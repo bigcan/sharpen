@@ -20,9 +20,23 @@ from pathlib import Path
 logging.basicConfig(level=logging.INFO, format="%(levelname)s: %(message)s")
 log = logging.getLogger(__name__)
 
-# Same regex used by bulk_index_memory.py
-ENTRY_HEADER_RE = re.compile(r"^(## \d{4}-\d{2}-\d{2} .+)$", re.MULTILINE)
+# An entry header is ANY `## ` line carrying an ISO date — the date does not have to come first.
+#
+# ⚠ DATA-LOSS BUG, fixed 2026-08-09 (S553-cont-153). This used to be
+# `^(## \d{4}-\d{2}-\d{2} .+)$`, i.e. date-FIRST only. The log has always carried two header styles —
+# `## 2026-07-31 | Session 553-cont-145 — ...` AND `## S553-cont-152 | 2026-08-08/09 | ...` — and
+# everything before the first date-first header lands in `parts[0]`, the "preamble", which the writer
+# then REPLACES with `RANDD_HEADER`. Because entries are prepended newest-first, that was exactly the
+# newest work: one rotation silently destroyed **11 entries** (the whole of August 2026 plus four late
+# July ones). It was only recoverable because they happened to be committed minutes earlier.
+#
+# The old `entry count check` did not catch it: it compared kept+archived against ITS OWN parse
+# (12 == 12) rather than against the file, so a mis-parse validated itself. `assert_all_entries_parsed`
+# below now checks against the artifact, which is the only version of that check worth having.
+ENTRY_HEADER_RE = re.compile(r"^(## (?=.*\d{4}-\d{2}-\d{2}).+)$", re.MULTILINE)
 DATE_RE = re.compile(r"(\d{4}-\d{2}-\d{2})")
+# Every `## ` line, date or not — the ground truth `assert_all_entries_parsed` counts against.
+ANY_H2_RE = re.compile(r"^## .+$", re.MULTILINE)
 
 RANDD_HEADER = """\
 # FinRL-Pro_DS Research & Development Log
@@ -42,8 +56,29 @@ ARCHIVE_HEADER_TEMPLATE = """\
 """
 
 
+def assert_all_entries_parsed(text: str, preamble: str, entries: list[dict]) -> None:
+    """Refuse to rewrite the log unless every ``## `` header was parsed as an entry.
+
+    This is the guard whose absence cost 11 entries. The rewrite path DISCARDS the preamble (it is
+    replaced by ``RANDD_HEADER``), so any entry that fails to parse is destroyed rather than merely
+    mis-sorted — a silent, unrecoverable-without-git failure. Checking against the FILE's own header
+    count (not against the parser's bookkeeping) is what makes this a real check.
+    """
+    n_headers = len(ANY_H2_RE.findall(text))
+    if n_headers != len(entries):
+        stray = [h for h in ANY_H2_RE.findall(preamble)]
+        raise SystemExit(
+            f"REFUSING TO ROTATE: {n_headers} '## ' headers in the log but only {len(entries)} parsed "
+            f"as entries. Rewriting would DISCARD the {n_headers - len(entries)} unparsed one(s) "
+            f"(the preamble is replaced, not preserved).\n"
+            f"  unparsed headers found in the preamble ({len(stray)}):\n" +
+            "".join(f"    {h[:120]}\n" for h in stray[:15]) +
+            "  Fix the header format (every entry needs a '## ' line containing a YYYY-MM-DD date), "
+            "or extend ENTRY_HEADER_RE.")
+
+
 def parse_entries(text: str) -> tuple[str, list[dict]]:
-    """Split text on ## YYYY-MM-DD headers, returning (preamble, entries).
+    """Split text on ## headers carrying an ISO date, returning (preamble, entries).
 
     Each entry dict: {header, body, date_str, month}.
     """
@@ -174,12 +209,12 @@ def main():
     # Parse
     text = randd_path.read_text(encoding="utf-8")
     original_size = len(text.encode("utf-8"))
-    _, all_entries = parse_entries(text)
+    preamble, all_entries = parse_entries(text)
+    # BEFORE anything else: every '## ' header must have parsed as an entry, or the rewrite below
+    # destroys the ones that did not (the preamble is replaced, never preserved). See the regex
+    # comment for the rotation that silently ate 11 entries.
+    assert_all_entries_parsed(text, preamble, all_entries)
     log.info("Parsed %d entries from %s (%.1f KB)", len(all_entries), randd_path.name, original_size / 1024)
-
-    # Strip orphan lines that aren't part of any entry
-    # (e.g., stray timestamp lines at the very end)
-    # These are already excluded by parse_entries since they don't match ## headers
 
     # Determine which months to keep vs archive
     keep = months_to_keep(args.keep_months)

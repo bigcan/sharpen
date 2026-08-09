@@ -159,47 +159,88 @@ The per-leg tally isolates the mechanism. At a fixed plant (realized ΔSR +0.551
 Pre-registered read was "within ~5% ⇒ harmless documentation fix". It is 12% worse for the next single
 test and **36–43% worse for a realistic batch**. The guard is anti-conservative by construction.
 
-### What it implies for `us_equity` — stated as an implication, not a measurement
+### Re-measured on the CROSS-SECTIONAL curve — the one `us_equity` is actually gated by
 
-⚠ **Transport caveat, load-bearing.** The measurement above is on the calibration's **overlay**
-planted fixture; `us_equity` mines **cross_sectional**. `crucible-v7.0` made the power stamp
-candidate-type aware precisely because overlay curves were being read for cross_sectional. So the
-*ratio* is what transports here, and that transport is an assumption. The absolute 0.750 is **not** the
-`us_equity` stamp (1.312).
+⚠ The measurement above is on the calibration's **overlay** planted fixture; `us_equity` mines
+**cross_sectional**, and `crucible-v7.0` exists precisely because those curves differ. So it was
+re-measured on the cross-sectional path (`--path cross_sectional`), reproducing the shipped
+`calibration_xsec_mde_sweep_corrected.json` sweep's own parameters (holdout_frac 0.25, hold 21,
+`ls_min_names` 6, its beta grid, 24 seeds — **not** `us_equity`'s), re-deriving its rows at each level,
+and then reading the implied MDE back through the guard's **own accessor** (`_pooled_points` +
+`interp_mde` at holdout 1726). Only the two grid depths that anchor the interpolation are re-measured,
+since `interp_mde` cannot use any others.
 
-Applying the ratio to the substrate's own stamp:
+Two efficiencies make this exact rather than approximate: the LORD++ level enters
+`corrected_contract_fitness` **only** through `lord_pass`, so one scoring pass serves every level and
+the levels are compared on identical draws; and `non_lord_pass` is taken as `passes_corrected` scored
+at `lord_level=1.0` rather than re-ANDing leg flags by hand, so a leg this script never names (the
+cont-151 `exposure_pass`) cannot be silently dropped. Verified: re-running with the hand-ANDed version
+gives identical numbers, i.e. the exposure leg was inert here — but by construction now, not by luck.
 
-| | MDE ΔSR | vs ceiling 1.457 | vs achievable ΔSR |
-|---|---|---|---|
-| as gated (fresh level) | 1.312 | PASS | detectable IC 0.0180 |
-| at the live 8-spec-batch level | ~1.78 | **REFUSE** | needs IC ≈ 0.025 |
+**Harness validation.** On the shipped beta grid the fresh level reproduces the recorded stamp
+**exactly**: 1.3121 against the tick's `implied_mde_delta_sr = 1.3120527546583958`.
 
-The recorded GO band was "IC 0.020 → achievable 1.46 > MDE 1.31". At the threshold production actually
-uses, that inequality reverses. **`us_equity` is marginal-to-underpowered at its true binding
-threshold, and each further tick makes it worse.**
+| LORD++ level | shipped grid | ratio | refined grid (16 betas) | ratio | overlay ratio |
+|---|---|---|---|---|---|
+| fresh (what the guard calibrates at) | **1.312** | 1.00× | **1.029** | 1.00× | 1.00× |
+| live after 8, next single | 1.464 | 1.12× | 1.367 | **1.33×** | 1.12× |
+| live after 8, batch of 8 | 1.464 | 1.12× | 1.367 | **1.33×** | 1.36× |
+| live after 8, batch of 40 | 1.464 | 1.12× | 1.431 | **1.39×** | 1.43× |
+
+**The effect replicates on the cross-sectional path.** At matched resolution the ratio is 1.33–1.39×
+against the overlay's 1.36–1.43×. The transport caveat is discharged: this is not an overlay artifact.
+
+The shipped grid's flat 1.12× is **quantization**, not a flat effect. `_pooled_points` takes the worst
+MDE across `n` at each depth, and `first_point_mde` reports the realized ΔSR at the first grid beta
+reaching 0.80 power; the steps are wide (n=100 at holdout 1011 jumps 1.398 → 2.001 between adjacent
+betas), so all three live levels landed on the same step. The individual rows do move — n=25 at holdout
+2016 goes 1.011 → 1.312 — the pooled maximum just doesn't.
+
+### ⚠ Correction to this report's own earlier claim
+
+The first version of this section said the live 8-spec MDE was **≈1.78 ⇒ REFUSE**. That is **wrong and
+is retracted.** It multiplied the *overlay* ratio by the *shipped-grid* stamp — two different
+estimators — and refined-grid absolutes run systematically lower than shipped-grid ones because a
+finer grid finds the power crossing earlier. Like-for-like:
+
+* **On the guard's own grid**: fresh 1.312 → live **1.464**, against the ceiling **1.457**. It crosses,
+  by **0.5%** — a margin far inside one quantization step of the estimator that produced it.
+* **On the refined grid**: fresh 1.029 → live **1.367–1.431**, both **below** 1.457.
+
+So **the depletion effect does not clearly close `us_equity`**, and the earlier "REFUSE" overstated
+it. What is established is narrower and still worth acting on: the fresh→live gap (+0.34 ΔSR refined)
+is **comparable to the entire margin between the stamp and the ceiling**, so at this substrate the
+guard's verdict is set as much by the LORD++ convention and the calibration grid's resolution as by
+the substrate itself. A gate whose answer flips on its own estimator's step size is not measuring what
+it claims to three digits.
+
+Also retracted: "spend the budget in small high-prior batches, since a wide tick is disproportionately
+expensive." On the cross-sectional path single and 8-spec batches are **identical** (1.367) and 40
+specs costs only ~5% more. That advice was an overlay artifact too.
 
 ### Not fixed here, deliberately
 
-Making the power guard read the live account is a gate-semantics change that would refuse the only
-open substrate. That is an operator decision under the CLAUDE.md gate rule, not a call to make inside a
-measurement session. What ships is the measurement, the tooling, and this statement of the
-consequence.
+Making the power guard read the live account is a gate-semantics change, and on the guard's own grid
+it flips `us_equity` to REFUSE. That is an operator decision under the CLAUDE.md gate rule, not a call
+to make inside a measurement session. What ships is the measurement, the tooling, and this statement.
 
-Three options when it is taken up, roughly in order of honesty:
+Two options when it is taken up:
 
-1. **Stamp power at the live level.** Correct, and it likely closes `us_equity` until the panel
-   deepens. The guard would finally be measuring the test it actually runs.
+1. **Stamp power at the live level.** Correct on principle — the guard would measure the test it
+   actually runs. On the shipped grid it refuses `us_equity` (1.464 > 1.457); on a refined grid it
+   does not (1.367 < 1.457). So this should be taken **together with** re-running the calibration
+   sweep on a finer beta grid, or the gate's answer is set by its own step size.
 2. **Reset/partition the LORD++ account per campaign.** Defensible only with an explicit argument
    about what family-wise error is being controlled across which hypotheses — otherwise it is
    multiplicity laundering.
-3. **Spend the budget deliberately**: small, high-prior batches rather than broad sweeps, since the
-   batch-minimum rule makes a wide tick disproportionately expensive (8 specs cost 1.36×, 40 cost
-   1.43×, against 1.12× for one).
 
-⚠ **Do not run a broad second `us_equity` round before this is settled.** The plan carried into this
-session was "more pre-registered hypotheses on the only powered substrate"; the measurement says a
-40-spec batch would run at 1.43× the calibrated MDE against a substrate that is already marginal. That
-is the one decision this session's numbers change.
+**On the second `us_equity` round** (the plan carried into this session): power is *not* the blocker
+it looked like one measurement ago — the refined-grid live MDE 1.367 sits under the 1.457 ceiling, and
+batch size barely matters (single and 8-spec are identical; 40 specs costs ~5% more). The real
+constraints on that round are the ones already on the record: the default `LibrarySeedProposer` bank
+**is** the 8 seeds already scored, so new hypotheses mean a new pre-registered bank (92 unused WQ101
+formulas); and every candidate must still be reported at 1/2/5 bp, because the 2 bp cost is a stated
+assumption, not a measurement.
 
 ---
 
@@ -210,7 +251,9 @@ is the one decision this session's numbers change.
 | prereg pre-filter / holdout forensics | `scripts/research/crucible_prereg_prefilter_forensics.py` |
 | — output | `results/crucible_prereg_forensics/us_equity_prereg_forensics.json` |
 | LORD++ depletion power curves | `scripts/research/crucible_lord_depletion_power.py` |
-| — output | `results/crucible_lord_depletion/lord_depletion_power.json` |
+| — overlay output | `results/crucible_lord_depletion/lord_depletion_power.json` |
+| — cross_sectional, shipped grid (reproduces the stamp) | `results/crucible_lord_depletion/lord_depletion_power_xsec.json` |
+| — cross_sectional, refined grid | `results/crucible_lord_depletion/lord_depletion_power_xsec_fine.json` |
 | the fix | `finrl_pro_ds/signals/generation/evolve.py` (train pre-filter branch) |
 | reporting | `substrate.py` / `orchestrator.py` `n_holdout_tested` (+ migration) |
 | version rationale | `finrl_pro_ds/crucible/version.py` (`crucible-v12.0`) |
