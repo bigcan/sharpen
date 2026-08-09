@@ -45,6 +45,36 @@ def test_record_upsert_and_dedup(tmp_path: Path) -> None:
         assert led.count() == 1
 
 
+def test_unscored_prereg_does_not_dedup_itself_forever(tmp_path: Path) -> None:
+    """A pre-registration written BEFORE the holdout runs must not block its own later test.
+
+    Regression for the S553-cont-152 livelock: `is_duplicate` matched on candidate_hash alone, so a
+    row written at pre-registration time (verdict NULL) and never scored — because the tick NO-OPed
+    before scoring — made the author drop that spec as a duplicate on every subsequent tick, forever.
+    Eight WQ101 seeds pre-registered on 2026-07-02 were blocked on every substrate for five weeks,
+    and the first adequately-powered substrate accepted 0/8 proposals and mined nothing.
+    """
+    with TrialLedger(tmp_path / "ledger.db") as led:
+        led.record(TrialRecord(
+            candidate_hash="pre1", crucible_version=_V, family="101alpha",
+            candidate_type="cross_sectional", formula="rank(close)",
+            economic_rationale="pre-registered, not yet scored", spec_json='{"name": "x"}'))
+        assert led.count() == 1
+        assert not led.is_duplicate("pre1"), "an unscored pre-registration must stay testable"
+        assert not led.is_semantic_duplicate("rank(close)")
+
+        # The author dedups off the AGENT VIEW, not is_duplicate — the view is the binding path.
+        view = {r[0] for r in led._conn.execute(
+            "SELECT candidate_hash FROM ledger_agent_view")}
+        assert "pre1" not in view, "an unscored pre-registration must not appear as a dedup key"
+
+        led.record(_rec("pre1", "101alpha", "LOGGED"))          # now it is actually scored
+        assert led.is_duplicate("pre1"), "a scored candidate must dedup"
+        view = {r[0] for r in led._conn.execute(
+            "SELECT candidate_hash FROM ledger_agent_view")}
+        assert "pre1" in view, "a scored candidate must appear as a dedup key"
+
+
 def test_agent_view_exposes_no_score_columns(tmp_path: Path) -> None:
     """CR-1: the agent-visible view is dedup keys + killed families ONLY — no verdict/score/holdout.
     Enforced structurally (allowed column tuple) AND by inspecting the SQL view definition."""
@@ -59,13 +89,19 @@ def test_agent_view_exposes_no_score_columns(tmp_path: Path) -> None:
             assert set(row) == set(TrialLedger.agent_view_columns())
             for f in _FORBIDDEN:
                 assert f not in row
-        # and the VIEW definition itself must not select any forbidden column
+        # and the VIEW definition itself must not SELECT any forbidden column. Scoped to the
+        # projection (between `select` and `from`) rather than the whole statement: the view filters
+        # `WHERE verdict IS NOT NULL` so that unscored pre-registrations are not handed out as dedup
+        # keys (S553-cont-152 livelock), and a WHERE reference exposes nothing — a filtered-out row is
+        # absent, not readable. The substantive CR-1 guarantees are the two assertions above (the
+        # projection column set, and every returned row), which are unchanged and still exact.
         import sqlite3
 
         sql = sqlite3.connect(str(db)).execute(
             "SELECT sql FROM sqlite_master WHERE name='ledger_agent_view'").fetchone()[0].lower()
+        projection = sql.split(" from ")[0]
         for f in _FORBIDDEN:
-            assert f not in sql
+            assert f not in projection
 
 
 def test_killed_families_excludes_later_promising(tmp_path: Path) -> None:
