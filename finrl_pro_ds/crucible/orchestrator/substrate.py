@@ -427,6 +427,12 @@ class TickRecord:
     snapshot_hash: str
     n_preregistered: int = 0
     n_scored: int = 0
+    # v12.0: the DENOMINATOR of ``n_promising`` — candidates the BINDING holdout gate adjudicated.
+    # `n_scored` is the hall-of-fame size (capped at 10) and `n_preregistered` counts hypotheses
+    # written down, so neither answers "did the decisive test run?". `n_promising=0` with
+    # `n_holdout_tested=0` is VACUOUS; with `n_holdout_tested=8` it is a result. NULL on ticks written
+    # before this column existed — read a NULL as "unknown", never as zero.
+    n_holdout_tested: int | None = None
     n_promising: int = 0
     fdr_charged_total: float = 0.0
     budget_breached: bool = False
@@ -460,6 +466,7 @@ CREATE TABLE IF NOT EXISTS ticks (
     snapshot_hash     TEXT,
     n_preregistered   INTEGER,
     n_scored          INTEGER,
+    n_holdout_tested  INTEGER,
     n_promising       INTEGER,
     fdr_charged_total REAL,
     budget_breached   INTEGER,
@@ -503,7 +510,8 @@ class OrchestratorStore:
         _ensure_columns(self._conn, "ticks", [
             ("status", "TEXT"), ("error", "TEXT"),
             ("panel_T", "INTEGER"), ("holdout_bars", "INTEGER"),
-            ("implied_mde_delta_sr", "REAL"), ("power_interp_mode", "TEXT")])
+            ("implied_mde_delta_sr", "REAL"), ("power_interp_mode", "TEXT"),
+            ("n_holdout_tested", "INTEGER")])           # v12.0 (NULL on pre-v12 rows = unknown)
 
     def close(self) -> None:
         self._conn.close()
@@ -561,12 +569,13 @@ class OrchestratorStore:
     def record_tick(self, rec: TickRecord) -> None:
         self._conn.execute(
             "INSERT INTO ticks (tick_ts, substrate_id, dirty, mined, reason, snapshot_hash, "
-            "n_preregistered, n_scored, n_promising, fdr_charged_total, budget_breached, "
-            "burst_target, manifest_hash, status, error, panel_T, holdout_bars, "
+            "n_preregistered, n_scored, n_holdout_tested, n_promising, fdr_charged_total, "
+            "budget_breached, burst_target, manifest_hash, status, error, panel_T, holdout_bars, "
             "implied_mde_delta_sr, power_interp_mode) "
-            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
             (rec.tick_ts, rec.substrate_id, int(rec.dirty), int(rec.mined), rec.reason,
-             rec.snapshot_hash, rec.n_preregistered, rec.n_scored, rec.n_promising,
+             rec.snapshot_hash, rec.n_preregistered, rec.n_scored, rec.n_holdout_tested,
+             rec.n_promising,
              rec.fdr_charged_total, int(rec.budget_breached), rec.burst_target, rec.manifest_hash,
              rec.status, rec.error, rec.panel_T, rec.holdout_bars, rec.implied_mde_delta_sr,
              rec.power_interp_mode))
