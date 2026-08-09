@@ -57,24 +57,33 @@ from finrl_pro_ds.signals.library.alphas101 import SIGNALS as ALPHAS  # noqa: E4
 MEMBERS = Path(r"C:\tmp\sp500_pit_members.csv")
 OUT = ROOT / "results" / "signal_eval" / "crucible_equity_breadth"
 
+#: Bars per YEAR on each substrate's own clock. Load-bearing for the IC-needed table and for
+#: annualizing IR: the intraday panels carry 5,694 bars/yr, so assuming 252 understates their IR by
+#: sqrt(22.6) = 4.75x and inflates their IC-needed by the same factor.
+#: NOTE `n_eff_realized` itself is INVARIANT to this — it is (IR/IC)^2/rpy with IR = (m/s)*sqrt(rpy),
+#: so rpy cancels exactly. Only the derived columns move.
+PANEL_PPY = {"us_equity": 252.0, "cross_asset": 252.0, "taiwan": 252.0,
+             "intraday_fx": 5694.0, "intraday": 5694.0}
+
 NEU = ("winsor", "zscore")     # sector unknown for former members; size omitted to stay generic
 MIN_ABS_IC = 0.004             # below this the (IR/IC)^2 inversion is numerically meaningless
 N_EFF_RAW = 9.41
 N_EFF_DEMEANED = 30.09
 
 
-def evaluate(scores: np.ndarray, rets: np.ndarray, univ: np.ndarray, hold: int) -> dict | None:
+def evaluate(scores: np.ndarray, rets: np.ndarray, univ: np.ndarray, hold: int,
+             min_names: int = 30, ppy: float = 252.0) -> dict | None:
     """Realized IC and L/S book IR for one alpha. Signal at t -> return over (t, t+hold]."""
     T = scores.shape[0]
     pnl, ics, icr = [], [], []
     for t in range(0, T - hold, hold):
         act = univ[t] & univ[t + hold]
-        if act.sum() < 30:
+        if act.sum() < min_names:
             continue
         s = scores[t]
         fwd = np.nansum(rets[t + 1:t + hold + 1], axis=0)
         m = act & np.isfinite(s) & np.isfinite(fwd)
-        if m.sum() < 30:
+        if m.sum() < min_names:
             continue
         sv, yv = s[m], fwd[m]
         if sv.std() == 0 or yv.std() == 0:
@@ -84,7 +93,7 @@ def evaluate(scores: np.ndarray, rets: np.ndarray, univ: np.ndarray, hold: int) 
         icr.append(float(spearmanr(sv, yd).statistic))
         row = np.full(scores.shape[1], np.nan)
         row[m] = sv
-        w = _ls_weights(row, m)
+        w = _ls_weights(row, m, min_names=min_names)
         if np.any(w):
             pnl.append(float(w @ np.nan_to_num(fwd)))
     if len(pnl) < 200:
@@ -92,7 +101,7 @@ def evaluate(scores: np.ndarray, rets: np.ndarray, univ: np.ndarray, hold: int) 
     pnl = np.asarray(pnl)
     if pnl.std() == 0:
         return None
-    rpy = 252.0 / hold
+    rpy = ppy / hold
     return {"ic": float(np.mean(ics)), "ic_rank": float(np.mean(icr)),
             "ir": float(pnl.mean() / pnl.std() * np.sqrt(rpy)), "n_obs": len(pnl)}
 
@@ -101,17 +110,39 @@ def main() -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument("--k", type=int, default=300)
     ap.add_argument("--hold", type=int, default=1)
+    ap.add_argument("--panel", default="us_equity",
+                    choices=("us_equity", "cross_asset", "taiwan", "intraday_fx", "intraday"),
+                    help="which WIRED substrate to measure (uses that substrate's own builder)")
+    ap.add_argument("--min-names", type=int, default=None,
+                    help="min active names per bar; defaults to 30 (us_equity) or 6 (small panels)")
     args = ap.parse_args()
 
     # Measure on the SHIPPED builder, not a local reconstruction: breadth is the number the whole
     # substrate is justified by, so it must come from the exact panel the miner will see (shifted
     # ADV, PIT membership, top-K mask) rather than a lookalike built here.
-    panel = build_us_equity_panel(top_k=args.k)
+    if args.panel == "us_equity":
+        panel = build_us_equity_panel(top_k=args.k)
+    elif args.panel == "cross_asset":
+        from finrl_pro_ds.data.cross_asset_panel_loader import load_cross_asset_panel
+        panel = load_cross_asset_panel(
+            "2007-01-01", config_path=ROOT / "configs" / "cross_asset_momentum.yaml")
+    elif args.panel == "taiwan":
+        from finrl_pro_ds.data.taiwan_panel_loader import load_taiwan_panel
+        panel = load_taiwan_panel(None, None)
+    elif args.panel == "intraday_fx":
+        from finrl_pro_ds.crucible.data.intraday_panel import build_fx_majors_panel
+        panel = build_fx_majors_panel()
+    else:
+        from finrl_pro_ds.crucible.data.intraday_panel import build_intraday_panel
+        panel = build_intraday_panel()
     univ = panel.active.astype(bool)
+    min_names = args.min_names if args.min_names is not None else (
+        30 if args.panel == "us_equity" else 6)
     with np.errstate(invalid="ignore", divide="ignore"):
         rets = np.diff(np.log(panel.close), axis=0, prepend=np.nan)
-    rpy = 252.0 / args.hold
-    print(f"panel {panel.T}x{panel.N} | universe {univ.sum(axis=1).mean():.0f} names/day | "
+    ppy = PANEL_PPY[args.panel]
+    rpy = ppy / args.hold
+    print(f"[{args.panel}] panel {panel.T}x{panel.N} | universe {univ.sum(axis=1).mean():.0f} names/day | "
           f"H={args.hold} ({rpy:.0f} rebal/yr) | {len(ALPHAS)} alphas\n")
 
     rows = []
@@ -122,7 +153,8 @@ def main() -> int:
         except Exception as exc:  # noqa: BLE001
             print(f"  [skip] {name}: {exc!r}"[:90])
             continue
-        r = evaluate(np.asarray(sc, dtype=np.float64), rets, univ, args.hold)
+        r = evaluate(np.asarray(sc, dtype=np.float64), rets, univ, args.hold,
+                     min_names=min_names, ppy=ppy)
         if r is None:
             continue
         if abs(r["ic"]) < MIN_ABS_IC:
@@ -159,8 +191,8 @@ def main() -> int:
         print(f"   holdout {yrs:>4.0f}y : {3.17 / np.sqrt(med * rpy * yrs):.4f}")
 
     OUT.mkdir(parents=True, exist_ok=True)
-    (OUT / f"real_alpha_breadth_h{args.hold}.json").write_text(json.dumps(
-        {"k": args.k, "hold": args.hold, "neutralization": list(NEU),
+    (OUT / f"real_alpha_breadth_{args.panel}_h{args.hold}.json").write_text(json.dumps(
+        {"panel": args.panel, "k": args.k, "hold": args.hold, "neutralization": list(NEU),
          "n_eff_realized_median": med, "iqr": [q1, q3], "n_usable": len(rows),
          "sign_mismatches": mism, "rows": rows}, indent=2))
     print(f"\nwrote {OUT / f'real_alpha_breadth_h{args.hold}.json'}")
