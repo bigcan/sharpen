@@ -21,12 +21,13 @@ from finrl_pro_ds.signals.generation.cohort_eval import (
     CohortVerdict,
     _cohort_holdout_guard,
     _frozen_weight_book,
+    assemble_candidate_pool,
     assemble_overlay_pool,
     derive_cohort_seed,
     evaluate_cohort,
     pool_content_hash,
 )
-from finrl_pro_ds.signals.generation.evolve import _overlay_returns
+from finrl_pro_ds.signals.generation.evolve import _candidate_returns, _overlay_returns
 from finrl_pro_ds.signals.generation.fitness import FitnessConfig, _combined_book
 
 T, N = 600, 12
@@ -562,3 +563,169 @@ def test_holdout_guard_month_end_span_is_noop() -> None:
     delta_tail = _ann_sharpe(b_aug, _CFG.periods_per_year) - _ann_sharpe(b_base, _CFG.periods_per_year)
 
     assert delta == pytest.approx(delta_tail)          # month-end span → fix is a byte-for-byte no-op
+
+
+# ============================================================ v12.1 — MIXED-TYPE POOLS ==========
+# The cohort pool admits CROSS-SECTIONAL candidates, not only overlays. These tests pin the three
+# things that make that safe: each member is scored through its OWN funnel path (so the cohort and
+# the per-candidate gate see the same stream), a cross-sectional stream stays causal under the
+# full-panel-then-slice convention (LEAK-2), and an all-overlay pool is byte-identical to pre-v12.1.
+
+_XSEC = {"xs-mom": "ts_rank(close, 20)", "xs-rev": "(-1) * rank(close)",
+         "xs-vol": "rank(stddev(close, 10))"}
+
+
+def test_assemble_candidate_pool_xsec_matches_evolve_candidate_returns() -> None:
+    """A cross-sectional member's stream is bit-identical to ``evolve._candidate_returns`` — the call
+    the per-candidate gate scores. If these ever diverge the cohort is adjudicating a different
+    hypothesis than the one that was pre-registered."""
+    slots = _noise_slots(2, seed=21)
+    panel = _panel(slots)
+    base, ts = _base_and_ts()
+    base_book = _combined_book(base, ts, _CFG)
+
+    returns, culled = assemble_candidate_pool(
+        panel, base_book, _XSEC, cost_bps=0.0010,
+        candidate_types={k: "cross_sectional" for k in _XSEC}, hold_horizon=21, ls_min_names=6)
+    assert culled == [] and set(returns) == set(_XSEC)
+    for name, formula in _XSEC.items():
+        direct = _candidate_returns(formula, panel, hold_horizon=21, cost_bps=0.0010, min_names=6)
+        assert direct is not None
+        np.testing.assert_array_equal(returns[name], direct[0])
+
+
+def test_assemble_candidate_pool_defaults_to_overlay() -> None:
+    """No type map ⇒ every member takes the overlay path ⇒ byte-identical to the pre-v12.1
+    ``assemble_overlay_pool``."""
+    slots = _noise_slots(4, seed=22)
+    panel = _panel(slots)
+    base, ts = _base_and_ts()
+    base_book = _combined_book(base, ts, _CFG)
+    overlays = _overlays(slots)
+
+    a, culled_a = assemble_overlay_pool(panel, base_book, overlays, cost_bps=0.0010)
+    b, culled_b = assemble_candidate_pool(panel, base_book, overlays, cost_bps=0.0010)
+    c, culled_c = assemble_candidate_pool(panel, base_book, overlays, cost_bps=0.0010,
+                                          candidate_types={k: "overlay" for k in overlays})
+    assert culled_a == culled_b == culled_c and set(a) == set(b) == set(c)
+    for k in a:
+        np.testing.assert_array_equal(a[k], b[k])
+        np.testing.assert_array_equal(a[k], c[k])
+
+
+def test_assemble_candidate_pool_dispatches_per_member() -> None:
+    """A MIXED pool routes each member by its own type — the overlay members are unchanged by the
+    presence of cross-sectional ones and vice versa (no shared state between the two paths)."""
+    slots = _noise_slots(3, seed=23)
+    panel = _panel(slots)
+    base, ts = _base_and_ts()
+    base_book = _combined_book(base, ts, _CFG)
+    overlays = _overlays(slots)
+    formulas = {**overlays, **_XSEC}
+    types = {**{k: "overlay" for k in overlays}, **{k: "cross_sectional" for k in _XSEC}}
+
+    mixed, culled = assemble_candidate_pool(
+        panel, base_book, formulas, cost_bps=0.0010, candidate_types=types,
+        hold_horizon=21, ls_min_names=6)
+    assert culled == [] and set(mixed) == set(formulas)
+
+    ov_only, _ = assemble_overlay_pool(panel, base_book, overlays, cost_bps=0.0010)
+    for k in overlays:
+        np.testing.assert_array_equal(mixed[k], ov_only[k])
+    for k, f in _XSEC.items():
+        direct = _candidate_returns(f, panel, hold_horizon=21, cost_bps=0.0010, min_names=6)
+        assert direct is not None
+        np.testing.assert_array_equal(mixed[k], direct[0])
+
+
+def test_assemble_candidate_pool_rejects_unknown_type() -> None:
+    """An unrecognised candidate_type must FAIL LOUD, not silently fall back to the overlay path —
+    a mislabelled member would otherwise be scored as a different hypothesis than pre-registered."""
+    slots = _noise_slots(1, seed=24)
+    panel = _panel(slots)
+    base, ts = _base_and_ts()
+    with pytest.raises(ValueError, match="candidate_type"):
+        assemble_candidate_pool(panel, _combined_book(base, ts, _CFG), {"c": "close"},
+                                cost_bps=0.0010, candidate_types={"c": "conditioner"})
+
+
+def test_xsec_stream_is_causal_under_truncation() -> None:
+    """LEAK-2 tripwire (NEGATIVE test). ``evaluate_cohort`` computes the pool once on the FULL panel
+    and slices the train span off it. That is only legitimate if a cross-sectional stream at bar t
+    reads nothing after t: computing on a panel truncated at t must reproduce the full-panel prefix
+    EXACTLY. Fails the moment a forward-looking operator or a whole-sample normalization is
+    introduced into the cross-sectional path."""
+    slots = _noise_slots(1, seed=25)
+    panel = _panel(slots)
+    n_train = int(T * 0.75) - 21
+    truncated = panel.truncated(n_train - 1)
+    assert truncated.T == n_train
+    for formula in _XSEC.values():
+        full = _candidate_returns(formula, panel, hold_horizon=21, cost_bps=0.0010, min_names=6)
+        part = _candidate_returns(formula, truncated, hold_horizon=21, cost_bps=0.0010, min_names=6)
+        assert full is not None and part is not None
+        # The final bar of any span is NaN by construction (marked with the 1-day forward return),
+        # so compare the [0, n_train-1) prefix both spans define.
+        np.testing.assert_array_equal(full[0][:n_train - 1], part[0][:n_train - 1])
+
+
+def test_pool_content_hash_is_backcompat_for_overlay_only_pools() -> None:
+    """CRU-1: an all-overlay pool must hash EXACTLY as it did pre-v12.1 — otherwise enabling mixed
+    pools would silently re-seed the MC null of the cohort cards already on disk."""
+    a = {"ov-x": "fred:X00", "ov-y": "fred:X01"}
+    bare = pool_content_hash(a)
+    assert pool_content_hash(a, None) == bare
+    assert pool_content_hash(a, {k: "overlay" for k in a}) == bare
+    assert pool_content_hash(a, {"ov-x": "overlay"}) == bare          # missing key ⇒ overlay default
+
+
+def test_pool_content_hash_separates_types() -> None:
+    """The SAME formula mined cross-sectionally is a different hypothesis than mined as an overlay,
+    so the pool hash — hence the MC seed — must distinguish them."""
+    a = {"c0": "rank(close)", "c1": "rank(volume)"}
+    assert pool_content_hash(a, {"c0": "cross_sectional", "c1": "cross_sectional"}) != \
+        pool_content_hash(a)
+    assert pool_content_hash(a, {"c0": "cross_sectional", "c1": "overlay"}) != \
+        pool_content_hash(a, {"c0": "overlay", "c1": "cross_sectional"})
+
+
+def test_evaluate_cohort_runs_on_an_all_cross_sectional_pool_and_records_composition() -> None:
+    """End-to-end null-safety on a pool with NO overlays: the gate renders a verdict on synthetic
+    noise, does NOT promote it, and records what it adjudicated (the `n_holdout_tested` lesson — a
+    verdict whose pool composition is unreadable is a verdict that costs a session to interpret)."""
+    slots = _noise_slots(1, seed=26)
+    panel = _panel(slots, seed=3)
+    base, ts = _base_and_ts()
+    types = {k: "cross_sectional" for k in _XSEC}
+
+    v = evaluate_cohort(
+        panel, base, ts, _XSEC, _CCFG, _CFG, mc_kwargs=_MC_KWARGS, cost_bps=0.0010,
+        holdout_frac=0.25, holdout_embargo=21,
+        seed=derive_cohort_seed("f", "c", pool_content_hash(_XSEC, types), "run-xs"),
+        candidate_types=types, hold_horizon=21, ls_min_names=6)
+
+    assert v is not None, "an all-cross-sectional pool must be able to form a cohort"
+    assert v.verdict != "PROMISING"                     # pure noise must not promote
+    assert v.n_pool_cross_sectional == len(_XSEC)
+    assert v.n_members_cross_sectional == v.n_members   # every admitted member is cross-sectional
+    assert v.pool_content_hash == pool_content_hash(_XSEC, types)
+
+
+def test_evaluate_cohort_overlay_only_is_unchanged_by_the_new_params() -> None:
+    """The v12.1 parameters are inert on an overlay-only pool: same verdict, same pool hash, same
+    MC p-value as the pre-v12.1 call shape."""
+    slots = _noise_slots(6, seed=27)
+    panel = _panel(slots, seed=4)
+    base, ts = _base_and_ts()
+    overlays = _overlays(slots)
+    seed = derive_cohort_seed("f", "c", pool_content_hash(overlays), "run-ov")
+    kw = dict(mc_kwargs=_MC_KWARGS, cost_bps=0.0010, holdout_frac=0.25, holdout_embargo=21, seed=seed)
+
+    a = evaluate_cohort(panel, base, ts, overlays, _CCFG, _CFG, **kw)
+    b = evaluate_cohort(panel, base, ts, overlays, _CCFG, _CFG,
+                        candidate_types={k: "overlay" for k in overlays},
+                        hold_horizon=21, ls_min_names=6, **kw)
+    assert a is not None and b is not None
+    assert a.pool_content_hash == b.pool_content_hash
+    assert a.mc_p_value == b.mc_p_value and a.verdict == b.verdict
+    assert a.n_pool_cross_sectional == 0 and a.n_members_cross_sectional == 0

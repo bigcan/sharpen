@@ -323,30 +323,51 @@ def _evaluate_cohort_gate(
     where ``provenance`` carries the manifest's pinned cohort fields (``cohort_gates_hash`` /
     ``cohort_verdicts`` / ``cohort_card_hashes``). A no-op (returns ``([], {})``, so the manifest stays
     byte-identical to the pre-cohort path) when the gate is disabled, no cohort config is attached,
-    there are no overlay specs, or no cohort can form (Doc 2 §5)."""
+    the tick pre-registered no spec of an ADMITTED type (overlay, plus cross_sectional when
+    cohort.include_cross_sectional is on — v12.1), or no cohort can form (Doc 2 §5)."""
     if not (cohort_cfg is not None and cohort_mc_kwargs and cohort_mc_kwargs.get("enabled")):
         return [], {}
-    overlay_formulas = {pr.candidate_hash: pr.formula
-                        for pr in specs if pr.spec.candidate_type == "overlay"}
-    if not overlay_formulas:
+    # v12.1: the pool is the tick's pre-registered OVERLAY specs, PLUS its cross-sectional specs when
+    # `cohort.include_cross_sectional` is on. Pre-v12.1 this line was a hard `== "overlay"` filter,
+    # which routed the two halves of the machine to the wrong gates: cross-sectional candidates carry
+    # the panel's breadth (the larger per-member δ in `IR_cohort = δ·√K·hit_rate`) and went to the
+    # per-candidate gate measured at ~0% power, while overlays — one scalar per day, and structurally
+    # correlated with the base book they tilt — were the only thing the ONE gate with measured power
+    # ever saw. See `docs/research/crucible_zero_alpha_root_cause_2026-08-09.md` and the
+    # `assemble_candidate_pool` docstring. Offspring are NOT admitted (ADR-3 (B) still stands: the
+    # pool must be deterministic for `pool_content_hash`); this widens the TYPE, not the search.
+    admitted_types = {"overlay"}
+    if cohort_cfg.include_cross_sectional:
+        admitted_types.add("cross_sectional")
+    formulas = {pr.candidate_hash: pr.formula
+                for pr in specs if pr.spec.candidate_type in admitted_types}
+    if not formulas:
         return [], {}
-    pch = pool_content_hash(overlay_formulas)
+    candidate_types = {pr.candidate_hash: pr.spec.candidate_type
+                       for pr in specs if pr.spec.candidate_type in admitted_types}
+    n_xs = sum(1 for t in candidate_types.values() if t == "cross_sectional")
+    pch = pool_content_hash(formulas, candidate_types)
     cgh = cohort_gates_hash or ""
     seed = derive_cohort_seed(gates_hash, cgh, pch, run_id)
     verdict = evaluate_cohort(
-        panel, base_returns, timestamps, overlay_formulas, cohort_cfg, cfg,
+        panel, base_returns, timestamps, formulas, cohort_cfg, cfg,
         mc_kwargs=cohort_mc_kwargs, cost_bps=float(ek.get("cost_bps", 0.0010)),
         holdout_frac=float(ek.get("holdout_frac", 0.25)),
         holdout_embargo=int(ek.get("holdout_embargo", 21)), seed=seed,
-        base_components=base_components)
+        base_components=base_components, candidate_types=candidate_types,
+        # The cross-sectional sleeve knobs must be the MINE's, not this function's defaults, or the
+        # cohort would score a different stream than the per-candidate gate did (same defaults as
+        # `orchestrator._incubation_params`).
+        hold_horizon=int(ek.get("hold_horizon", 21)),
+        ls_min_names=int(ek.get("ls_min_names", 6)))
     if verdict is None:
         return [], {}
     card = card_from_verdict(
         verdict, crucible_version=crucible_version, funnel_gates_hash=gates_hash,
         cohort_gates_hash=cgh, proposal_ts=proposal_ts, data_snapshot_hash=data_snapshot_hash)
-    log.info("cohort gate: %s (p=%.4f, holdout ΔSR=%.3f, %d members of %d seen)",
-             verdict.verdict, verdict.mc_p_value, verdict.holdout_delta_sr,
-             verdict.n_members, verdict.n_candidates_seen)
+    log.info("cohort gate: %s (p=%.4f, holdout ΔSR=%.3f, %d members of %d seen; pool = %d overlay + "
+             "%d cross_sectional)", verdict.verdict, verdict.mc_p_value, verdict.holdout_delta_sr,
+             verdict.n_members, verdict.n_candidates_seen, len(formulas) - n_xs, n_xs)
     # Pin BOTH the verdict string and the full-card content hash (the latter pins the MC p-value +
     # every other card field) so `crucible reproduce` re-derives them byte-identically (spec §5).
     provenance = {

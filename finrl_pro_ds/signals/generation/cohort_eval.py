@@ -1,9 +1,27 @@
 """Cohort evaluator ORCHESTRATION (Phase 4 integration) — the single library entry point that runs
-the full weak-signal cohort gate end-to-end: assemble the overlay candidate pool → analytic
+the full weak-signal cohort gate end-to-end: assemble the candidate pool → analytic
 ``SR*_cohort`` pre-filter (Doc 1) → selection-aware MC null (Doc 2 §3, binding) → embargoed holdout
 guard (Doc 2 §4). It owns NO new statistic — it wires the Math-verified pieces in
 :mod:`cohort` / :mod:`cohort_mc` in the pre-registered order (Doc 2 §5) and returns one
 :class:`CohortVerdict` artifact.
+
+MIXED-TYPE POOLS (crucible-v12.1). The pool was OVERLAY-only through v12.0 (ADR-3 deferred
+cross-sectional admission to "a future extension, only if measured to help"). It no longer is:
+:func:`assemble_candidate_pool` dispatches per candidate on its ``candidate_type``, so a cohort can
+be built from cross-sectional rank-L/S sleeves, overlays, or both. Everything downstream is already
+type-agnostic — admission, the MC null and the holdout guard consume ``(T,)`` return streams and
+never look at how a stream was produced — so this is a pool-assembly change, not a statistics change.
+
+WHY it matters (2026-08-09 root cause, ``docs/research/crucible_zero_alpha_root_cause_2026-08-09.md``):
+``IR_cohort = δ·√K·hit_rate``, and the two halves of the machine were mispaired. Cross-sectional
+candidates carry the panel's breadth (``n_eff`` 42.1 on ``us_equity``) and so have the larger
+per-member δ, but they were routed to the per-candidate gate, which has ~0% power at any plausible
+alpha. Overlays — one scalar per day, δ small by construction, and structurally correlated with the
+base book they tilt — were routed to the cohort MC null, the ONE gate with measured power (25% @
+IR 0.30 / 50% @ IR 0.50 at a 15% hit rate). Admitting cross-sectional candidates here pairs the
+high-δ hypotheses with the powered gate for the first time. Note what does NOT change: the cohort
+statistic is still ``T`` observations of a book ΔSR — a candidate's ``T×N`` panel buys a cleaner
+per-day stream (larger δ), not more rows for the null.
 
 Design: ``.agent/artifacts/crucible_cohort_integration_architecture.md`` (Step 1). This module is
 PURE (signals-only — no crucible imports) so it stays free of the orchestrator import cycle; the P2
@@ -44,13 +62,18 @@ from .cohort import (
     evaluate_cohort_analytic,
 )
 from .cohort_mc import McNullResult, mc_null_pvalue
-from .evolve import _overlay_returns
+from .evolve import _candidate_returns, _overlay_returns
 from .fitness import FitnessConfig, _combined_book, _combined_book_with_components
 
 if TYPE_CHECKING:
     from .base_sleeves import SleeveComponents
 
 logger = logging.getLogger(__name__)
+
+# The two candidate types the funnel mines (``evolve.evolve`` rejects anything else). ``_OVERLAY`` is
+# the pool's back-compat default so a caller that passes no type map gets the pre-v12.1 behaviour.
+_OVERLAY = "overlay"
+_CROSS_SECTIONAL = "cross_sectional"
 
 
 @dataclass(frozen=True, slots=True)
@@ -78,17 +101,30 @@ class CohortVerdict:
     holdout_passes: bool
     pool_content_hash: str
     verdict: str                       # "PROMISING" | "LOGGED"
+    # v12.1 pool composition — WHAT the gate adjudicated, travelling with the verdict rather than
+    # living in a log line (the `n_holdout_tested` lesson: a null whose denominator is unreadable
+    # costs sessions). `n_pool_cross_sectional` counts the assembled pool; `n_members_cross_sectional`
+    # counts how many SURVIVED de-correlated admission. 0/0 == an overlay-only cohort.
+    n_pool_cross_sectional: int = 0
+    n_members_cross_sectional: int = 0
 
 
 # --------------------------------------------------------------------------------------------
 # Determinism helpers (Doc 2 §6) — the caller derives the MC seed from these
 # --------------------------------------------------------------------------------------------
-def pool_content_hash(overlay_formulas: Mapping[str, str]) -> str:
-    """12-hex SHA-256 over the sorted ``(name, formula)`` pairs of the pool (mirrors
-    ``spec.content_hash``). Deterministic ⇒ the derived MC seed is reproducible; a changed pool ⇒ a
-    changed hash ⇒ a different (visible) seed."""
-    items = sorted((str(k), str(v)) for k, v in overlay_formulas.items())
-    payload = "\n".join(f"{k}\t{v}" for k, v in items)
+def pool_content_hash(formulas: Mapping[str, str],
+                      candidate_types: "Mapping[str, str] | None" = None) -> str:
+    """12-hex SHA-256 over the sorted ``(name, formula[, candidate_type])`` triples of the pool
+    (mirrors ``spec.content_hash``). Deterministic ⇒ the derived MC seed is reproducible; a changed
+    pool ⇒ a changed hash ⇒ a different (visible) seed.
+
+    The type is folded into a member's payload line ONLY when it is not ``"overlay"`` (v12.1). An
+    all-overlay pool therefore hashes byte-identically to every pre-v12.1 pool, so the two cohort
+    cards already on disk keep their ``pool_content_hash`` and their MC seed — the mixed-pool
+    capability cannot silently re-seed a recorded verdict (CRU-1)."""
+    ct = dict(candidate_types or {})
+    items = sorted((str(k), str(v), str(ct.get(str(k), _OVERLAY))) for k, v in formulas.items())
+    payload = "\n".join(f"{k}\t{v}" if t == _OVERLAY else f"{k}\t{v}\t{t}" for k, v, t in items)
     return hashlib.sha256(payload.encode("utf-8")).hexdigest()[:12]
 
 
@@ -129,12 +165,64 @@ def assemble_overlay_pool(
     over-count N, break the m=1 BLdP calibration anchor, and desync from the MC null which re-admits
     exactly these ``len(returns)`` columns). LOCKED BY
     ``test_cohort_eval.py::test_n_candidates_seen_excludes_culled_not_all_scored``."""
+    return assemble_candidate_pool(
+        panel, base_book, overlay_formulas, cost_bps=cost_bps, base_gross=base_gross,
+        base_cost=base_cost, gross_exposure=gross_exposure)
+
+
+def assemble_candidate_pool(
+    panel: Panel,
+    base_book: np.ndarray,
+    formulas: Mapping[str, str],
+    *,
+    cost_bps: float,
+    candidate_types: "Mapping[str, str] | None" = None,
+    hold_horizon: int = 21,
+    ls_min_names: int = 6,
+    base_gross: "np.ndarray | None" = None,
+    base_cost: "np.ndarray | None" = None,
+    gross_exposure: "np.ndarray | None" = None,
+) -> tuple[dict[str, np.ndarray], list[str]]:
+    """Recompute each candidate's return stream through **its own funnel scoring path**, dispatched on
+    ``candidate_types[name]`` (crucible-v12.1). Missing/None ⇒ ``"overlay"``, so an existing caller is
+    byte-identical to :func:`assemble_overlay_pool`.
+
+    * ``"overlay"`` → :func:`evolve._overlay_returns` against the combined ``base_book`` (the timing
+      tilt; F14 cost decomposition via ``base_gross``/``base_cost``/``gross_exposure``).
+    * ``"cross_sectional"`` → :func:`evolve._candidate_returns`: the dollar-neutral rank-L/S sleeve
+      return, rebalanced every ``hold_horizon`` bars, net of turnover·``cost_bps``, ``ls_min_names``
+      minimum names. This is the SAME call ``evolve``'s ``_returns_for`` makes for a cross-sectional
+      genome, so the cohort admits exactly the stream the per-candidate gate scored — the two gates
+      differ in how they adjudicate a stream, never in what the stream is.
+
+    ``base_book`` is ignored for cross-sectional members (an L/S sleeve is a standalone book, not a
+    tilt of the base) — which is precisely why they enter the combiner near-orthogonal to the base
+    while an overlay is structurally correlated with it.
+
+    Causality: both paths are computed ONCE on the full panel and sliced by the caller, matching
+    ``evolve``'s own holdout convention (``evolve.py`` "scoring on the FULL panel so trailing-window
+    operators warm up from the (causal, past) train history"). A cross-sectional stream at bar ``t``
+    reads only rows ``≤ t`` (DSL ts-operators are backward-looking; ``_ls_weights`` is per-row; the
+    rebalance phase is anchored at index 0, identical under truncation), so slicing a full-panel
+    stream to ``[0, n_train)`` is bit-identical to computing it on the truncated panel (LEAK-2).
+
+    Returns ``(returns, culled)``; see :func:`assemble_overlay_pool` for the pre-registered rule that
+    ``culled`` is an EXCLUSION and must never inflate ``n_candidates_seen``."""
+    types = dict(candidate_types or {})
     returns: dict[str, np.ndarray] = {}
     culled: list[str] = []
-    for name, formula in overlay_formulas.items():
-        out = _overlay_returns(str(formula), panel, base_book, cost_bps=cost_bps,
-                               base_gross=base_gross, base_cost=base_cost,
-                               gross_exposure=gross_exposure)   # F14 overlay-cost fix (unit if None)
+    for name, formula in formulas.items():
+        ct = str(types.get(str(name), _OVERLAY))
+        if ct == _CROSS_SECTIONAL:
+            out = _candidate_returns(str(formula), panel, hold_horizon=int(hold_horizon),
+                                     cost_bps=cost_bps, min_names=int(ls_min_names))
+        elif ct == _OVERLAY:
+            out = _overlay_returns(str(formula), panel, base_book, cost_bps=cost_bps,
+                                   base_gross=base_gross, base_cost=base_cost,
+                                   gross_exposure=gross_exposure)   # F14 (unit-gross if None)
+        else:
+            raise ValueError(
+                f"candidate_type must be 'cross_sectional' or 'overlay'; got {ct!r} for {name!r}")
         if out is None:
             culled.append(str(name))
             continue
@@ -240,10 +328,14 @@ def _cohort_holdout_guard(
 # The single orchestration entry point
 # --------------------------------------------------------------------------------------------
 def _verdict(ev: CohortEvidence, mc: McNullResult | None, holdout: tuple[float, bool],
-             pool_hash: str, n_culled: int, verdict: str) -> CohortVerdict:
+             pool_hash: str, n_culled: int, verdict: str,
+             xsec_pool: "frozenset[str]" = frozenset()) -> CohortVerdict:
+    members = (mc.members_obs if mc is not None else ev.members)
     return CohortVerdict(
-        members=(mc.members_obs if mc is not None else ev.members),
+        members=members,
         n_members=(len(mc.members_obs) if mc is not None else ev.n_members),
+        n_pool_cross_sectional=len(xsec_pool),
+        n_members_cross_sectional=sum(1 for m in members if m in xsec_pool),
         n_candidates_seen=ev.n_candidates_seen, n_culled=n_culled,
         mean_pairwise_corr=ev.mean_pairwise_corr, sr_star_cohort=ev.sr_star_cohort,
         dsr_cohort_book=ev.dsr_cohort_book, passes_analytic_floor=ev.passes_analytic_floor,
@@ -261,7 +353,7 @@ def evaluate_cohort(
     panel: Panel,
     base_returns: Mapping[str, np.ndarray],
     timestamps: np.ndarray,
-    overlay_formulas: Mapping[str, str],
+    formulas: Mapping[str, str],
     ccfg: CohortConfig,
     fcfg: FitnessConfig,
     *,
@@ -271,15 +363,23 @@ def evaluate_cohort(
     holdout_embargo: int,
     seed: int,
     base_components: "Mapping[str, SleeveComponents] | None" = None,
+    candidate_types: "Mapping[str, str] | None" = None,
+    hold_horizon: int = 21,
+    ls_min_names: int = 6,
 ) -> CohortVerdict | None:
     """Run the full cohort gate. Returns ``None`` when no cohort can form (pool < ``min_cohort_size``
     de-correlated admits, or a degenerate split). Otherwise a :class:`CohortVerdict`; PROMISING iff
     analytic-floor PASS ∧ MC ``p ≤ alpha_cohort`` ∧ holdout ΔSR ``≥ min_book_uplift``.
 
     Evaluation order (Doc 2 §5) short-circuits so the expensive MC never fires on a doomed cohort:
-    analytic pre-filter → (pass) MC null → (pass) holdout guard. ``overlay_formulas`` maps candidate
-    id → DSL formula (the tick's pre-registered OVERLAY specs). ``mc_kwargs`` = ``{n_reps,
-    alpha_cohort, block_length}``. ``seed`` is the caller's :func:`derive_cohort_seed` value."""
+    analytic pre-filter → (pass) MC null → (pass) holdout guard. ``formulas`` maps candidate
+    id → DSL formula (named ``overlay_formulas`` pre-v12.1, when the pool could only be overlays);
+    ``candidate_types`` maps the same ids to ``"overlay"`` (default, and the whole
+    pool pre-v12.1) or ``"cross_sectional"``, which selects that member's scoring path in
+    :func:`assemble_candidate_pool`. ``hold_horizon`` / ``ls_min_names`` are the cross-sectional
+    sleeve's rebalance period and minimum-names floor (the caller passes its ``evolve_kwargs`` values
+    so the cohort's streams match the mine's). ``mc_kwargs`` = ``{n_reps, alpha_cohort,
+    block_length}``. ``seed`` is the caller's :func:`derive_cohort_seed` value."""
     ts_full = np.asarray(timestamps)
     base_full = {str(k): np.asarray(v, dtype=np.float64) for k, v in base_returns.items()}
     # F14: with base_components, charge the overlay tilt against the base book's TRUE gross / embedded
@@ -293,10 +393,14 @@ def evaluate_cohort(
     else:
         base_book_full = _combined_book(base_full, ts_full, fcfg)
         bg_full = bc_full = ge_full = None
-    pool_full, culled = assemble_overlay_pool(
-        panel, base_book_full, overlay_formulas, cost_bps=cost_bps,
+    pool_full, culled = assemble_candidate_pool(
+        panel, base_book_full, formulas, cost_bps=cost_bps,
+        candidate_types=candidate_types, hold_horizon=hold_horizon, ls_min_names=ls_min_names,
         base_gross=bg_full, base_cost=bc_full, gross_exposure=ge_full)
     n_culled = len(culled)
+    # Composition of the SURVIVING pool (culled members are not in it and must not be counted).
+    xsec_pool = frozenset(k for k in pool_full
+                          if str((candidate_types or {}).get(k, _OVERLAY)) == _CROSS_SECTIONAL)
 
     T = int(panel.T)
     cut = int(T * (1.0 - float(holdout_frac)))
@@ -316,12 +420,12 @@ def evaluate_cohort(
     if ev is None:
         logger.info("cohort: pool cannot form >= min_cohort_size on train span — no verdict")
         return None
-    pch = pool_content_hash(overlay_formulas)
+    pch = pool_content_hash(formulas, candidate_types)
     if not ev.passes_analytic_floor:
         if not ccfg.analytic_floor_advisory:
             logger.info("cohort: analytic floor NOT cleared (dsr=%.3f) — LOGGED, MC skipped",
                         ev.dsr_cohort_book)
-            return _verdict(ev, None, (float("nan"), False), pch, n_culled, "LOGGED")
+            return _verdict(ev, None, (float("nan"), False), pch, n_culled, "LOGGED", xsec_pool)
         # ADVISORY (default): record the miss and continue to the BINDING MC null. The floor reuses
         # promising_dsr / cohort_hlz_t_min, which pass 0/170 across the lifetime record, so gating on
         # it made the only high-power gate in the system unreachable — the third instance of "a cheap
@@ -338,7 +442,7 @@ def evaluate_cohort(
         seed=int(seed), block_length=(int(bl) if bl else None))
     if not mc.passes_mc:
         logger.info("cohort: MC null NOT cleared (p=%.4f > alpha) — LOGGED, holdout skipped", mc.p_value)
-        return _verdict(ev, mc, (float("nan"), False), pch, n_culled, "LOGGED")
+        return _verdict(ev, mc, (float("nan"), False), pch, n_culled, "LOGGED", xsec_pool)
 
     # 3. embargoed holdout guard (Doc 2 §4) — persistence, orthogonal to selection.
     hd, hp = _cohort_holdout_guard(
@@ -346,4 +450,4 @@ def evaluate_cohort(
     verdict = "PROMISING" if hp else "LOGGED"
     logger.info("cohort: MC PASS (p=%.4f) + holdout ΔSR=%.3f (floor %.3f) -> %s",
                 mc.p_value, hd, ccfg.min_book_uplift, verdict)
-    return _verdict(ev, mc, (hd, hp), pch, n_culled, verdict)
+    return _verdict(ev, mc, (hd, hp), pch, n_culled, verdict, xsec_pool)
