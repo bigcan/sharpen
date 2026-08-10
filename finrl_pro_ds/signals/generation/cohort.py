@@ -66,6 +66,11 @@ class CohortConfig:
     cohort_hlz_t_min: float           # book-level marginal-HLZ t floor (REUSE 3.0)
     min_book_uplift: float            # ΔSR of cohort book vs base book (REUSE 0.10)
     combiner_redundancy_strength: float = 0.0   # λ_r for the COHORT book only (Doc 1 Part 3)
+    # When True the analytic SR*_cohort floor is RECORDED but does not gate — the MC null decides.
+    # See configs/crucible_cohort.gates.yaml::analytic_floor_advisory for the full rationale (the
+    # floor reuses promising_dsr/cohort_hlz_t_min, which pass 0/170 lifetime, so as a hard gate it
+    # made the binding MC null unreachable — 2026-08-09 root-cause investigation, Finding 5).
+    analytic_floor_advisory: bool = True
 
 
 @dataclass(frozen=True, slots=True)

@@ -110,6 +110,7 @@ _COHORT_DEFAULTS: dict = {
     "alpha_cohort": 0.05,           # MC-null gate (new pre-registered gate, Doc 2 §3.3)
     "mc_n_replicates": 1000,        # B — binding gate wants ≥1000 (Doc 2 §3.3); 200 for dev
     "mc_block_length": 21,          # ℓ pinned (Politis–White fallback; ℓ-sweep test guards it)
+    "analytic_floor_advisory": True,  # analytic SR*_cohort floor records but does not gate (2026-08-09)
 }
 
 
@@ -169,7 +170,8 @@ def load_cohort_config(
         promising_dsr=float(g["promising_dsr"]),          # REUSE the funnel floors
         cohort_hlz_t_min=float(g["hlz_t_min"]),
         min_book_uplift=float(g["min_combination_uplift"]),
-        combiner_redundancy_strength=float(c["combiner_redundancy_strength"]))
+        combiner_redundancy_strength=float(c["combiner_redundancy_strength"]),
+        analytic_floor_advisory=bool(c["analytic_floor_advisory"]))
     mc_kwargs = dict(
         enabled=bool(c["enabled"]), n_reps=int(c["mc_n_replicates"]),
         alpha_cohort=float(c["alpha_cohort"]), block_length=int(c["mc_block_length"]))

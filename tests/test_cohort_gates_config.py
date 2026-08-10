@@ -40,11 +40,33 @@ def test_funnel_file_has_no_cohort_block() -> None:
 
 def test_cohort_config_loads_from_separate_file() -> None:
     ccfg, mc = load_cohort_config(FUNNEL, COHORT)
-    assert mc["enabled"] is False                       # opt-in; shipped disabled
+    # ENABLED 2026-08-10 by operator authorisation (see the header of crucible_cohort.gates.yaml).
+    # Previously asserted False as "opt-in; shipped disabled".
+    assert mc["enabled"] is True
+    # The analytic SR*_cohort floor is ADVISORY: recorded on the card, but it does not gate, so the
+    # binding selection-aware MC null is reachable (2026-08-09 root-cause report §5b Finding 5).
+    assert ccfg.analytic_floor_advisory is True
     assert ccfg.min_cohort_size == 3 and ccfg.max_cohort_size == 12
     assert ccfg.max_pairwise_corr == 0.35
     assert ccfg.combiner_redundancy_strength == 0.5
     assert mc["n_reps"] == 1000 and mc["alpha_cohort"] == 0.05 and mc["block_length"] == 21
+
+
+def test_cohort_enabled_and_advisory_remain_opt_out_able() -> None:
+    """The MECHANISM, not the shipped value: both switches must still be honoured when set off, so
+    the pre-2026-08-10 behaviour stays reachable and reproducible."""
+    import tempfile
+    from pathlib import Path
+
+    raw = yaml.safe_load(COHORT.read_text(encoding="utf-8")) or {}
+    raw["cohort"]["enabled"] = False
+    raw["cohort"]["analytic_floor_advisory"] = False
+    with tempfile.TemporaryDirectory() as td:
+        p = Path(td) / "cohort_off.yaml"
+        p.write_text(yaml.safe_dump(raw), encoding="utf-8")
+        ccfg, mc = load_cohort_config(FUNNEL, p)
+    assert mc["enabled"] is False
+    assert ccfg.analytic_floor_advisory is False
 
 
 def test_reused_floors_come_from_generation_block() -> None:
