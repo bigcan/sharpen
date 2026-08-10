@@ -519,6 +519,52 @@ duplicates cannot crowd out cross-market independence.
 
 ---
 
+## 5f. Tier 2 — the hypothesis pool was redundant, and truncation was source-dependent
+
+Two defects, both measured on the 24 slots the 5e run bridged.
+
+### (a) Within-market COT redundancy
+
+The COT connector publishes three fields per market, and category positions sum to open interest, so
+within a market they are near-mechanical transforms. Measured |corr| **on first differences**:
+
+| | |
+|---|---|
+| within-market duplicates | **0.948 – 0.979** (wti, gold, corn, spx, eurofx) |
+| across markets/sources | **median 0.020** |
+
+A ~50× separation, so the threshold is not delicate. `altdata.max_slot_corr: 0.90`
+(`configs/crucible_altdata.gates.yaml`, new) drops a slot duplicating an already-kept one:
+**24 → 15, retaining all 6 COT markets and all 6 FRED series**; the 9 dropped are exactly the
+within-market duplicates. Independence fully preserved.
+
+**First differences, not levels, deliberately** — macro levels co-trend (level median |corr| 0.156 vs
+0.020 differenced), so a level rule would reject distinct-but-trending series, the over-rejection
+direction that silently costs breadth. Pinned by `test_redundancy_filter_uses_first_differences_not_levels`.
+Default `None` in the bridge, so every existing caller stays byte-identical and no verdict can move.
+
+### (b) Truncation was source-dependent, not information-dependent
+
+Slots arrive grouped by connector, and the batch is cut at `max_proposals`. On the 5e run that meant
+6 FRED slots × 3 overlay templates consumed **18 of the 24** available overlay specs, so only **2 of
+6** COT markets reached the batch — four independent markets silently cut, purely because FRED sorts
+first. `_round_robin_by_source` interleaves across the `source:` prefix so the surviving prefix is a
+balanced sample. It is a permutation, never a filter (asserted), deterministic, and stable within a
+source, preserving the P2 replay gate.
+
+### Not done — an operator step, deliberately left
+
+The 4 EDGAR series need `SEC_EDGAR_UA`. There is **no code to write**: `EdgarConnector` already reads
+that env var (or a `user_agent=` param) and fails closed without it. SEC's fair-access policy requires
+a *descriptive contact string*, so this identifies the operator to a government service in automated
+requests — not something to invent or bake into a committed config.
+
+```bash
+export SEC_EDGAR_UA="FinRL-Pro-DS research <contact-email>"
+```
+
+---
+
 ## 6. What follows
 
 Ordered by measured effect. These are findings, not a mandate — every gate change below is an operator
