@@ -9,6 +9,8 @@ BLOCKER-1/3 regressions, and the MC-path production-config noise rejection live 
 """
 from __future__ import annotations
 
+from dataclasses import replace
+
 import numpy as np
 import pandas as pd
 import pytest
@@ -242,12 +244,45 @@ def test_evaluate_cohort_pure_noise_not_promising() -> None:
     assert v is None or v.verdict != "PROMISING"
 
 
-def test_evaluate_cohort_short_circuits_on_analytic_fail(monkeypatch: pytest.MonkeyPatch) -> None:
-    """When the analytic floor fails, the (expensive) MC null is never called — Doc 2 §5 order.
-    Seed-independent: the analytic pre-filter is stubbed to return evidence with the floor NOT
-    cleared, so the assertion is about the ORCHESTRATION order, not a particular pool's statistics."""
+def _stub_failing_floor(monkeypatch: pytest.MonkeyPatch, spy) -> None:
+    """Stub the analytic pre-filter to report the floor NOT cleared, and route the MC null to
+    ``spy``. Seed-independent: the assertions are about ORCHESTRATION, not a pool's statistics."""
     import finrl_pro_ds.signals.generation.cohort_eval as ce
     from finrl_pro_ds.signals.generation.cohort import CohortEvidence
+
+    stub_ev = CohortEvidence(
+        members=("ov-a", "ov-b", "ov-c"), n_members=3, n_candidates_seen=6,
+        delta_sr_oos=0.0, dsr_cohort_book=0.5, cohort_hlz_t=1.0, mean_pairwise_corr=0.1,
+        sr_star_cohort=0.2, passes_analytic_floor=False)     # floor NOT cleared
+    monkeypatch.setattr(ce, "evaluate_cohort_analytic", lambda *a, **k: stub_ev)
+    monkeypatch.setattr(ce, "mc_null_pvalue", spy)
+
+
+def test_analytic_floor_short_circuits_when_NOT_advisory(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Legacy path (``analytic_floor_advisory=False``): a floor miss skips the expensive MC null."""
+    slots = _noise_slots(6, seed=13)
+    panel = _panel(slots)
+    base, ts = _base_and_ts()
+
+    def _spy_mc(*a, **k):
+        raise AssertionError("MC must not run when the floor fails and advisory is OFF")
+
+    _stub_failing_floor(monkeypatch, _spy_mc)
+    ccfg = replace(_CCFG, analytic_floor_advisory=False)
+    v = evaluate_cohort(panel, base, ts, _overlays(slots), ccfg, _CFG,
+                        mc_kwargs=_MC_KWARGS, cost_bps=0.0010, holdout_frac=0.25,
+                        holdout_embargo=21, seed=1)
+    assert v is not None and v.verdict == "LOGGED" and v.passes_analytic_floor is False
+
+
+def test_analytic_floor_is_ADVISORY_by_default_and_mc_still_runs(
+        monkeypatch: pytest.MonkeyPatch) -> None:
+    """DEFAULT path: the analytic floor is recorded but does NOT gate — the binding MC null still
+    runs. Regression for the 2026-08-09 root-cause finding: the floor reuses ``promising_dsr`` /
+    ``cohort_hlz_t_min``, which pass 0/170 lifetime, so gating on it made the MC null unreachable
+    (docs/research/crucible_zero_alpha_root_cause_2026-08-09.md §5b Finding 5). The floor result is
+    still carried on the verdict for provenance."""
+    from finrl_pro_ds.signals.generation.cohort_mc import McNullResult
 
     slots = _noise_slots(6, seed=13)
     panel = _panel(slots)
@@ -256,19 +291,16 @@ def test_evaluate_cohort_short_circuits_on_analytic_fail(monkeypatch: pytest.Mon
 
     def _spy_mc(*a, **k):
         called["mc"] = True
-        raise AssertionError("MC must not run when the analytic floor fails")
+        return McNullResult(t_obs=0.1, p_value=0.90, n_reps=int(k["n_reps"]), n_valid_reps=1,
+                            block_length=21, passes_mc=False, members_obs=("ov-a", "ov-b", "ov-c"))
 
-    stub_ev = CohortEvidence(
-        members=("ov-a", "ov-b", "ov-c"), n_members=3, n_candidates_seen=6,
-        delta_sr_oos=0.0, dsr_cohort_book=0.5, cohort_hlz_t=1.0, mean_pairwise_corr=0.1,
-        sr_star_cohort=0.2, passes_analytic_floor=False)     # floor NOT cleared
-    monkeypatch.setattr(ce, "evaluate_cohort_analytic", lambda *a, **k: stub_ev)
-    monkeypatch.setattr(ce, "mc_null_pvalue", _spy_mc)
-
+    _stub_failing_floor(monkeypatch, _spy_mc)
+    assert _CCFG.analytic_floor_advisory is True, "advisory must be the shipped default"
     v = evaluate_cohort(panel, base, ts, _overlays(slots), _CCFG, _CFG,
                         mc_kwargs=_MC_KWARGS, cost_bps=0.0010, holdout_frac=0.25,
                         holdout_embargo=21, seed=1)
-    assert called["mc"] is False
+    assert called["mc"] is True, "the binding MC null must be reachable when the floor is advisory"
+    # Nothing is loosened: the MC null still decides, and it rejected here.
     assert v is not None and v.verdict == "LOGGED" and v.passes_analytic_floor is False
 
 

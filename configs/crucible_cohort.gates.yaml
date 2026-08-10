@@ -14,11 +14,34 @@
 # threshold is loosened; the reused floors apply to the √N-larger cohort quantity). NEVER hardcode
 # these numbers in code (CLAUDE.md); the loader reads them via load_cohort_config().
 #
-# Disabled by default: with enabled=false the cohort path never runs and the orchestrator behaves
-# byte-identically to the pre-cohort loop. Everything still caps at PROMISING — a cleared cohort
-# requires a human-initiated Tier-2 deep lifecycle audit before any capital (CLAUDE.md).
+# ENABLED since 2026-08-10 (was: disabled by default). With enabled=false the cohort path never runs
+# and the orchestrator behaves byte-identically to the pre-cohort loop; that path is still honoured
+# and regression-tested, it is simply no longer the shipped value. Everything still caps at
+# PROMISING — a cleared cohort requires a human-initiated Tier-2 deep lifecycle audit before any
+# capital (CLAUDE.md).
 cohort:
-  enabled: false            # OPT-IN; false => the cohort path never runs (default)
+  # ENABLED 2026-08-10 by explicit operator authorisation, together with `analytic_floor_advisory`
+  # below. Rationale: the 2026-08-09 root-cause investigation measured the per-candidate path at
+  # ~0% power for any realistic alpha, while the selection-aware MC null reached 25% power at a
+  # per-signal IR of 0.30 and 50% at 0.50 on a realistic 15% hit rate. This is the only gate in the
+  # system with measured power against a plausible edge.
+  #
+  # WHAT TURNING THIS ON COSTS (read before reverting or re-tuning):
+  #   * `loop.py` runs the cohort path on every tick whose overlay pool can form >= min_cohort_size.
+  #   * ADR-4: a cohort EVALUATED is ONE additional LORD++ test per tick, charged deterministic-LAST
+  #     so the per-candidate charge order is untouched. It spends real FDR wealth.
+  #   * COMPUTE: with `analytic_floor_advisory: true` the cheap analytic reject no longer
+  #     short-circuits, so every such tick pays the full MC null, O(B · (admission + 2·combiner)) at
+  #     B = mc_n_replicates. At B=1000 that is minutes-to-tens-of-minutes per tick. If ticks need to
+  #     be cheap, lower `mc_n_replicates` for dev or set `analytic_floor_advisory: false` — do NOT
+  #     silently re-gate on the floor and call it a cost fix; that is the defect this pair removed.
+  #   * A cohort still caps at PROMISING. Capital (live/paper) continues to require a human-initiated
+  #     Tier-2 deep lifecycle audit (CLAUDE.md).
+  #
+  # Blast radius at the moment of the flip: 0 cohort cards and 0 cohort verdicts had ever been
+  # emitted, so no recorded verdict moves. The funnel gates_hash (519158fa1450) is in a different
+  # file and stays byte-identical (CRU-1).
+  enabled: true             # OPT-IN; false => the cohort path never runs
 
   # Admission (Doc 1 #2a — the binding return-correlation guard).
   min_cohort_size: 3        # below this many de-correlated admits, no cohort verdict is rendered
@@ -28,6 +51,32 @@ cohort:
   # Cohort combiner (Doc 1 Part 3): redundancy down-weight for the COHORT book ONLY; the live/funnel
   # combiner stays at 0.0 (this does not touch any existing verdict).
   combiner_redundancy_strength: 0.5
+
+  # Is the analytic SR*_cohort floor a GATE or a DIAGNOSTIC? (2026-08-09 root-cause investigation,
+  # docs/research/crucible_zero_alpha_root_cause_2026-08-09.md §5b Finding 5.)
+  #
+  # The floor's condition (cohort.py::evaluate_cohort_analytic) is
+  #     dsr_book >= promising_dsr (0.90)  AND  cohort_hlz_t >= cohort_hlz_t_min (3.0)
+  # i.e. the two REUSED funnel seals — the SAME two legs measured at 0/170 pass across the entire
+  # lifetime record. As a hard gate it made `cohort_eval` return LOGGED before ever calling
+  # `mc_null_pvalue`, so the BINDING selection-aware MC null was unreachable. That is the third
+  # occurrence of one architectural bug in this project: a "cheap pre-filter" strictly harder than
+  # the gate it is supposed to protect (cf. the pre-v6.0 train re-application of the 6-way gate, and
+  # the v12.0 train cull of 8/8 pre-registrations).
+  #
+  # true  (DEFAULT) — the floor is COMPUTED and RECORDED on the evidence card
+  #       (`passes_analytic_floor`, already documented "NOT the binding gate" in three places) but
+  #       does not stop evaluation. The MC null + the embargoed holdout decide. NOTHING is loosened:
+  #       both downstream gates are byte-identical, and the MC null's size is calibrated green
+  #       (tests/signals/test_generation_cohort_mc.py, incl. the BLOCKER-1 regression).
+  # false — legacy behaviour: a floor miss short-circuits to LOGGED and skips the MC null. Retained
+  #       so the pre-2026-08-09 path stays reproducible, and as the cheap-compute option (the MC null
+  #       costs O(B · (admission + 2·combiner))).
+  #
+  # Blast radius when this changed: ZERO. Across all 13 run manifests that carry cohort keys the
+  # lifetime totals are 0 cohort cards and 0 cohort verdicts, so no recorded verdict can move. The
+  # funnel gates_hash (crucible-v2.0, 519158fa1450) is in a DIFFERENT file and is untouched (CRU-1).
+  analytic_floor_advisory: true
 
   # Selection-aware Monte-Carlo null (Doc 2 §3 — the BINDING statistical gate).
   alpha_cohort: 0.05        # new pre-registered gate: cohort passes iff MC p <= alpha_cohort
