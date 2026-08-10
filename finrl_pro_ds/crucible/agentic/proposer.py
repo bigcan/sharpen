@@ -147,6 +147,31 @@ class Proposer(Protocol):
     def propose(self, context: ProposalContext) -> list[HypothesisProposal]: ...
 
 
+def _round_robin_by_source(terminals: "tuple[str, ...]") -> list[str]:
+    """Interleave feature-slot terminals across their ``source:`` prefix, preserving each source's
+    own order within its group.
+
+    The batch is truncated at ``context.max_proposals``, and slots arrive grouped by connector
+    (``fred:*`` then ``cot:*`` then ``edgar:*``). Grouped order makes the truncation
+    SOURCE-DEPENDENT rather than information-dependent: measured on the 2026-08-10 us_equity run,
+    6 FRED slots x 3 overlay templates consumed 18 of the 24 available overlay specs, so only 2 of
+    6 COT markets reached the batch and four independent markets were silently cut. Round-robin
+    makes the surviving prefix a balanced sample across sources instead.
+
+    Deterministic (stable within-source order, sources in first-appearance order), so replays
+    reproduce the same batch — the P2 exit gate.
+    """
+    groups: dict[str, list[str]] = {}
+    for t in terminals:
+        groups.setdefault(t.split(":", 1)[0] if ":" in t else "", []).append(t)
+    out: list[str] = []
+    for i in range(max((len(g) for g in groups.values()), default=0)):
+        for g in groups.values():
+            if i < len(g):
+                out.append(g[i])
+    return out
+
+
 @dataclass(frozen=True, slots=True)
 class LibrarySeedProposer:
     """Deterministic, offline default proposer (no LLM, no network) — the shipped P2 baseline.
@@ -176,7 +201,7 @@ class LibrarySeedProposer:
                     candidate_type="cross_sectional", formula=FORMULAS[idx],
                     economic_rationale=f"WQ101 #{idx}: {hypo}."))
         if self.include_overlay:
-            for term in context.feature_slots():
+            for term in _round_robin_by_source(context.feature_slots()):
                 slug = term.replace(":", "-").replace("_", "-")
                 for suffix, tmpl, hypo_t, sign in _OVERLAY_TEMPLATES:
                     out.append(HypothesisProposal(

@@ -78,6 +78,22 @@ DEFAULT_GATES = ROOT / "configs" / "signal_eval.gates.yaml"
 DEFAULT_LOCKBOX_GATES = ROOT / "configs" / "crucible_lockbox.gates.yaml"
 DEFAULT_COHORT_GATES = ROOT / "configs" / "crucible_cohort.gates.yaml"
 DEFAULT_POWER_GATES = ROOT / "configs" / "crucible_power.gates.yaml"
+DEFAULT_ALTDATA_GATES = ROOT / "configs" / "crucible_altdata.gates.yaml"
+
+
+def _altdata_max_slot_corr(path: "str | Path | None") -> float | None:
+    """Read ``altdata.max_slot_corr`` from the alt-data ingest gates (never hardcode a gate —
+    CLAUDE.md). Missing file or missing key ⇒ ``None`` ⇒ the redundancy filter is OFF and the
+    bridge behaves exactly as it did pre-2026-08-10."""
+    import yaml
+
+    p = Path(path) if path else DEFAULT_ALTDATA_GATES
+    if not p.exists():
+        return None
+    with open(p, encoding="utf-8") as fh:            # utf-8 explicit: Windows default is cp950 here
+        cfg = yaml.safe_load(fh) or {}
+    v = (cfg.get("altdata") or {}).get("max_slot_corr")
+    return None if v is None else float(v)
 DEFAULT_CORRECTED_GATES = ROOT / "configs" / "crucible_corrected_contract.gates.yaml"
 DEFAULT_SEARCH_MEMORY_GATES = ROOT / "configs" / "crucible_search_memory.gates.yaml"
 
@@ -241,7 +257,8 @@ def _build_substrate(args, cfg, ek, meta, sweep, sweep_hash) -> tuple[Substrate,
                 bar_start = np.datetime_as_string(panel.dates.min(), unit="D")
                 bar_end = args.end or np.datetime_as_string(panel.dates.max(), unit="D")
                 slots = bridge_altdata_feature_slots(
-                    bar_dates=panel.dates, start=bar_start, end=bar_end, catalog=catalog)
+                    bar_dates=panel.dates, start=bar_start, end=bar_end, catalog=catalog,
+                    max_slot_corr=_altdata_max_slot_corr(args.altdata_config))
                 if slots:
                     panel = dataclasses.replace(
                         panel, feature_slots={**panel.feature_slots, **slots})
@@ -594,6 +611,8 @@ def main() -> int:
     ap.add_argument("--no-cohort", action="store_true",
                     help="detach the weak-signal cohort gate entirely (pure pre-cohort byte-identical "
                          "path; used by crucible reproduce / testing)")
+    ap.add_argument("--altdata-config", default=str(DEFAULT_ALTDATA_GATES),
+                    help="alt-data INGEST gates (altdata.max_slot_corr redundancy filter)")
     ap.add_argument("--no-altdata-slots", action="store_true",
                     help="real mode only: skip bridging macro/positioning/fundamental connector "
                          "series into Panel feature slots (mine the cross-sectional bank only)")
