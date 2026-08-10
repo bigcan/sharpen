@@ -426,6 +426,51 @@ when set off) rather than a value — the same brittleness that let the original
 
 ---
 
+## 5d. ⭐ The enabled gate has nowhere to run — measured 2026-08-10
+
+The cohort path was enabled and pointed at `us_equity`, the only adequately-powered substrate. **It
+cannot run there**, and this is structural rather than a configuration slip.
+
+* `build_us_equity_panel()` returns **0 feature slots** (measured, not inferred).
+* The `us_equity` branch of `crucible_orchestrator.py` (≈L218-230) never calls
+  `bridge_altdata_feature_slots` — unlike the `cross_asset` and `taiwan` branches, which do.
+* [`loop.py:329-331`](finrl_pro_ds/crucible/agentic/loop.py:329) feeds the cohort **only overlay
+  specs**: `overlay_formulas = {... if pr.spec.candidate_type == "overlay"}; if not overlay_formulas:
+  return [], {}`.
+
+Overlay candidates are instantiated *per feature slot*. No slots ⇒ no overlay specs ⇒ the cohort hook
+returns `([], {})` before `evaluate_cohort` is ever called.
+
+| substrate | overlay pool? | adequately powered? |
+|---|---|---|
+| `us_equity` | **no** — 0 slots | **yes** — MDE 1.312 < ceiling 1.457 |
+| `cross_asset` | yes | no — MDE 1.68; realized n_eff 6.8 ⇒ 1.03 achievable vs 1.44 needed |
+| `taiwan` | yes | no — MDE 1.40 |
+| `intraday` / `intraday_fx` | no (deliberate: daily-or-slower connectors on an hourly clock) | no |
+
+> **The one gate in the system with measured power has no substrate where it can both run and be
+> adequately powered.** Unblocking and enabling it was necessary but not sufficient.
+
+This does not argue for reverting §5c — the alternative is a gate that can never fire anywhere, and
+the fix is independently correct. It does retract the practical claim that "point the enabled path at
+`us_equity`" was the next step; that was wrong, and the run is what exposed it.
+
+**What the run actually did.** Two ticks, neither mined, for two non-verdict reasons: (1) implied MDE
+`inf` because the calibration curves are absent from a worktree `results/` (the known fresh-clone
+blocker — fixed by junctioning, *not* by `--force-underpowered`, which would have fabricated a run of
+unknown power); then (2) `author: 0/8 proposals accepted` — the default `LibrarySeedProposer` bank is
+the same 8 WQ101 seeds already scored `SCORED_NOT_SELECTED` on 08-09, correctly deduped. Both ticks
+logged `promising=0 status=OK exit 0`, indistinguishable at a glance from "mined and found nothing" —
+the **third and fourth** distinct mechanisms in this investigation that manufacture a false negative.
+
+**Real next step:** bridge per-name `(T,N)` alt-data slots into the `us_equity` panel — the U3 route
+that `grammar.py::cross_sectional_terminals` already documents, and by which the only PROMISING this
+project ever recorded was found. That is substrate wiring, not a config flip.
+
+**Alphas found: zero.** Nothing was tested; nothing was discovered.
+
+---
+
 ## 6. What follows
 
 Ordered by measured effect. These are findings, not a mandate — every gate change below is an operator
