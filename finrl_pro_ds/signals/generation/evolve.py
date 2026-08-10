@@ -105,6 +105,11 @@ class GenerationReport:
     promising: list[Candidate] = field(default_factory=list)
     pbo: dict | None = None          # CSCV Probability of Backtest Overfitting (advisory, GP7-03)
     contract: str = CONTRACT_SHIPPED  # which decision contract produced ``promising`` (v6.0)
+    # v12.0 — the DENOMINATOR of ``promising``: how many candidates the binding holdout gate actually
+    # adjudicated. `promising=0` out of 0 is vacuous; out of 8 it is evidence. Two sessions running,
+    # a zero with an unread denominator cost real analysis time (the cont-152 dedup livelock, then the
+    # cont-153 train pre-filter), so the count travels WITH the verdict instead of living in a log line.
+    n_holdout_tested: int = 0
 
 
 def _candidate_returns(formula: str, panel: Panel, *, hold_horizon: int, cost_bps: float,
@@ -296,6 +301,36 @@ def _overlay_ctx(
     if components is not None:
         return _combined_book_with_components(net_returns, components, timestamps, cfg)
     return _combined_book(net_returns, timestamps, cfg), None, None, None
+
+
+def _panel_market_returns(panel: Panel) -> "np.ndarray | None":
+    """Equal-weight bar-over-bar return of the ACTIVE universe — the panel's own market factor.
+
+    Feeds ONLY the corrected contract's `max_market_beta` exposure leg, which short-circuits to pass
+    when that threshold is unset. Supplying this is therefore INERT on every substrate whose gates
+    leave `max_market_beta: null`, so no existing verdict moves and CRU-1 holds; it becomes binding
+    only where a config opts in.
+
+    Why it is needed at all: the best candidate the funnel has ever surfaced decomposed to a market
+    beta of +0.548 (R² 57.2%) with a residual timing Sharpe of −0.0000, and it cleared 3 of the 5
+    corrected legs — `max_base_corr` compares against the BASE SLEEVES, not the market, so a pure
+    beta tilt walks straight through uplift, fragility and collinearity.
+
+    LEAK-2: bar t's market return is realized AT t, the same bar as the candidate's own return, so
+    the regression is contemporaneous — a beta measurement, not a forecast.
+    """
+    close = getattr(panel, "close", None)
+    active = getattr(panel, "active", None)
+    if close is None or active is None:
+        return None
+    with np.errstate(invalid="ignore", divide="ignore"):
+        r = np.diff(np.log(close), axis=0, prepend=np.nan)
+    r = np.where(np.asarray(active, dtype=bool) & np.isfinite(r), r, np.nan)
+    empty = ~np.any(np.isfinite(r), axis=1)
+    out = np.full(r.shape[0], np.nan)
+    if (~empty).any():
+        out[~empty] = np.nanmean(r[~empty], axis=1)
+    return out
 
 
 def evolve(
@@ -499,8 +534,6 @@ def evolve(
     # significance decision is taken once, on the holdout.
     if is_corrected:
         assert corrected_cfg is not None                      # narrowed above
-        train_passers = [c for c in ranked
-                         if c.result is not None and _passes_cheap_prefilter(c.result, corrected_cfg)]
         # SEARCH-MULTIPLICITY CONTROL (U1e). Under `prereg_only` an evolved offspring may be scored,
         # ledgered and reported — it is still part of the file drawer — but it may NOT be promoted,
         # because it charges no LORD++ wealth. Restricting promotion to the pre-registered seeds makes
@@ -508,13 +541,58 @@ def evolve(
         # is what the corrected contract's binding-FDR leg assumes. `seed_formulas` IS the
         # pre-registration: the orchestrator passes exactly the tick's fresh specs.
         if corrected_cfg.offspring_policy == "prereg_only":
+            # crucible-v12.0: A PRE-REGISTERED SPEC IS TESTED, NOT SCREENED. Under `prereg_only` the
+            # eligible set IS the pre-registration, so the cheap train pre-filter is not applied to it.
+            #
+            # WHY (measured, S553-cont-153). On the first adequately-powered substrate (us_equity) the
+            # pre-filter culled 8 of 8 pre-registered seeds on train — every one on the `uplift` leg,
+            # train ΔSR −0.19..−1.03 against a +0.10 floor — so `train_passers` was EMPTY, the holdout
+            # loop below never iterated, and `corrected_contract_fitness` (the single decision the
+            # substrate's whole power argument is about) never executed on one pre-registered
+            # hypothesis. The tick still reported `mined=True fdr_tests=8 promising=0` and still
+            # CHARGED eight LORD++ tests. That is the same shape as the defect the corrected contract
+            # was built to remove (audit 2026-07-29: the holdout gate never ran in production because
+            # train re-applied the final gate) reappearing through a different door — an ECONOMIC-SIZE
+            # screen rather than a significance one, but with the identical consequence: `promising=0`
+            # carries no evidence, and cannot be told apart from a run where the test did execute.
+            #
+            # It is also selection in the wrong direction: keeping only the pre-registered hypotheses
+            # that already looked good IN-SAMPLE and then testing those out-of-sample is precisely what
+            # pre-registration exists to prevent. The cheap guards are not lost — every one of them is
+            # re-applied on the holdout inside `corrected_contract_fitness` (uplift / fragility /
+            # collinearity legs), where they judge out-of-sample evidence instead of in-sample fit.
+            #
+            # Cost is negligible: the eligible set is the tick's handful of pre-registered specs, not
+            # the search. Offspring are unaffected — they are non-promotable under this policy either
+            # way, so the pre-filter has nothing left to decide here.
             prereg = set(seed_formulas)
-            n_before = len(train_passers)
-            train_passers = [c for c in train_passers if c.formula in prereg]
-            if n_before != len(train_passers):
-                log.info("prereg_only: %d of %d train-survivors are evolved offspring — scored and "
-                         "ledgered, but not promotion-eligible (they charge no LORD++ wealth)",
-                         n_before - len(train_passers), n_before)
+            eligible = [c for c in ranked if c.formula in prereg]
+            train_passers = [c for c in eligible if c.result is not None]
+            # The ONE remaining reason a pre-registered spec can fail to reach the holdout: it never
+            # produced a FitnessResult at all (Tier-0 causality cull, degenerate all-NaN score, or
+            # hard-infeasible turnover/size). Those are correctness culls, not evidence, so each is
+            # named individually — a silently-dropped pre-registration is the ambiguity this bump
+            # exists to remove.
+            for c in eligible:
+                if c.result is None:
+                    log.warning("prereg_only: pre-registered spec NOT tested — %s (formula=%.120s)",
+                                c.reason or "no fitness result", c.formula)
+            n_would_have_been_culled = sum(
+                1 for c in train_passers if not _passes_cheap_prefilter(c.result, corrected_cfg))
+            log.info("prereg_only: %d of %d pre-registered specs reach the holdout gate; %d of them "
+                     "would have been screened out on train by the cheap guards and are tested "
+                     "anyway (v12.0)", len(train_passers), len(eligible), n_would_have_been_culled)
+            if not train_passers:
+                log.warning("prereg_only: NO pre-registered spec reached the holdout gate — a "
+                            "`promising=0` from this tick is VACUOUS, not evidence")
+        else:
+            # `offspring_policy: all` — UNCHANGED v6.0 behaviour. Every train-survivor is eligible,
+            # including offspring, so the cheap pre-filter is still the thing that bounds how many
+            # genomes reach the holdout. The v12.0 argument above does not transfer: with an unbounded
+            # search feeding it, the pre-filter is a compute bound, not a screen on pre-registrations.
+            train_passers = [c for c in ranked
+                             if c.result is not None
+                             and _passes_cheap_prefilter(c.result, corrected_cfg)]
     else:
         train_passers = [c for c in ranked if c.result is not None and c.result.passes_gate]
 
@@ -524,6 +602,10 @@ def evolve(
     n_hold = hold.T
     base_ho = {k: np.asarray(v)[panel.T - n_hold:] for k, v in base_returns.items()}
     ts_ho = np.asarray(timestamps)[panel.T - n_hold:]
+    # EXPOSURE leg (guards.max_market_beta). Inert wherever that threshold is null — see
+    # _panel_market_returns for why it exists and why it moves no existing verdict.
+    _mkt_full = _panel_market_returns(panel)
+    mkt_ho = None if _mkt_full is None else _mkt_full[panel.T - n_hold:]
     # OVERLAY (CR-9): the base book on the FULL timeline is the multiplier target for the full-panel
     # re-score; the holdout rows are sliced off it below, matching the cross_sectional warm-up path.
     # F14: base_components is already on the full timeline, so no slicing here.
@@ -548,7 +630,7 @@ def evolve(
             if is_corrected:
                 assert corrected_cfg is not None and lord_level is not None
                 cr = corrected_contract_fitness(cand_ho, base_ho, ts_ho, cfg, corrected_cfg,
-                                                lord_level=lord_level)
+                                                lord_level=lord_level, market_returns=mkt_ho)
             else:
                 hv = combination_fitness(cand_ho, base_ho, ts_ho, cfg, gen_n_eff=final_n_eff,
                                          turnover_ann=full[1], n_nodes=node_count(parse(c.formula)),
@@ -592,4 +674,4 @@ def evolve(
         hall_of_fame=ranked[:10],
         gen_n_total=gen_n_total, gen_n_eff=final_n_eff,
         holdout_validation=holdout_validation, promising=promising, pbo=pbo,
-        contract=contract)
+        contract=contract, n_holdout_tested=len(train_passers))

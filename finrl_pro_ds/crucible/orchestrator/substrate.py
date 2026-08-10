@@ -74,7 +74,25 @@ class SubstratePower:
     ``implied_mde_delta_sr`` is ``+inf`` exactly when ``interp_mode`` is an ``unmeasured_*`` mode: the
     substrate sits off the calibration grid, so its power was never measured and the stamp claims none
     (fail-closed — see :func:`interp_mde`). It is a sentinel, not an estimate; do not average, plot, or
-    regress it alongside the measured modes."""
+    regress it alongside the measured modes.
+
+    UNITS (S553-cont-151, and the reason this stamp used to read a substrate as powered when it was
+    not). Every MDE on the calibration curve is an annualized ΔSR **in units of the calibration's own
+    252-bar year** — its synthetic panel stamps one bar per calendar day, so there a 252-bar year IS a
+    calendar year. A substrate sampled faster puts MORE bars in a calendar year (the 12-instrument
+    hourly panel: 5,694), so the SAME economic edge reads √(252/bars_per_year) times SMALLER through
+    that convention. ``implied_mde_delta_sr`` is therefore rescaled to CALENDAR-annualized ΔSR, which
+    is the unit ``plausible_delta_sr_max`` is stated in (its 0.3-0.5 justification, and the project's
+    TSMOM anchor net SR 0.60, are both calendar Sharpes). ``implied_mde_delta_sr_curve_units`` keeps
+    the raw curve reading for provenance.
+
+    This is not a modelling nicety: the pre-fix stamp read the hourly panel at 0.401 vs a 0.50 ceiling
+    and ALLOWED it, when its calendar MDE is ~1.9. The underlying reason no unit-free "go deeper /
+    sample faster" move can help is measured in
+    ``scripts/research/crucible_frequency_invariance_probe.py``: at a MATCHED calendar span the
+    detection rate of the shipped Sharpe-difference z is the SAME at 252 and 5,694 bars/yr (calendar
+    MDE ratio 0.944). SE of an annualized Sharpe is 1/√(calendar years) whatever the bar spacing, so
+    sampling finer relabels the axis and buys no power."""
 
     panel_T: int
     holdout_bars: int
@@ -84,6 +102,10 @@ class SubstratePower:
     # fail-closed sentinel modes: 'unmeasured_high' (off the top of the grid) | 'unmeasured_degenerate'
     interp_mode: str
     calibration_sweep_hash: str
+    # Provenance for the unit rescale above. Defaults keep every pre-cont-151 construction identical:
+    # bars_per_year 252 ⇒ scale 1.0 ⇒ implied_mde_delta_sr IS the raw curve reading.
+    bars_per_year: float = 252.0
+    implied_mde_delta_sr_curve_units: float = float("nan")
 
 
 @dataclass(frozen=True, slots=True)
@@ -213,10 +235,24 @@ def interp_mde(holdout_bars: int, sweep: dict) -> tuple[float, str]:
     return m_hi, "grid"                                          # unreachable (guarded above)
 
 
+#: The calibration curve's own annualization: its synthetic panel is one bar per calendar day, so its
+#: MDEs are ΔSR per 252-bar year. Any substrate on a different bar clock must be converted (see
+#: :class:`SubstratePower` UNITS).
+CURVE_BARS_PER_YEAR: float = 252.0
+
+
 def stamp_substrate_power(panel_T: int, holdout_frac: float, sweep: "dict | Mapping[str, dict]",
                           sweep_hash: str,
-                          candidate_types: "tuple[str, ...] | None" = None) -> SubstratePower:
+                          candidate_types: "tuple[str, ...] | None" = None,
+                          bars_per_year: float = CURVE_BARS_PER_YEAR) -> SubstratePower:
     """Build the :class:`SubstratePower` stamp for a panel of ``panel_T`` bars.
+
+    ``bars_per_year`` is the substrate's OWN bar clock (252 = daily, the default, under which this
+    function is byte-identical to its pre-cont-151 form). The interpolated curve MDE is in ΔSR per
+    252-bar year; it is rescaled by ``√(bars_per_year / 252)`` so ``implied_mde_delta_sr`` is
+    CALENDAR-annualized and therefore comparable to the guard's ceiling. The rescale is applied AFTER
+    the worst-across-types fold and is a strictly increasing function of the MDE, so it cannot reorder
+    which candidate type binds — and ``+inf`` sentinels pass through unchanged.
 
     ``sweep`` is either ONE sweep dict (the legacy form — treated as the curve for its own declared
     ``candidate_type``, i.e. ``overlay`` for pre-surface files) or a mapping ``{candidate_type: sweep}``.
@@ -232,6 +268,10 @@ def stamp_substrate_power(panel_T: int, holdout_frac: float, sweep: "dict | Mapp
     measured curve yields ``(+inf, 'unmeasured_candidate_type')`` — refuse — rather than silently
     borrowing another type's curve. ``None`` keeps the historical single-curve behaviour."""
     hb = _power_holdout_bars(panel_T, holdout_frac)
+    bpy = float(bars_per_year)
+    if bpy <= 0.0:
+        raise ValueError(f"bars_per_year must be > 0, got {bars_per_year!r}")
+    scale = math.sqrt(bpy / CURVE_BARS_PER_YEAR)      # curve 252-bar-year ΔSR -> calendar ΔSR
     if not isinstance(sweep, Mapping) or "mde_sweep" in sweep:
         by_type: dict[str, dict] = {sweep_candidate_type(sweep): sweep}    # type: ignore[arg-type]
     else:
@@ -243,7 +283,8 @@ def stamp_substrate_power(panel_T: int, holdout_frac: float, sweep: "dict | Mapp
         # crucible-v5.0 was written to close. An empty type set is UNMEASURED.
         return SubstratePower(panel_T=int(panel_T), holdout_bars=hb, holdout_frac=float(holdout_frac),
                               implied_mde_delta_sr=math.inf, interp_mode="unmeasured_empty",
-                              calibration_sweep_hash=sweep_hash)
+                              calibration_sweep_hash=sweep_hash, bars_per_year=bpy,
+                              implied_mde_delta_sr_curve_units=math.inf)
     worst_mde, worst_mode = -math.inf, "unmeasured_empty"
     for ct in wanted:
         sw = by_type.get(ct)
@@ -253,9 +294,11 @@ def stamp_substrate_power(panel_T: int, holdout_frac: float, sweep: "dict | Mapp
         mde, mode = interp_mde(hb, sw)
         if mde > worst_mde:
             worst_mde, worst_mode = mde, (mode if len(wanted) == 1 else f"{mode}:{ct}")
+    # math.inf * scale is still inf, so the fail-closed sentinel survives the rescale untouched.
     return SubstratePower(panel_T=int(panel_T), holdout_bars=hb, holdout_frac=float(holdout_frac),
-                          implied_mde_delta_sr=float(worst_mde), interp_mode=worst_mode,
-                          calibration_sweep_hash=sweep_hash)
+                          implied_mde_delta_sr=float(worst_mde * scale), interp_mode=worst_mode,
+                          calibration_sweep_hash=sweep_hash, bars_per_year=bpy,
+                          implied_mde_delta_sr_curve_units=float(worst_mde))
 
 
 def panel_content_hash(panel: Panel) -> str:
@@ -384,6 +427,12 @@ class TickRecord:
     snapshot_hash: str
     n_preregistered: int = 0
     n_scored: int = 0
+    # v12.0: the DENOMINATOR of ``n_promising`` — candidates the BINDING holdout gate adjudicated.
+    # `n_scored` is the hall-of-fame size (capped at 10) and `n_preregistered` counts hypotheses
+    # written down, so neither answers "did the decisive test run?". `n_promising=0` with
+    # `n_holdout_tested=0` is VACUOUS; with `n_holdout_tested=8` it is a result. NULL on ticks written
+    # before this column existed — read a NULL as "unknown", never as zero.
+    n_holdout_tested: int | None = None
     n_promising: int = 0
     fdr_charged_total: float = 0.0
     budget_breached: bool = False
@@ -417,6 +466,7 @@ CREATE TABLE IF NOT EXISTS ticks (
     snapshot_hash     TEXT,
     n_preregistered   INTEGER,
     n_scored          INTEGER,
+    n_holdout_tested  INTEGER,
     n_promising       INTEGER,
     fdr_charged_total REAL,
     budget_breached   INTEGER,
@@ -460,7 +510,8 @@ class OrchestratorStore:
         _ensure_columns(self._conn, "ticks", [
             ("status", "TEXT"), ("error", "TEXT"),
             ("panel_T", "INTEGER"), ("holdout_bars", "INTEGER"),
-            ("implied_mde_delta_sr", "REAL"), ("power_interp_mode", "TEXT")])
+            ("implied_mde_delta_sr", "REAL"), ("power_interp_mode", "TEXT"),
+            ("n_holdout_tested", "INTEGER")])           # v12.0 (NULL on pre-v12 rows = unknown)
 
     def close(self) -> None:
         self._conn.close()
@@ -518,12 +569,13 @@ class OrchestratorStore:
     def record_tick(self, rec: TickRecord) -> None:
         self._conn.execute(
             "INSERT INTO ticks (tick_ts, substrate_id, dirty, mined, reason, snapshot_hash, "
-            "n_preregistered, n_scored, n_promising, fdr_charged_total, budget_breached, "
-            "burst_target, manifest_hash, status, error, panel_T, holdout_bars, "
+            "n_preregistered, n_scored, n_holdout_tested, n_promising, fdr_charged_total, "
+            "budget_breached, burst_target, manifest_hash, status, error, panel_T, holdout_bars, "
             "implied_mde_delta_sr, power_interp_mode) "
-            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
             (rec.tick_ts, rec.substrate_id, int(rec.dirty), int(rec.mined), rec.reason,
-             rec.snapshot_hash, rec.n_preregistered, rec.n_scored, rec.n_promising,
+             rec.snapshot_hash, rec.n_preregistered, rec.n_scored, rec.n_holdout_tested,
+             rec.n_promising,
              rec.fdr_charged_total, int(rec.budget_breached), rec.burst_target, rec.manifest_hash,
              rec.status, rec.error, rec.panel_T, rec.holdout_bars, rec.implied_mde_delta_sr,
              rec.power_interp_mode))

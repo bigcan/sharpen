@@ -668,5 +668,175 @@ def taiwan_base_sleeves(
     return {"tsmom": tsmom_net}
 
 
+# --------------------------------------------------------------------------- #
+# Intraday base book — 12-instrument Dukascopy hourly TSMOM (S553-cont-151)
+# --------------------------------------------------------------------------- #
+# The intraday analog of :func:`taiwan_base_sleeves`: one TSMOM sleeve, no carry leg (there is no
+# intraday rates-carry construction). Unlike Taiwan's, the base book trades the PANEL'S OWN
+# instruments — FX/metals/energy hourly bars are the tradable universe AND the mining cross-section —
+# so it routes through :func:`tsmom_sleeve_returns` rather than fetching a separate universe.
+#
+# CLOCK TRANSLATION (the part that is a decision, not a transcription). The validated daily constants
+# are lookbacks (63, 126, 252) / skip 5 / vol_window 63 TRADING DAYS against a hold of 21 days —
+# lookback:hold ratios of 3 / 6 / 12. Two translations were available and they are not equivalent:
+#
+#   (a) preserve CALENDAR horizon — 63 trading days ~ 1,426 hourly bars, hold ~475 bars;
+#   (b) preserve the BAR COUNTS and hence the lookback:hold RATIOS, on the hourly clock.
+#
+# (b) is used, and the reason is the power stamp rather than taste. The cross-sectional calibration
+# curve the guard interpolates was measured at ``hold_horizon: 21`` (see the sweep JSON's own
+# metadata). A substrate that mines at hold 475 while being stamped from a hold-21 curve is judged by
+# a curve measured on a different gate — the same "similar name, different object" error class that
+# produced the deep-grid correction, and it fails OPEN. Holding 21 BARS keeps the substrate on the
+# clock its own power stamp was measured on. The consequence is stated plainly: this is a ~1-day-hold
+# intraday trend book (21 hourly bars), NOT the monthly TSMOM whose net SR 0.601 earned the GO, so it
+# carries none of that falsification's authority and is a BASELINE here, never a validated sleeve.
+_INTRADAY_ANN_DEFAULT: float = 5694.0     # measured bars/calendar-year on the 12-instrument panel
+
+
+def intraday_tsmom_sleeve_returns(
+    panel: Panel,
+    *,
+    hold_horizon: int,
+    cost_bps: float,
+    periods_per_year: float = _INTRADAY_ANN_DEFAULT,
+    verify_causal: bool = False,
+    with_components: bool = False,
+) -> "np.ndarray | SleeveComponents":
+    """TSMOM on the hourly panel's own instruments, booked with the shared bar-marked loop.
+
+    Identical construction to :func:`tsmom_sleeve_returns` — the SAME
+    :func:`cross_asset_signals.compute` (multi-look-back mean-sign x causal vol-scale, leverage-
+    capped) and the SAME ``_book_from_target_weights`` basis — with the bar counts kept and the
+    annualization moved onto the substrate's clock. ``periods_per_year`` reaches ``compute`` as its
+    ``ann`` argument, which sets ONLY the realized-vol annualization feeding the vol-scale; leaving it
+    at 252 on an hourly panel would understate vol by √22.6 and hand every name a ~4.75x oversized
+    weight, silently clipped at ``lev_cap`` — i.e. a constant-max-leverage book, not a vol-scaled one.
+
+    ``verify_causal`` runs the momentum library's own future-bar + current-bar look-ahead tripwire on
+    the real-data path (GP2-04, LEAK-2).
+    """
+    close_df = pd.DataFrame(
+        panel.close, index=pd.DatetimeIndex(panel.dates), columns=list(panel.tickers)
+    )
+    if verify_causal:
+        cas.assert_causal(close_df)
+    long = cas.compute(close_df, ann=int(round(periods_per_year)))
+    w_wide = (
+        long.pivot(index="date", columns="ticker", values="baseline_weight")
+        .reindex(index=close_df.index, columns=close_df.columns)
+    )
+    return _book_from_target_weights(
+        w_wide.to_numpy(dtype=np.float64), panel.forward_returns(1),
+        hold_horizon=hold_horizon, cost_bps=cost_bps, with_components=with_components,
+    )
+
+
+def intraday_base_sleeves(
+    panel: Panel,
+    *,
+    hold_horizon: int,
+    cost_bps: float,
+    periods_per_year: float = _INTRADAY_ANN_DEFAULT,
+    verify_causal: bool = True,
+    return_components: bool = False,
+) -> "dict[str, np.ndarray] | tuple[dict[str, np.ndarray], dict[str, SleeveComponents]]":
+    """``{"tsmom"}`` intraday base book aligned to ``panel.dates`` (the hourly substrate's book).
+
+    ``return_components`` (default off — byte-identical net dict) instead returns
+    ``(sleeves_net, sleeve_components)`` for the overlay-cost correction; see
+    :func:`production_base_sleeves`. ``verify_causal`` defaults ON, as on every real-data entry point.
+    """
+    tsmom = intraday_tsmom_sleeve_returns(
+        panel, hold_horizon=hold_horizon, cost_bps=cost_bps, periods_per_year=periods_per_year,
+        verify_causal=verify_causal, with_components=return_components)
+    tsmom_net = cast("SleeveComponents", tsmom).net if return_components else cast("np.ndarray", tsmom)
+    finite = int(np.isfinite(tsmom_net).sum())
+    log.info("intraday_base_sleeves: T=%d  finite_bars=%d  (hold=%d bars, cost_bps=%.4f, ann=%.0f)",
+             panel.T, finite, hold_horizon, cost_bps, periods_per_year)
+    if return_components:
+        return {"tsmom": tsmom_net}, {"tsmom": cast("SleeveComponents", tsmom)}
+    return {"tsmom": tsmom_net}
+
+
+def us_equity_base_sleeves(
+    panel: Panel,
+    *,
+    hold_horizon: int,
+    cost_bps: float,
+    etf_panel: "Panel | None" = None,
+    verify_causal: bool = True,
+    return_components: bool = False,
+) -> "dict[str, np.ndarray] | tuple[dict[str, np.ndarray], dict[str, SleeveComponents]]":
+    """``{"tsmom", "rates_carry"}`` — the VALIDATED ETF linear core, aligned onto the US-equity clock.
+
+    The comparator for the `us_equity` substrate is deliberately NOT computed on the equity panel.
+    Two reasons, and the second is a hard gate:
+
+      * ECONOMICS. The uplift question that matters is "does this equity signal add anything to the
+        book I would actually run?", and the only validated edge this project owns is cross-asset
+        ETF TSMOM at net SR ~0.60. Scoring marginal contribution against that is the real question.
+      * THE COMPARATOR MUST NOT BLEED. A base book losing to friction lets a ZERO-ALPHA candidate
+        clear the marginal-uplift gate purely by diluting the bleed — measured at a 15.3% null pass
+        rate against a nominal ~1% on the intraday substrate. The obvious equity-native base
+        (cross-sectional momentum) is a RECORDED NO-GO on liquid large caps, i.e. exactly such a
+        losing book. The ETF core is a winning one.
+
+    `hold_horizon` is the BASE book's own cadence (`generation.base_hold_horizon`), decoupled from
+    the candidate's — the 0.601/0.467 net-Sharpe anchors were earned at a monthly rebalance and
+    re-pricing them daily would destroy the comparator.
+
+    Sleeve streams are computed on the ETF panel and joined to `panel.dates` BY DATE (never
+    forward-filled into a bar the ETF book did not mark): a date the base book did not trade
+    contributes zero marked P&L, while `gross_exposure` carries forward because the position is
+    still held and the overlay's turnover must be charged at the book's true gross.
+    """
+    from finrl_pro_ds.data.cross_asset_panel_loader import load_cross_asset_panel
+
+    if etf_panel is None:
+        etf_panel = load_cross_asset_panel(
+            "2007-01-01", config_path=ROOT / "configs" / "cross_asset_momentum.yaml")
+
+    base, comps = cast(
+        "tuple[dict[str, np.ndarray], dict[str, SleeveComponents]]",
+        production_base_sleeves(etf_panel, hold_horizon=hold_horizon, cost_bps=cost_bps,
+                                verify_causal=verify_causal, return_components=True))
+
+    src_days = etf_panel.dates.astype("datetime64[D]")
+    dst_days = panel.dates.astype("datetime64[D]")
+    pos = np.searchsorted(src_days, dst_days)
+    hit = (pos < src_days.shape[0]) & (src_days[np.clip(pos, 0, src_days.shape[0] - 1)] == dst_days)
+    src_ix = np.clip(pos, 0, src_days.shape[0] - 1)
+
+    def _align(v: np.ndarray, *, carry: bool) -> np.ndarray:
+        out = np.where(hit, np.asarray(v, dtype=np.float64)[src_ix], 0.0)
+        if carry:
+            # last held gross before this bar; ffill over unmarked days, 0 before the book starts
+            prev = np.maximum.accumulate(np.where(hit, np.arange(hit.size), -1))
+            out = np.where(prev >= 0, out[np.clip(prev, 0, None)], 0.0)
+        return out
+
+    aligned_net: dict[str, np.ndarray] = {}
+    aligned_comps: dict[str, SleeveComponents] = {}
+    for k, c in comps.items():
+        net = _align(c.net, carry=False)
+        cost = _align(c.cost, carry=False)
+        aligned_net[k] = net
+        aligned_comps[k] = SleeveComponents(
+            net=net, gross=net + cost, cost=cost,
+            gross_exposure=_align(c.gross_exposure, carry=True))
+
+    log.info("us_equity_base_sleeves: %d/%d equity bars matched an ETF bar (%.2f%%); "
+             "sleeves=%s hold=%d cost_bps=%.6f",
+             int(hit.sum()), hit.size, 100.0 * hit.mean(), sorted(aligned_net), hold_horizon,
+             cost_bps)
+    if hit.mean() < 0.95:
+        log.warning("us_equity_base_sleeves: only %.1f%% of equity bars matched an ETF bar — the "
+                    "comparator is sparse on this clock", 100.0 * hit.mean())
+    if return_components:
+        return aligned_net, aligned_comps
+    return aligned_net
+
+
 # Path anchors kept for callers/tests that locate the gates/config relative to this module.
 ROOT = Path(__file__).resolve().parents[3]

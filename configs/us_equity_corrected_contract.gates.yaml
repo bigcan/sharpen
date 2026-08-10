@@ -1,3 +1,16 @@
+# US-EQUITY corrected-contract gates (S553-cont-152). Byte-identical to
+# `crucible_corrected_contract.gates.yaml` EXCEPT `guards.max_market_beta`, which is turned on at the
+# 0.30 the shipped file itself suggests. Kept as a SEPARATE FILE so the shipped gates keep their bytes
+# and their hash (ADR-1/CRU-1) — the same separation `cross_asset_h1_signal_eval.gates.yaml` uses.
+# Select it with `crucible_orchestrator.py --corrected-config configs/us_equity_corrected_contract.gates.yaml`.
+#
+# WHY IT IS ON HERE AND NOWHERE ELSE. This substrate is a 300-name US equity cross-section whose
+# dominant factor IS the market: the return correlation matrix's top eigenvalue carries the bulk of
+# total variance, so a candidate that quietly accumulates net long exposure is the single most likely
+# way a false PROMISING gets produced here. On the ETF/FX substrates the leg stays null.
+# `market_returns=` is wired by `evolve._panel_market_returns` (equal-weight active universe), so BOTH
+# halves the shipped file requires are present — the leg is live, not decorative.
+#
 # §5 CORRECTED single-hypothesis contract — decision thresholds (audit 2026-07-14 §5).
 #
 # A PARALLEL discovery pathway (design: .agent/artifacts/corrected_contract_architecture.md). It is NOT
@@ -73,7 +86,7 @@ guards:                  # the cheap guards retained from the funnel (NOT the F1
   # Suggested value when enabled: 0.30 (catches the +0.55 case with room for a genuinely
   # market-neutral book to breathe). Requires the caller to pass `market_returns=`; without it the
   # beta is NaN and the leg stays inert, so enabling this alone is not sufficient — wire both.
-  max_market_beta: null
+  max_market_beta: 0.30
 
 online_fdr:              # binding LORD++ account (audit F13: make it actually threshold, currently gates nothing)
   alpha: 0.10            # per-substrate target FDR

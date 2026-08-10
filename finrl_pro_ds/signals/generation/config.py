@@ -19,11 +19,48 @@ from .fitness import FitnessConfig
 _WIRED_SUBSTRATES: dict[str, frozenset[str]] = {
     "cross_asset": frozenset({"tsmom", "rates_carry"}),
     "taiwan": frozenset({"tsmom"}),
+    # S553-cont-152: top-300 PIT S&P 500 names, daily (crucible/data/us_equity_panel.py). The book is
+    # the SAME validated {tsmom, rates_carry} ETF core as `cross_asset`, computed on the ETF panel and
+    # joined onto the equity clock by `us_equity_base_sleeves` — deliberately NOT an equity-native
+    # book, because the obvious one (large-cap cross-sectional momentum) is a recorded NO-GO and a
+    # losing comparator is what lets zero-alpha candidates clear the uplift gate by dilution.
+    "us_equity": frozenset({"tsmom", "rates_carry"}),
+    # S553-cont-151: the 12-instrument Dukascopy hourly panel + its own TSMOM book
+    # (intraday_base_sleeves). There is no intraday rates-carry sleeve, so the book is TSMOM-only —
+    # same shape as the Taiwan substrate.
+    "intraday": frozenset({"tsmom"}),
+    # S553-cont-151: the DERIVED-optimal substrate — 9 FX majors, 2008+, union grid + active mask.
+    # Chosen by solving the detection/profitability inequality rather than by search; see
+    # crucible/data/intraday_panel.py::build_fx_majors_panel. Same TSMOM-only book.
+    "intraday_fx": frozenset({"tsmom"}),
 }
 
 _GEN_DEFAULTS: dict = {
     "enabled": False, "panel": "cross_asset", "base_sleeves": ["tsmom", "rates_carry"],
-    "hold_horizon": 21, "pop_size": 200, "n_generations": 40, "rng_seed": 7,
+    # BARS PER YEAR on this substrate's clock — the Sharpe annualization factor (S553-cont-151).
+    # 252 (daily) is the historical hardcode and stays the default, so every existing config and
+    # every fixture is byte-identical. It is a CONFIG key because it is a property of the SUBSTRATE's
+    # bar clock, not a threshold: an hourly panel puts 5,694 bars in a calendar year, and reporting
+    # its Sharpes at 252/yr shrinks every annualized number by √(252/5694) = 0.21. That mis-scales
+    # BOTH the uplift gate (min_combination_uplift is an economic ΔSR floor, so at 252 on an hourly
+    # panel it silently demands 4.75x more than it says) and the power stamp's comparison against
+    # `plausible_delta_sr_max`, whose 0.3-0.5 justification is calendar-annualized. Measured, not
+    # assumed: scripts/research/crucible_frequency_invariance_probe.py.
+    "periods_per_year": 252.0,
+    "hold_horizon": 21,
+    # Rebalance cadence for the BASE book only; None => same as hold_horizon (every existing config,
+    # byte-identical). Decoupling exists because a base book is a COMPARATOR, and a comparator that
+    # bleeds friction hands the marginal-uplift gate a free pass: blending any lower-turnover stream
+    # into a losing book raises the combined Sharpe, so a candidate gets rewarded for trading LESS
+    # rather than for predicting. Measured on the intraday substrate
+    # (scripts/research/crucible_intraday_null_calibration.py): with the base at hold 21 bars
+    # (calendar SR -0.78, 30.6%/yr cost drag), ZERO-ALPHA nulls post a median marginal DSR of +0.367
+    # and clear the FULL corrected-contract gate 15.3% of the time against a ~1% nominal — a
+    # false-positive factory. The one-basis discipline is preserved: base and candidate are still
+    # marked on the same bars and charged the same cost_bps on their own turnover. Only the cadence
+    # differs, which is a property of each strategy, not of the accounting.
+    "base_hold_horizon": None,
+    "pop_size": 200, "n_generations": 40, "rng_seed": 7,
     "elite_frac": 0.30, "cost_bps": 0.0010, "ls_min_names": 6, "max_ast_nodes": 24,
     "turnover_soft_cap": 12.0, "lambda_turnover": 0.05, "lambda_complexity": 0.10,
     "min_combination_uplift": 0.10, "hlz_t_min": 3.0, "promising_dsr": 0.90,
@@ -50,6 +87,12 @@ def _validate(g: dict) -> None:
         raise ValueError("generation.max_base_corr must be in [0,1]")
     if not (0.0 <= float(g["frac_positive_min"]) <= 1.0):
         raise ValueError("generation.frac_positive_min must be in [0,1]")
+    if float(g["periods_per_year"]) <= 0.0:
+        raise ValueError("generation.periods_per_year must be > 0 (bars per year on the "
+                         "substrate's own bar clock; 252 for daily)")
+    if g["base_hold_horizon"] is not None and int(g["base_hold_horizon"]) < 1:
+        raise ValueError("generation.base_hold_horizon must be >= 1 bar (or null to track "
+                         "hold_horizon)")
     # GP8-02: the substrate keys are load-bearing — the runner builds the EXACT panel + base book a
     # substrate names, so a config naming an unwired panel/sleeve set is a silent no-op; fail fast.
     panel = str(g["panel"])
@@ -77,8 +120,10 @@ def load_generation_config(gates_path: str | Path) -> tuple[FitnessConfig, dict]
     fit = FitnessConfig(
         n_groups=int(g["cpcv_n_groups"]), k_test=int(g["cpcv_k_test"]),
         embargo=int(g["cpcv_embargo_days"]), purge_horizon=int(g["cpcv_purge_horizon"]),
-        periods_per_year=252.0,        # the book is DAILY-marked (held between rebalances);
-                                       # hold_horizon affects turnover only, not Sharpe annualization
+        # Bars per year on the substrate's clock (default 252 = the historical daily hardcode). The
+        # book is marked EVERY BAR (held between rebalances), so hold_horizon affects turnover only,
+        # never the annualization — the bar spacing does.
+        periods_per_year=float(g["periods_per_year"]),
         hlz_t_min=float(g["hlz_t_min"]), promising_dsr=float(g["promising_dsr"]),
         min_combination_uplift=float(g["min_combination_uplift"]),
         max_base_corr=float(g["max_base_corr"]),
@@ -190,4 +235,7 @@ def load_generation_meta(gates_path: str | Path) -> dict:
     g = {**_GEN_DEFAULTS, **dict(cfg.get("generation", {}))}
     _validate(g)
     return {"enabled": bool(g["enabled"]), "panel": str(g["panel"]),
-            "base_sleeves": [str(s) for s in g["base_sleeves"]]}
+            "base_sleeves": [str(s) for s in g["base_sleeves"]],
+            # None => the runner uses hold_horizon (unchanged for every pre-cont-151 config).
+            "base_hold_horizon": (None if g["base_hold_horizon"] is None
+                                  else int(g["base_hold_horizon"]))}

@@ -86,6 +86,9 @@ class SubstrateTickOutcome:
     snapshot_hash: str
     n_preregistered: int = 0
     n_scored: int = 0                 # candidates scored (mine hall-of-fame) — the budget spend axis
+    # v12.0: candidates the BINDING holdout gate adjudicated — the denominator of `n_promising`.
+    # None on a tick that did not mine. See TickRecord.n_holdout_tested.
+    n_holdout_tested: int | None = None
     n_promising: int = 0
     fdr_charged_total: float = 0.0
     fdr_num_tests: int = 0            # cumulative online-FDR tests on this substrate (post-tick)
@@ -336,15 +339,25 @@ def _process_substrate(
                   if enrolled else list(result.cards))
 
     n_scored = sum(len(r.hall_of_fame) for r in result.reports.values())
+    # v12.0: how many candidates the BINDING holdout gate actually adjudicated, summed over candidate
+    # types. This is the denominator of `n_promising` — see TickRecord.n_holdout_tested for why a
+    # zero-with-unknown-denominator has now cost two sessions.
+    n_holdout_tested = sum(r.n_holdout_tested for r in result.reports.values())
+    if result.reports and n_holdout_tested == 0:
+        log.warning("substrate %s: the holdout gate adjudicated ZERO candidates — n_promising=%d is "
+                    "VACUOUS (no test ran), not a negative result", sub.substrate_id,
+                    result.n_promising)
     record = TickRecord(
         tick_ts=tick_ts, substrate_id=sub.substrate_id, dirty=True, mined=True, reason=reason,
         snapshot_hash=snap, n_preregistered=n_fresh, n_scored=n_scored,
+        n_holdout_tested=n_holdout_tested,
         n_promising=result.n_promising, fdr_charged_total=fdr_total,
         budget_breached=False, burst_target=burst.target,
         manifest_hash=result.manifest.content_hash(), **_power_kwargs(prepared))
     outcome = SubstrateTickOutcome(
         substrate_id=sub.substrate_id, dirty=True, mined=True, reason=reason, snapshot_hash=snap,
-        n_preregistered=n_fresh, n_scored=n_scored, n_promising=result.n_promising,
+        n_preregistered=n_fresh, n_scored=n_scored, n_holdout_tested=n_holdout_tested,
+        n_promising=result.n_promising,
         fdr_charged_total=fdr_total, fdr_num_tests=fdr.num_tests, burst_target=burst.target,
         result=result, cards=tick_cards,
         n_cohort_promising=n_cohort_promising, cohort_cards=list(result.cohort_cards),
