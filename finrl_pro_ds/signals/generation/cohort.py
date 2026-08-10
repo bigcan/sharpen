@@ -71,6 +71,12 @@ class CohortConfig:
     # floor reuses promising_dsr/cohort_hlz_t_min, which pass 0/170 lifetime, so as a hard gate it
     # made the binding MC null unreachable — 2026-08-09 root-cause investigation, Finding 5).
     analytic_floor_advisory: bool = True
+    # When True the cohort pool admits CROSS-SECTIONAL pre-registrations as well as overlays
+    # (crucible-v12.1). Read by the caller that ASSEMBLES the pool (``crucible.agentic.loop``), not by
+    # any statistic in this module — admission, the MC null and the holdout guard consume ``(T,)``
+    # return streams and are indifferent to how a stream was produced. See
+    # ``cohort_eval.assemble_candidate_pool`` for why the pairing was wrong before.
+    include_cross_sectional: bool = False
 
 
 @dataclass(frozen=True, slots=True)

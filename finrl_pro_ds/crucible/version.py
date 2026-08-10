@@ -677,7 +677,44 @@ from pathlib import Path
 # when it is zero. Two consecutive sessions lost real time to a `promising=0` whose denominator was
 # unreadable — the cont-152 dedup livelock, then this pre-filter. The count now travels with the
 # verdict instead of living in a log line.
-CRUCIBLE_VERSION = "crucible-v12.0"
+# v12.1 = THE COHORT GATE ADMITS CROSS-SECTIONAL CANDIDATES. MINOR. Through v12.0
+# `agentic/loop.py` assembled the cohort pool with a hard `candidate_type == "overlay"` filter
+# (ADR-3 option (A); (C) was deferred as "future extension, only if measured to help"). The 2026-08-09
+# root-cause work measured it, and the pairing was backwards on both sides:
+#   * CROSS-SECTIONAL candidates carry the panel's breadth (n_eff 42.1 on us_equity) and so hold the
+#     large per-member IR — the δ in `IR_cohort = δ·√K·hit_rate` — but were adjudicated ONLY by the
+#     per-candidate corrected contract, whose measured power is ~0% for any plausible alpha (IR 1.18
+#     needed for a coin flip on the deepest substrate; max `corrected_t` ever recorded = +1.644 vs
+#     t_min 2.33, across 559 ledger rows and 6 substrates).
+#   * OVERLAYS are one scalar per day and structurally correlated with the base book they tilt, so
+#     their δ is small by construction — and they were the ONLY input the selection-aware MC null (the
+#     one gate with measured power: 25% @ IR 0.30, 50% @ IR 0.50 at a 15% hit rate) ever saw. Both
+#     cohort verdicts ever rendered sat on the null median (p=0.5385 / p=0.5934).
+# High-information hypotheses went to the powerless gate; low-information hypotheses went to the
+# powerful one. This bump crosses them: `cohort_eval.assemble_candidate_pool` dispatches per member on
+# `candidate_type` (`_candidate_returns` for cross-sectional, `_overlay_returns` for overlay — each
+# member's OWN funnel scoring path, so the cohort scores exactly the stream the per-candidate gate
+# did), and `loop.py` admits cross-sectional pre-registrations when
+# `cohort.include_cross_sectional` is set (SHIPPED true in configs/crucible_cohort.gates.yaml,
+# code default False so an absent key reproduces the pre-v12.1 pool).
+#
+# MINOR, not MAJOR: NO statistic and NO threshold changed. Admission, the MC null and the embargoed
+# holdout guard consume `(T,)` return streams and never inspect how a stream was produced; the null's
+# calibration is a property of the stationary bootstrap, not of the pool's provenance. The deflation N
+# (`n_candidates_seen`) grows with the pool, which makes the analytic benchmark STRICTER. ADR-4 still
+# charges ONE LORD++ test per cohort EVALUATED, not per member — no extra multiplicity is spent.
+#
+# NOTE what this does NOT claim. The cohort statistic is still T observations of a book ΔSR; a
+# candidate's T×N panel buys a cleaner per-day stream (larger δ), not more rows for the null. And
+# `IR_cohort = δ·√K·hit_rate` is LINEAR in hit rate, so this change raises δ and K but leaves the
+# hypothesis bank as the binding constraint.
+#
+# CRU-1: no recorded verdict moves. Two cohort cards exist (both LOGGED, both overlay-only pools);
+# `pool_content_hash` folds `candidate_type` ONLY for non-overlay members, so an all-overlay pool
+# hashes and seeds byte-identically to pre-v12.1. The funnel gates_hash (519158fa1450) lives in a
+# different file and is untouched; `configs/crucible_cohort.gates.yaml`'s own hash changes, which is
+# exactly the visible-provenance mechanism the two-file split (ADR-1) exists for.
+CRUCIBLE_VERSION = "crucible-v12.1"
 
 # The baseline (pre-gate-repair) system, preserved as a git tag for reproducibility comparisons.
 CRUCIBLE_BASELINE_VERSION = "crucible-v1.0"

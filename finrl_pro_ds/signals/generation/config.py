@@ -156,6 +156,10 @@ _COHORT_DEFAULTS: dict = {
     "mc_n_replicates": 1000,        # B — binding gate wants ≥1000 (Doc 2 §3.3); 200 for dev
     "mc_block_length": 21,          # ℓ pinned (Politis–White fallback; ℓ-sweep test guards it)
     "analytic_floor_advisory": True,  # analytic SR*_cohort floor records but does not gate (2026-08-09)
+    # v12.1 — admit CROSS-SECTIONAL pre-registrations into the cohort pool alongside overlays. FALSE
+    # here (so an absent key reproduces the pre-v12.1 overlay-only pool byte-for-byte); the shipped
+    # configs/crucible_cohort.gates.yaml sets it TRUE. See that file for the rationale + blast radius.
+    "include_cross_sectional": False,
 }
 
 
@@ -216,7 +220,8 @@ def load_cohort_config(
         cohort_hlz_t_min=float(g["hlz_t_min"]),
         min_book_uplift=float(g["min_combination_uplift"]),
         combiner_redundancy_strength=float(c["combiner_redundancy_strength"]),
-        analytic_floor_advisory=bool(c["analytic_floor_advisory"]))
+        analytic_floor_advisory=bool(c["analytic_floor_advisory"]),
+        include_cross_sectional=bool(c["include_cross_sectional"]))
     mc_kwargs = dict(
         enabled=bool(c["enabled"]), n_reps=int(c["mc_n_replicates"]),
         alpha_cohort=float(c["alpha_cohort"]), block_length=int(c["mc_block_length"]))

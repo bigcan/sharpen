@@ -91,7 +91,16 @@ def test_versions_are_distinct_and_tagged_form() -> None:
     # `promising=0` was vacuous while eight tests were charged. CRU-1 verified by re-scoring all eight
     # through the shipped holdout gate — 0/8 pass (best t 0.44 vs t_min 2.33), so no recorded verdict
     # moves. Ships `n_holdout_tested` (the denominator of `n_promising`) on the report and tick record.
-    assert CRUCIBLE_VERSION == "crucible-v12.0"
+    # v12.1 crosses the two halves that never met: the cohort pool admits CROSS-SECTIONAL candidates,
+    # not only overlays. High-information hypotheses (breadth n_eff 42.1, the large per-member δ) had
+    # been routed to the per-candidate gate measured at ~0% power, while the one gate with measured
+    # power (the selection-aware MC null) only ever saw one-scalar-per-day overlays structurally
+    # correlated with the base book they tilt. MINOR: no statistic, no threshold and no gate byte in
+    # the funnel file changed — admission / MC / holdout consume (T,) streams and are indifferent to
+    # how a stream was produced; the deflation N grows, which is strictly stricter; ADR-4 still charges
+    # ONE LORD++ test per cohort evaluated. CRU-1 holds — an all-overlay pool hashes and seeds
+    # byte-identically (pool_content_hash folds candidate_type only for non-overlay members).
+    assert CRUCIBLE_VERSION == "crucible-v12.1"
     assert CRUCIBLE_BASELINE_VERSION == "crucible-v1.0"
     assert CRUCIBLE_VERSION != CRUCIBLE_BASELINE_VERSION
 
