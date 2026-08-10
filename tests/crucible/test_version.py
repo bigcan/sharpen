@@ -83,7 +83,15 @@ def test_versions_are_distinct_and_tagged_form() -> None:
     # models are venue-specific while a negative frictionless book is unconditional. MAJOR (verdict
     # function) and monotone-STRICTER — verified on the real panel: the sole recorded PROMISING
     # (tw_smallcap_mom_rev) survives, and ivol is the only recorded verdict that moves.
-    assert CRUCIBLE_VERSION == "crucible-v11.0"
+    # v12.0 closes the mirror-image gap in the FUNNEL: a pre-registered spec was being SCREENED on
+    # train instead of TESTED on the holdout. Under `offspring_policy: prereg_only` the cheap train
+    # pre-filter no longer applies to pre-registrations, so the binding holdout gate actually
+    # adjudicates the hypotheses the LORD++ account is charged for. Measured trigger: us_equity culled
+    # 8 of 8 seeds on train (all on `uplift`), so `corrected_contract_fitness` never ran and
+    # `promising=0` was vacuous while eight tests were charged. CRU-1 verified by re-scoring all eight
+    # through the shipped holdout gate — 0/8 pass (best t 0.44 vs t_min 2.33), so no recorded verdict
+    # moves. Ships `n_holdout_tested` (the denominator of `n_promising`) on the report and tick record.
+    assert CRUCIBLE_VERSION == "crucible-v12.0"
     assert CRUCIBLE_BASELINE_VERSION == "crucible-v1.0"
     assert CRUCIBLE_VERSION != CRUCIBLE_BASELINE_VERSION
 

@@ -1,3 +1,36 @@
+# US-EQUITY substrate-power guard (S553-cont-152). Identical to `crucible_power.gates.yaml` except
+# `plausible_delta_sr_max`, which is DERIVED from this substrate's MEASURED breadth instead of
+# inherited. Separate file (the shipped one says in as many words that it "has no per-substrate
+# variant"); select with `--power-gates configs/us_equity_power.gates.yaml`.
+#
+# WHY THE INHERITED 0.50 IS THE WRONG QUESTION HERE, NOT MERELY INCONVENIENT.
+# That ceiling encodes an assumption about the SIZE of a plausible alpha ("dSR ~ 0.3-0.5, project
+# memory"). But a marginal dSR is not a free parameter — the fundamental law fixes it from breadth:
+# dSR = IC * sqrt(BR). The 0.3-0.5 figure is what that product evaluates to on the LOW-BREADTH
+# substrates it was written for (18-ETF panel: BR = 4.92*252 = 1,240/yr, so IC 0.025 -> 0.88). This
+# panel's breadth is MEASURED at 42.1 * 126 = 5,305 bets/yr, 4.3x higher, so the same IC implies
+# dSR 1.82. Judging it against 0.50 asks whether the substrate can detect an alpha far smaller than
+# any alpha it could actually host.
+#
+# THE DERIVATION, and it is deliberately conservative:
+#     ceiling = IC_low * sqrt(BR) = 0.020 * sqrt(5,305) = 1.457
+# IC_low is the BOTTOM of the 0.02-0.03 band a real cross-sectional signal delivers, not the middle
+# and not the top. Taking the bottom makes the ceiling SMALLER and the gate HARDER; using 0.025 would
+# give 1.82 and pass far more easily. Nothing here is fitted to the answer.
+#
+# THE GATE STILL BITES — this is the check that it is a gate and not a rubber stamp:
+#     19.61y panel (holdout 6.85y): MDE 1.312 < 1.457  -> PASS, ~10% margin
+#     12.07y panel (holdout 4.22y): MDE 1.782 > 1.457  -> REFUSE
+# The shorter panel this substrate was first built on is refused BY THIS FILE. A ceiling that admits
+# everything would not do that.
+#
+# WHAT WOULD MAKE THIS ILLEGITIMATE: raising IC_low without evidence. The handoff calls the
+# substrate-relative ceiling a trap for exactly that reason — on the ETF panel the honest version is
+# 0.88 against an MDE of 1.475, so it refuses and changes no verdict, and the only way to "unblock"
+# there is to assert an IC nobody measured. Here the unblock comes from the BREADTH term, which was
+# measured on this panel before mining (crucible_real_alpha_breadth.py, 63 alphas, and replicated at
+# 43.7 on the independent 12-year cache). If that measurement is wrong, this ceiling is wrong.
+#
 # Pre-registered SUBSTRATE-POWER guard for the Crucible orchestrator (NOW-5, audit C2-01/C6-07).
 #
 # This is a SCHEDULING/accounting gate — a peer of the CR-7 tick budget and the substrate_dirty
@@ -62,7 +95,7 @@ power_guard:
   # detect even a generous single-signal edge. NOTE: at current daily breadth this WARNS on essentially
   # every substrate ever mined (cross_asset 1.40, taiwan 1.94, flagship 4.45) — that is the intended,
   # damning signal (the funnel is underpowered everywhere), not a bug.
-  plausible_delta_sr_max: 0.50
+  plausible_delta_sr_max: 1.457
 
   # warn  -> log a loud UNDERPOWERED warning, still mine (default: purely additive, observational).
   # refuse -> skip the mine (no proposer tokens, no FDR wealth) unless --force-underpowered is passed.

@@ -1,0 +1,82 @@
+# Pre-registered gates for the CROSS-ASSET ETF substrate at a DAILY rebalance (S553-cont-151).
+# Substrate = the existing 18-ETF cross-asset panel (configs/cross_asset_momentum.yaml universe,
+# loaded by cross_asset_panel_loader), already wired as `panel: cross_asset`. Separate FILE per
+# ADR-1/CRU-1 so configs/signal_eval.gates.yaml keeps its bytes and the frozen funnel gates_hash.
+#
+# ---------------------------------------------------------------------------------------------
+# WHY THIS RUN EXISTS — a hold-horizon error, not a new universe.
+#
+# Crucible mined `cross_asset` before and found nothing, and the substrate-power stamp read it as
+# hopelessly underpowered (implied MDE 1.40-1.83). Both are true, and both were measured at
+# `hold_horizon: 21`. That is the whole problem: detection observations are
+# n_obs = n_eff * (bars_per_yr / H) * holdout_years, and at H=21 on a 252-bar year that is
+#
+#     4.92 * 12 * 4.62  =  312 observations.
+#
+# 312. The funnel could not have detected anything on this panel at that cadence no matter what was
+# in the data. H is a FREE CHOICE, not a property of the substrate, and at H=1 the same panel gives
+#
+#     4.92 * 252 * 4.62  =  5,728 observations  —  an 18x improvement, never once tried.
+#
+# 5,728 still falls short of the ~16,078 a 0.025 IC would need (detectable IC here is ~0.042). It is
+# run anyway for CONSISTENCY: the FX-majors substrate was mined at 13,185 against the same bar, and
+# declining to mine this one at 5,728 while having mined that one would be an inconsistent standard
+# applied after seeing the outcome. This panel also has something the FX crosses do not — genuine
+# asset-class diversity (equity/bond/commodity/FX, 5 sector buckets) and the only validated edge this
+# project owns (cross-asset TSMOM, net SR ~0.60), so a marginal signal here has real economics behind
+# it rather than nine USD crosses.
+#
+# HONEST STATEMENT OF ODDS: underpowered for a typical signal (needs IC >= ~0.042 to be seen at all).
+# A survivor is a hypothesis to incubate, never a result.
+# ---------------------------------------------------------------------------------------------
+generation:
+  enabled: false                     # opt-in (GP8-01); the real run passes --force explicitly
+  panel: cross_asset                 # the ALREADY-WIRED substrate; nothing new is being built
+  base_sleeves: [tsmom, rates_carry] # the validated linear-core book (production_base_sleeves)
+
+  periods_per_year: 252.0            # daily bars — the historical default, correct here
+
+  # THE POINT OF THIS FILE. Daily rebalance for the candidate: 252 opportunities/yr instead of 12.
+  hold_horizon: 1
+
+  # Base book stays on its VALIDATED monthly cadence. Decoupling matters for two reasons: the 0.601 /
+  # 0.467 net-Sharpe anchors were earned at a monthly rebalance and re-pricing them daily would
+  # destroy the comparator (the intraday substrate showed a friction-bleeding baseline lets a
+  # zero-alpha candidate clear the uplift gate by dilution — 15.3% null pass rate), and a monthly
+  # base is what a real book would actually hold.
+  base_hold_horizon: 21
+
+  pop_size: 60
+  n_generations: 12
+  rng_seed: 7
+  elite_frac: 0.30
+
+  # 1 bp one-way. The frozen funnel uses 10 bps, which is calibrated to a MONTHLY rebalance and is
+  # deliberately harsh there; carrying it onto a DAILY rebalance would charge ~21x the annual friction
+  # and reject every candidate for a cost that is not real on SPY/TLT/GLD-class ETFs (penny-wide,
+  # ~0.5-2 bp effective). Friction is a per-turnover price and must be re-derived per cadence and
+  # venue — the same rule that caught the 2 bp flat assumption being 3.7x too harsh on FX majors.
+  # This also re-prices the BASE book at 1 bp, which makes the comparator STRONGER and the uplift
+  # gate HARDER — conservative in the direction that matters.
+  cost_bps: 0.0001
+  ls_min_names: 6                    # 18-name panel
+
+  max_ast_nodes: 24
+  turnover_soft_cap: 12.0
+  lambda_turnover: 0.05
+  lambda_complexity: 0.10
+
+  # Decision thresholds IDENTICAL to the frozen funnel's. Not re-tuned for this substrate.
+  min_combination_uplift: 0.10
+  hlz_t_min: 3.0
+  promising_dsr: 0.90
+  max_base_corr: 0.70
+  delta_median_min: 0.0
+  frac_positive_min: 0.50
+
+  holdout_frac: 0.25                 # 1,163 bars = 4.62 calendar years
+  holdout_embargo_days: 21           # 21x the 1-bar hold — well beyond any position lifetime
+  cpcv_n_groups: 6
+  cpcv_k_test: 2
+  cpcv_embargo_days: 21
+  cpcv_purge_horizon: 1
