@@ -205,6 +205,71 @@ def test_prereg_only_blocks_offspring_promotion(calib, corr):
         "offspring_policy='all' admitted no offspring — the policy switch is not wired")
 
 
+def test_prereg_seed_is_tested_not_screened_by_the_train_prefilter(calib, corr):
+    """crucible-v12.0. A PRE-REGISTERED spec that FAILS the cheap train pre-filter must still reach the
+    binding holdout gate, and must be rejected THERE if it deserves rejection.
+
+    This is the regression for the S553-cont-153 defect: on `us_equity` the pre-filter culled 8 of 8
+    pre-registered seeds on train (all on the `uplift` leg), so `train_passers` was empty, the holdout
+    loop never iterated, and the tick reported `promising=0` having run no test at all — while charging
+    eight LORD++ tests. The fixture reproduces the shape exactly: on the NULL substrate the surviving
+    seed fails the train pre-filter, so pre-v12.0 it was invisible to the holdout.
+
+    Note what the test also pins: reaching the holdout is not the same as passing it. The null seed is
+    adjudicated and REFUSED (its JKM z is nowhere near `t_min`), so removing the train screen buys
+    interpretability, not leniency — `test_null_substrate_yields_zero_promising_under_both_contracts`
+    covers the same ground from the verdict side."""
+    assert corr.offspring_policy == "prereg_only", "the shipped default must be the safe one"
+    rep = _run(calib, _NULL_BETA, contract=CONTRACT_CORRECTED, corrected=corr)
+
+    assert rep.holdout_validation, (
+        "no pre-registered seed reached the holdout gate — v12.0 is reverted, or every seed is "
+        "infeasible on this fixture (check the `NOT tested` warnings before trusting this failure)")
+    hof = {c.formula: c for c in rep.hall_of_fame}
+    screened_out = [hv for hv in rep.holdout_validation
+                    if (c := hof.get(hv["formula"])) is not None and c.result is not None
+                    and not _passes_cheap_prefilter(c.result, corr)]
+    assert screened_out, (
+        "fixture drift: every seed that reached the holdout ALSO passed the train pre-filter, so this "
+        "test cannot distinguish v12.0 from the pre-v12.0 path — re-derive the fixture")
+    for hv in screened_out:
+        assert hv["holdout_passes"] is False, (
+            "a seed the train screen would have culled was promoted — v12.0 removes a SCREEN, it must "
+            "not weaken the holdout decision")
+        assert hv["contract"] == CONTRACT_CORRECTED
+
+
+def test_n_holdout_tested_is_the_denominator_of_promising(calib, corr):
+    """crucible-v12.0 reporting half. `n_promising == 0` is only evidence if the binding gate actually
+    adjudicated something, so the count travels WITH the report rather than in a log line. It must
+    equal the number of holdout adjudications on every path, planted or null."""
+    for beta in (_NULL_BETA, _PLANTED_BETA):
+        rep = _run(calib, beta, contract=CONTRACT_CORRECTED, corrected=corr)
+        assert rep.n_holdout_tested == len(rep.holdout_validation), (
+            f"beta={beta}: n_holdout_tested {rep.n_holdout_tested} disagrees with the "
+            f"{len(rep.holdout_validation)} holdout records it is supposed to count")
+        assert rep.n_holdout_tested >= len(rep.promising), (
+            "more PROMISING than candidates adjudicated — impossible unless the count is wrong")
+
+
+def test_offspring_policy_all_still_applies_the_train_prefilter(calib, corr):
+    """v12.0 is scoped to `prereg_only`. Under `all` the eligible set is the whole search, where the
+    cheap pre-filter is a COMPUTE bound rather than a screen on pre-registrations — so it must still
+    bind, or an unbounded GP population walks into the holdout stage."""
+    from dataclasses import replace as dc_replace
+
+    loose = _run(calib, _PLANTED_BETA, contract=CONTRACT_CORRECTED,
+                 corrected=dc_replace(corr, offspring_policy="all"))
+    hof = {c.formula: c for c in loose.hall_of_fame}
+    for hv in loose.holdout_validation:
+        c = hof.get(hv["formula"])
+        if c is None or c.result is None:      # outside the (capped) hall-of-fame sample
+            continue
+        assert _passes_cheap_prefilter(c.result, corr), (
+            f"{hv['formula']!r} reached the holdout under offspring_policy='all' without passing the "
+            "cheap train pre-filter — the v12.0 bypass leaked out of prereg_only")
+
+
 def test_offspring_policy_value_is_validated():
     import yaml
 

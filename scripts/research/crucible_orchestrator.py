@@ -215,6 +215,48 @@ def _build_substrate(args, cfg, ek, meta, sweep, sweep_hash) -> tuple[Substrate,
             # F14: proxy sleeves are unit-gross cost-free return streams → the overlay-cost
             # correction is an exact no-op (byte-identical synthetic/reproduce path).
             base_components = {k: unit_components(v) for k, v in base.items()}
+        elif meta["panel"] == "us_equity":
+            # S553-cont-152: top-300 PIT S&P 500 names, daily — the first substrate whose MEASURED
+            # realized breadth (n_eff 21.5 at H=1 / 43.7 at H=2, crucible_real_alpha_breadth.py)
+            # clears its own detection floor. The base book is deliberately the ETF linear core, not
+            # an equity-native one: see us_equity_base_sleeves for why a losing comparator is the
+            # failure mode this substrate is most exposed to.
+            from finrl_pro_ds.crucible.data.us_equity_panel import build_us_equity_panel
+            from finrl_pro_ds.signals.generation.base_sleeves import us_equity_base_sleeves
+            panel = build_us_equity_panel()
+            base_hold = meta.get("base_hold_horizon") or ek["hold_horizon"]
+            base, base_components = us_equity_base_sleeves(
+                panel, hold_horizon=int(base_hold), cost_bps=ek["cost_bps"],
+                return_components=True)
+        elif meta["panel"] == "intraday_fx":
+            # cont-151 derived-optimal substrate. Same shape as the `intraday` branch below (no
+            # alt-data bridge — every connector publishes daily-or-slower, which on an hourly clock
+            # is a step function, not a signal), on the FX-majors union-grid panel.
+            from finrl_pro_ds.crucible.data.intraday_panel import build_fx_majors_panel
+            from finrl_pro_ds.signals.generation.base_sleeves import intraday_base_sleeves
+            panel = build_fx_majors_panel()
+            base_hold = meta.get("base_hold_horizon") or ek["hold_horizon"]
+            base, base_components = intraday_base_sleeves(
+                panel, hold_horizon=int(base_hold), cost_bps=ek["cost_bps"],
+                periods_per_year=float(cfg.periods_per_year), return_components=True)
+        elif meta["panel"] == "intraday":
+            # S553-cont-151: the 12-instrument Dukascopy 1h panel. No alt-data bridge — every
+            # connector in the catalog publishes on a DAILY-or-slower calendar (COT weekly, FRED
+            # monthly), so bridging one onto an hourly clock would hold a single value flat across
+            # ~5,694 bars a year and hand the overlay proposer a step function, not a signal. The
+            # cross-sectional path over the 12 instruments is the whole mining surface here.
+            from finrl_pro_ds.crucible.data.intraday_panel import build_intraday_panel
+            from finrl_pro_ds.signals.generation.base_sleeves import intraday_base_sleeves
+            panel = build_intraday_panel()
+            # The base book rebalances on its OWN cadence (generation.base_hold_horizon). At the
+            # candidate's 21-bar hold this book bleeds 30.6%/yr in friction to a calendar SR of
+            # -0.78, and a losing comparator lets a zero-alpha candidate clear the marginal-uplift
+            # gate purely by diluting the bleed (measured null pass rate 15.3% vs ~1% nominal —
+            # crucible_intraday_null_calibration.py). See config.py's base_hold_horizon note.
+            base_hold = meta.get("base_hold_horizon") or ek["hold_horizon"]
+            base, base_components = intraday_base_sleeves(
+                panel, hold_horizon=int(base_hold), cost_bps=ek["cost_bps"],
+                periods_per_year=float(cfg.periods_per_year), return_components=True)
         elif meta["panel"] == "taiwan":
             import dataclasses
 
@@ -298,8 +340,12 @@ def _build_substrate(args, cfg, ek, meta, sweep, sweep_hash) -> tuple[Substrate,
         # V4: a tick mines BOTH candidate types, whose curves differ, so the stamp is taken across both
         # and reports the WORST. `sweep` is now {candidate_type: sweep}; a type with no measured curve
         # yields +inf -> refuse rather than borrowing the other's.
+        # cont-151: the curve is in ΔSR per 252-bar year, so the stamp is rescaled onto the
+        # substrate's own bar clock (cfg.periods_per_year) before it is compared to the ceiling —
+        # 252 for every daily substrate, hence byte-identical there.
         power = (stamp_substrate_power(panel.T, float(ek.get("holdout_frac", 0.25)), sweep, sweep_hash,
-                                       candidate_types=tuple(sorted(sweep)))
+                                       candidate_types=tuple(sorted(sweep)),
+                                       bars_per_year=float(cfg.periods_per_year))
                  if sweep is not None else None)
         # NOW-6 (C2-07): fold the panel content-hash into snapshot_hash so a PRICE-bar arrival (or a
         # revision) flips the substrate dirty — the alt-data catalog hash alone missed the primary
