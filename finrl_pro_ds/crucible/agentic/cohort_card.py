@@ -3,7 +3,7 @@
 The cohort analogue of :class:`~finrl_pro_ds.crucible.agentic.card.DiscoveryCard`: it bundles the
 verbatim cohort verdict (CR-1 — the Triage Analyst may add narrative but never edits a number) a
 human needs before spending a Tier-2 deep audit. A cohort is a *select-and-combine of m-of-N weak
-overlays*, so its fields differ from a single-survivor card (members, the analytic ``SR*_cohort``, the
+candidates* (overlays and, since crucible-v12.1, cross-sectional rank-L/S sleeves), so its fields differ from a single-survivor card (members, the analytic ``SR*_cohort``, the
 MC-null p-value, the embargoed-holdout ΔSR) — hence a separate schema rather than overloading
 DiscoveryCard.
 
@@ -53,6 +53,11 @@ class CohortCard:
     holdout_delta_sr: float | None = None      # embargoed-holdout annualized ΔSR (Doc 2 §4)
     holdout_passes: bool | None = None
     mean_pairwise_corr: float | None = None    # realized diversification of the admitted set
+    # v12.1 pool composition — how many of the pool / of the admitted members were CROSS-SECTIONAL
+    # rank-L/S sleeves rather than base-book overlays. 0/0 == the pre-v12.1 overlay-only shape. A
+    # Tier-2 reader needs this to know WHAT the MC null adjudicated, not just that it ran.
+    n_pool_cross_sectional: int | None = None
+    n_members_cross_sectional: int | None = None
 
     # lockbox (CR-8) — NOT wired for cohorts in v1 (ADR-7): a cohort card is never yet human-eligible
     incubation_status: str = INCUBATION_PENDING
@@ -116,4 +121,6 @@ def card_from_verdict(
         mc_n_valid_reps=verdict.mc_n_valid_reps, mc_block_length=verdict.mc_block_length,
         passes_mc=verdict.passes_mc, holdout_delta_sr=verdict.holdout_delta_sr,
         holdout_passes=verdict.holdout_passes, mean_pairwise_corr=verdict.mean_pairwise_corr,
+        n_pool_cross_sectional=verdict.n_pool_cross_sectional,
+        n_members_cross_sectional=verdict.n_members_cross_sectional,
         agent_narrative=agent_narrative)
