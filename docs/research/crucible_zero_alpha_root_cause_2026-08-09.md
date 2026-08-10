@@ -471,6 +471,54 @@ project ever recorded was found. That is substrate wiring, not a config flip.
 
 ---
 
+## 5e. ⭐ First cohort verdict ever rendered — 2026-08-10
+
+§5d's blocker is closed. `bridge_altdata_feature_slots` is now called in the `us_equity` branch of
+`crucible_orchestrator.py` (mirroring `cross_asset`), with `start` taken from the **panel's own first
+bar** rather than `args.start` — which defaults to 2008-01-01, three years after this panel begins, so
+the survey's coverage check now runs against the calendar the slots are actually joined onto.
+
+**The scout accepts 24 of 28 discoverable series on this clock** — 6 FRED macro + 18 COT positioning
+across six asset classes (metal, energy, fx, ag, rate, equity). The only rejects are the 4 EDGAR
+series, which fail closed without a descriptive SEC User-Agent — an env var, not a data problem.
+
+> ⚠ This **retracts** the earlier "4 slots, 3 of them near-duplicate gold COT" estimate, which was
+> inferred from one `cross_asset` ledger. That ledger reflected `max_proposals: 32` truncation, not
+> the accept rate. Measure the survey, don't infer it from a downstream artifact.
+
+The run:
+
+| stage | result |
+|---|---|
+| slots bridged | **24** |
+| proposals accepted | 24/32 (the 8 CS seeds correctly deduped as already scored) |
+| tick | `dirty=True mined=True status=OK fdr_tests=33` (8 prior + 24 specs + 1 ADR-4 cohort test) |
+| cohort admitted | **10 members of 24 seen** at `max_pairwise_corr ≤ 0.35` |
+| analytic floor | **NOT cleared (dsr=0.013)** → ADVISORY, continued to the MC null |
+| **binding MC null** | **p = 0.5385** (α = 0.05) |
+| verdict | LOGGED |
+
+Lifetime cohort cards: **0 → 1**. This is the first cohort verdict in Crucible's history, and the
+first time its highest-power gate has adjudicated anything.
+
+⭐ **The advisory change is what made it possible, and the log proves it**: the analytic floor was NOT
+cleared (0.013 against a 0.90 bar), so under the pre-2026-08-10 behaviour `evaluate_cohort` would have
+hard-returned `LOGGED` and `mc_null_pvalue` would never have been called. §5b Finding 5 was a live
+defect, not a theoretical one.
+
+**Result: still zero alphas — but this one is a real negative.** p=0.5385 sits essentially on the null
+median measured in §5b (0.4985), i.e. macro/positioning *timing overlays* on a US equity book look
+like pure noise. That is a substantive finding about the hypotheses, not an artifact of a gate that
+could not fire. For the first time on this substrate, `promising=0` carries information.
+
+**Next (Tier 2):** 18 of the 24 slots are COT, three per market, and `comm_net` / `noncomm_net` /
+`comm_pct_oi` are near-mechanical transforms of one another (COT category nets sum to zero). That
+redundancy is what holds admission to 10 and caps the ensemble multiplier. Two fixes: set the SEC
+User-Agent to recover the 4 EDGAR series, and add an ingest-time redundancy filter so within-market
+duplicates cannot crowd out cross-market independence.
+
+---
+
 ## 6. What follows
 
 Ordered by measured effect. These are findings, not a mandate — every gate change below is an operator

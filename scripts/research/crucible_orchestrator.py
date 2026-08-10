@@ -221,9 +221,32 @@ def _build_substrate(args, cfg, ek, meta, sweep, sweep_hash) -> tuple[Substrate,
             # clears its own detection floor. The base book is deliberately the ETF linear core, not
             # an equity-native one: see us_equity_base_sleeves for why a losing comparator is the
             # failure mode this substrate is most exposed to.
+            import dataclasses
+
+            from finrl_pro_ds.crucible.data.altdata_bridge import bridge_altdata_feature_slots
             from finrl_pro_ds.crucible.data.us_equity_panel import build_us_equity_panel
             from finrl_pro_ds.signals.generation.base_sleeves import us_equity_base_sleeves
             panel = build_us_equity_panel()
+            # 2026-08-10: bridge the macro/positioning series into feature slots, exactly as the
+            # cross_asset branch does. WITHOUT this the panel carries ZERO feature slots, so the
+            # proposer emits no `candidate_type="overlay"` specs, and `loop.py`'s cohort hook returns
+            # ([], {}) before `evaluate_cohort` is ever called — i.e. the selection-aware cohort MC
+            # null (the only gate in the system with measured power against a plausible edge) could
+            # not run on the ONLY adequately-powered substrate. Measured: the scout accepts 24 of 28
+            # discoverable series on this 2007-2026 daily clock (6 FRED macro + 18 COT positioning);
+            # the 4 rejects are EDGAR, which fails closed without a descriptive SEC User-Agent.
+            # `start` is taken from the PANEL's own first bar, not args.start, so the survey's
+            # coverage check is run against the calendar the slots will actually be joined onto.
+            if not args.no_altdata_slots:
+                bar_start = np.datetime_as_string(panel.dates.min(), unit="D")
+                bar_end = args.end or np.datetime_as_string(panel.dates.max(), unit="D")
+                slots = bridge_altdata_feature_slots(
+                    bar_dates=panel.dates, start=bar_start, end=bar_end, catalog=catalog)
+                if slots:
+                    panel = dataclasses.replace(
+                        panel, feature_slots={**panel.feature_slots, **slots})
+                log.info("us_equity: bridged %d alt-data feature slots (overlay/cohort surface)",
+                         len(slots))
             base_hold = meta.get("base_hold_horizon") or ek["hold_horizon"]
             base, base_components = us_equity_base_sleeves(
                 panel, hold_horizon=int(base_hold), cost_bps=ek["cost_bps"],
