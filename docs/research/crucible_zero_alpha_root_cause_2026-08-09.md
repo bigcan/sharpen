@@ -319,9 +319,36 @@ mechanism is visible in the last column: the admission actually *finds* the plan
 then 6 of 6). Selection recovers most of what a low hit rate costs, precisely because the MC null lets
 you select without invalidating the test.
 
-Caveats: B=49 (the config wants ≥1000), 8 seeds so ±0.15-ish, and planted candidates are mutually
-independent Gaussians — real alphas correlate with each other and with the base, which will reduce
-effective K. Indicative, not precise.
+Caveat at the time: B=49 (the config wants ≥1000) and 8 seeds. **Both now discharged** — see below.
+
+#### Confirmed at FULL replicates (B=1000, 12 seeds, 2026-08-10)
+
+Re-run at the production `mc_n_replicates: 1000` with the same panel/pool/admission, 48 trials on 14
+workers (`mc_full.py`; raw rows in `mc_full_results.json`):
+
+| scenario | hit rate | **pass rate** | med p | real admitted | n |
+|---|---|---|---|---|---|
+| NULL (0 real) | 0.00 | **0.00** | 0.4985 | 0.0 | 12 |
+| 6/40 real, IR 0.30 | 0.15 | **0.25** | 0.1673 | 5.0 | 12 |
+| 6/40 real, IR 0.50 | 0.15 | **0.50** | 0.0425 | 6.0 | 12 |
+| 20/40 real, IR 0.30 | 0.50 | **0.75** | 0.0105 | 14.0 | 12 |
+
+⭐ **The pass rates reproduce the B=49 pilot exactly** (0.00 / 0.25 / 0.50 / 0.75 in both). The
+replicate count was not distorting the pilot, and the null's median p of **0.4985 ≈ 0.5** is precisely
+what a correctly-calibrated selection-aware null should return — an independent confirmation of the
+green in-repo size tests.
+
+Remaining caveat (unchanged): planted candidates are mutually independent Gaussians, so real alphas —
+which correlate with each other and with the base — will realize a lower effective K.
+
+#### ⚠ Operational finding: B=1000 is not affordable per tick
+
+The sweep cost **29,869 s of wall time on 14 parallel workers**; a *single* cohort evaluation ran
+**4,972–8,411 s** (1.4–2.3 h). Because `analytic_floor_advisory: true` removes the cheap analytic
+reject, every tick that forms a cohort now pays this in full. `mc_n_replicates: 1000` is therefore a
+campaign/audit setting, not a nightly-tick setting. The legitimate levers are lowering
+`mc_n_replicates` or setting `analytic_floor_advisory: false` for cheap mode — **not** silently
+re-gating on the floor, which is the defect this change removed.
 
 ### ⭐ Finding 5 — that gate is UNREACHABLE: a third instance of the project's signature defect
 
@@ -349,6 +376,53 @@ the gate it protects.*
 
 The cohort path was never dead. It was **never reachable.** Nothing has ever been measured through it,
 because `enabled: false` and, had it been enabled, the floor would have returned `LOGGED` first.
+
+---
+
+## 5c. The fix — the analytic floor is now ADVISORY (operator-authorised 2026-08-10)
+
+`cohort.analytic_floor_advisory` (new, **default `true`**) in `configs/crucible_cohort.gates.yaml`.
+When true, `evaluate_cohort_analytic`'s verdict is still computed and still recorded on the evidence
+card as `passes_analytic_floor` — it simply no longer short-circuits, so control reaches
+`mc_null_pvalue`. `false` restores the legacy path (kept reproducible, and it is the cheap-compute
+option since the MC null costs `O(B·(admission + 2·combiner))`).
+
+**Nothing was loosened.** The MC null and the embargoed holdout guard are byte-identical, and the
+three reused floors still load at their funnel values (`promising_dsr` 0.90, `cohort_hlz_t_min` 3.0,
+`min_book_uplift` 0.10 — verified after the change). What moved is *which* gate decides, not *how
+strictly* it decides.
+
+Verification:
+
+| check | result |
+|---|---|
+| `configs/signal_eval.gates.yaml` touched? | **no** — `git diff` empty |
+| funnel `gates_hash` (CRU-1 moat) | **`519158fa1450`** — byte-identical |
+| cohort cards / verdicts ever emitted (blast radius) | **0 / 0** across all 13 manifests carrying cohort keys |
+| cohort + signals + crucible suites | green (incl. the new both-ways regression test) |
+| ruff on all changed files | clean |
+
+The pre-existing test `test_evaluate_cohort_short_circuits_on_analytic_fail` **asserted the defect as
+a requirement** ("MC must not run when the analytic floor fails"). It is replaced by a pair that pins
+both behaviours: the legacy short-circuit under `advisory=False`, and — the regression that matters —
+`test_analytic_floor_is_ADVISORY_by_default_and_mc_still_runs`, which asserts the binding MC null is
+reachable on the shipped default. Worth noting as a general lesson: *a defect that a test protects
+will outlive every audit that reads only the diff.*
+
+**`enabled: true` (operator-authorised 2026-08-10).** The cohort path is now live: `loop.py:327` runs
+it on every tick whose overlay pool can form ≥ `min_cohort_size`, and ADR-4 charges one additional
+LORD++ test per evaluated cohort (deterministic-last, so per-candidate charge order is untouched). A
+cohort still caps at PROMISING; capital continues to require a Tier-2 deep lifecycle audit.
+
+⚠ **`max_cohort_size: 12` / `max_pairwise_corr: 0.35` remain at shipped values.** The K=30 / ρ≤0.10
+configuration the power numbers above were measured at is a threshold change that has **not** been
+authorised — so what is enabled today is the *weaker* setting (ensemble multiplier 1.57× vs 2.77×).
+Quote the measured power against the configuration it was measured at, not against the shipped one.
+
+One test had to change: `test_cohort_config_loads_from_separate_file` asserted `mc["enabled"] is
+False`. It now pins the new shipped state, and a new
+`test_cohort_enabled_and_advisory_remain_opt_out_able` pins the **mechanism** (both switches honoured
+when set off) rather than a value — the same brittleness that let the original defect hide.
 
 ---
 

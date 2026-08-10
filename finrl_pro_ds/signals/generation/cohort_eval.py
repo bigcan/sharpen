@@ -318,9 +318,17 @@ def evaluate_cohort(
         return None
     pch = pool_content_hash(overlay_formulas)
     if not ev.passes_analytic_floor:
-        logger.info("cohort: analytic floor NOT cleared (dsr=%.3f) — LOGGED, MC skipped",
+        if not ccfg.analytic_floor_advisory:
+            logger.info("cohort: analytic floor NOT cleared (dsr=%.3f) — LOGGED, MC skipped",
+                        ev.dsr_cohort_book)
+            return _verdict(ev, None, (float("nan"), False), pch, n_culled, "LOGGED")
+        # ADVISORY (default): record the miss and continue to the BINDING MC null. The floor reuses
+        # promising_dsr / cohort_hlz_t_min, which pass 0/170 across the lifetime record, so gating on
+        # it made the only high-power gate in the system unreachable — the third instance of "a cheap
+        # pre-filter stricter than the gate it protects" (2026-08-09 root-cause report §5b Finding 5).
+        # Nothing is loosened: the MC null and the embargoed holdout below are unchanged.
+        logger.info("cohort: analytic floor NOT cleared (dsr=%.3f) — ADVISORY, continuing to MC null",
                     ev.dsr_cohort_book)
-        return _verdict(ev, None, (float("nan"), False), pch, n_culled, "LOGGED")
 
     # 2. selection-aware MC null on survivors (Doc 2 §3) — the BINDING statistical gate.
     bl = mc_kwargs.get("block_length")
