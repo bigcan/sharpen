@@ -208,3 +208,71 @@ def test_bridged_slots_drive_altdata_overlay_proposals(tmp_path) -> None:
     overlay_terms = {t for p in overlays for t in ("fred:DGS10", "edgar:aapl_revenue") if t in p.formula}
     assert overlay_terms == {"fred:DGS10", "edgar:aapl_revenue"}
     catalog.close()
+
+
+# ------------------------------------------------------------------ redundancy filter (2026-08-10)
+
+def _slots_with_a_duplicate(t: int = 400) -> dict[str, np.ndarray]:
+    """Three independent random walks plus an exact near-duplicate of the first (a COT-style
+    mechanical transform: sign-flipped and rescaled, which is what comm_net vs noncomm_net is)."""
+    rng = np.random.default_rng(11)
+    a = np.cumsum(rng.normal(size=t))
+    b = np.cumsum(rng.normal(size=t))
+    c = np.cumsum(rng.normal(size=t))
+    return {"src:a": a, "src:a_mirror": -2.5 * a + 100.0, "src:b": b, "src:c": c}
+
+
+def test_redundancy_filter_drops_mechanical_duplicates_keeps_independents() -> None:
+    from finrl_pro_ds.crucible.data.altdata_bridge import _drop_redundant_slots
+
+    slots = _slots_with_a_duplicate()
+    kept = _drop_redundant_slots(slots, 0.90)
+    assert set(kept) == {"src:a", "src:b", "src:c"}, "the mirrored duplicate must be dropped"
+    # the survivor is the FIRST in insertion order — deterministic, so replays agree
+    assert list(kept) == ["src:a", "src:b", "src:c"]
+
+
+def test_redundancy_filter_is_off_by_default_and_noop_at_threshold_one() -> None:
+    """`None` must be byte-identical to the pre-filter behaviour (no recorded verdict can move)."""
+    from finrl_pro_ds.crucible.data.altdata_bridge import _drop_redundant_slots
+
+    slots = _slots_with_a_duplicate()
+    assert set(_drop_redundant_slots(slots, 1.0)) == set(slots), "|corr| > 1.0 is unreachable"
+
+
+def test_redundancy_filter_uses_first_differences_not_levels() -> None:
+    """Two INDEPENDENT random walks co-trend in levels but not in differences. A level-based rule
+    would over-reject them; the differenced rule must keep both (the measured motivation: level
+    median |corr| 0.156 vs 0.020 differenced on the real us_equity slots)."""
+    from finrl_pro_ds.crucible.data.altdata_bridge import _drop_redundant_slots
+
+    rng = np.random.default_rng(5)
+    t = 3000
+    # strong common drift => high LEVEL correlation, independent innovations => low DIFF correlation
+    x = np.cumsum(rng.normal(loc=0.5, scale=1.0, size=t))
+    y = np.cumsum(rng.normal(loc=0.5, scale=1.0, size=t))
+    lvl = abs(np.corrcoef(x, y)[0, 1])
+    dif = abs(np.corrcoef(np.diff(x), np.diff(y))[0, 1])
+    assert lvl > 0.9 and dif < 0.2, f"fixture invalid (level {lvl:.2f}, diff {dif:.2f})"
+    kept = _drop_redundant_slots({"src:x": x, "src:y": y}, 0.90)
+    assert set(kept) == {"src:x", "src:y"}, "differenced rule must not reject co-trending independents"
+
+
+def test_overlay_slots_are_round_robined_across_sources() -> None:
+    """Truncation at max_proposals must sample ACROSS sources, not exhaust the first connector.
+
+    Regression for the 2026-08-10 us_equity run: slots arrive grouped (fred:* then cot:*), so 6 FRED
+    slots x 3 templates consumed 18 of 24 overlay specs and only 2 of 6 COT markets reached the batch.
+    """
+    from finrl_pro_ds.crucible.agentic.proposer import _round_robin_by_source
+
+    slots = tuple([f"fred:F{i}" for i in range(6)] + [f"cot:C{i}" for i in range(9)])
+    out = _round_robin_by_source(slots)
+    assert sorted(out) == sorted(slots), "round-robin must be a permutation, never a filter"
+    # the first 8 (what a truncated batch would keep) must span BOTH sources roughly evenly
+    head = out[:8]
+    assert sum(t.startswith("fred:") for t in head) == 4
+    assert sum(t.startswith("cot:") for t in head) == 4
+    # deterministic + stable within a source
+    assert out == _round_robin_by_source(slots)
+    assert [t for t in out if t.startswith("cot:")] == [f"cot:C{i}" for i in range(9)]
