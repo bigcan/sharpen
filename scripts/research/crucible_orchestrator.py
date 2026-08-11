@@ -419,7 +419,7 @@ def _build_substrate(args, cfg, ek, meta, sweep, sweep_hash) -> tuple[Substrate,
         proposer = LlmProposer(model=args.llm_model)
         est_tokens = int(args.est_tokens_per_tick)
     else:
-        proposer = LibrarySeedProposer()
+        proposer = LibrarySeedProposer(extended_cs_bank=args.extended_seed_bank)
         est_tokens = 0
     # crucible-v6.0 DECISION CONTRACT (operator choice, never the agent's). "shipped" keeps the
     # historical 6-way AND; "corrected" swaps the holdout decision for the audit §5 contract, whose
@@ -585,6 +585,14 @@ def main() -> int:
                          "single-slot panel; use >=5 to give the overlay pool de-correlated breadth so "
                          "the opt-in weak-signal cohort gate can form a cohort)")
     ap.add_argument("--max-proposals", type=int, default=32)
+    ap.add_argument(
+        "--extended-seed-bank", action="store_true",
+        help="draw the FULL published WQ101 cross-sectional bank (100 formulas) instead of the "
+             "curated 8. The 8 are exhausted against us_equity's ledger, so without this the "
+             "substrate_dirty gate reports 'no fresh hypotheses' and the mine cannot run at all. "
+             "Each extra spec is pre-registered and charges one LORD++ test; the cohort still "
+             "charges exactly one regardless of pool size (ADR-4). Proposal types are interleaved "
+             "so --max-proposals truncation does not starve the overlay leg.")
     ap.add_argument("--proposer", choices=("library", "llm"), default="library",
                     help="library = deterministic offline seed bank (default, no cost/network, "
                          "bit-reproducible). llm = live LLM-backed proposer (spec Part A2); needs "

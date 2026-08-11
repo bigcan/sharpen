@@ -44,6 +44,40 @@ _CS_SEED_BANK: tuple[tuple[int, str, str, int], ...] = (
     (53, "cs-intraday-range", "intraday range position predicts cross-sectional reversal", -1),
 )
 
+# ---------------------------------------------------------------------------------------------
+# The EXTENDED cross-sectional bank (crucible-v12.2, opt-in via LibrarySeedProposer.extended_cs_bank).
+#
+# WHAT IT IS, stated plainly so the pre-registration record is not oversold. The curated
+# ``_CS_SEED_BANK`` above pairs 8 formulas with bespoke economic priors. This extension draws the
+# REMAINING published WQ101 alphas mechanically. Each is a real, pre-registered, falsifiable
+# hypothesis — the formula is fixed and written down before it is scored, which is what
+# pre-registration requires — but its prior is GENERIC ("this published alpha carries cross-sectional
+# information here"), not a bespoke economic story. Do not read these as 8-style curated hypotheses.
+#
+# WHY IT EXISTS. The 2026-08-09 root cause identified the HYPOTHESIS BANK as the binding constraint:
+# `IR_cohort = δ·√K·hit_rate` is LINEAR in hit rate and only √ in everything else, and a bank of 8 is
+# not a sample of a space of 101. Operationally the 8 were also exhausting the substrate — every one
+# already sits in the ledger, so the Author deduped every proposal to zero and `substrate_dirty`
+# reported "no fresh hypotheses" (2026-08-11), i.e. the machine could not mine `us_equity` at all.
+#
+# EXPECTED SIGN. Canonical WQ101 expressions are written so that a HIGHER value is the long leg (the
+# reversal alphas carry their own explicit `-1 *`), so +1 is the truthful declaration for all of them.
+# It is NOT a directional forecast added by this code.
+#
+# REDUNDANCY. This bank is deliberately un-deduplicated: a proposer is agent-blind (CR-1) and has no
+# panel, so it CANNOT measure that `rank(adv60)` and `rank(scale(adv60))` are the same statistic. The
+# per-candidate path pays for that (~39% of one holdout budget went to statistical duplicates); the
+# COHORT path does not — `greedy_decorrelated_admission` de-duplicates on realized return streams at
+# `max_pairwise_corr`, which is exactly the job it exists to do.
+_EXTENDED_SIGN = 1
+_EXTENDED_CS_BANK_NOTE = (
+    "WQ101 #{idx}, drawn mechanically from the published bank (crucible-v12.2 extended seed bank). "
+    "Pre-registered with a GENERIC prior — the formula is fixed before scoring, but no bespoke "
+    "economic story is claimed for it, unlike the curated 8. Rationale for widening: the hypothesis "
+    "bank is the binding constraint on cohort power (IR_cohort is LINEAR in hit rate), and the "
+    "curated 8 were fully exhausted against this substrate's ledger."
+)
+
 # Overlay DSL templates keyed by economic prior. ``{t}`` is a feature-slot terminal name. Each
 # encodes a standard macro-conditioning prior (level as slow regime, change as trend) as lightweight
 # DSL that ``evolve(candidate_type='overlay')`` scores as a marginal tilt on the existing book.
@@ -53,6 +87,20 @@ _OVERLAY_TEMPLATES: tuple[tuple[str, str, str, int], ...] = (
     ("smooth", "decay_linear({t}, 10)",
      "a smoothed {t} reduces whipsaw as a book-timing conditioner", 1),
 )
+
+
+def _interleave(a: list, b: list) -> list:
+    """Round-robin two proposal lists so a `max_proposals` truncation keeps BOTH candidate types
+    represented in proportion, instead of the longer list crowding the other one out. Order within
+    each list is preserved; the leftover tail of the longer list follows."""
+    out: list = []
+    n = max(len(a), len(b))
+    for i in range(n):
+        if i < len(a):
+            out.append(a[i])
+        if i < len(b):
+            out.append(b[i])
+    return out
 
 
 @dataclass(frozen=True, slots=True)
@@ -189,22 +237,38 @@ class LibrarySeedProposer:
     model_id: str = "library-seed-v1"
     include_cross_sectional: bool = True
     include_overlay: bool = True
+    #: Draw the REST of the published WQ101 bank, not just the curated 8 (crucible-v12.2). Opt-in and
+    #: default OFF so every pre-v12.2 run's proposal batch — hence its manifest — is byte-identical.
+    #: See :data:`_EXTENDED_CS_BANK_NOTE` for what these proposals are and are NOT.
+    extended_cs_bank: bool = False
 
     def propose(self, context: ProposalContext) -> list[HypothesisProposal]:
         out: list[HypothesisProposal] = []
+        xsec: list[HypothesisProposal] = []
+        overlay: list[HypothesisProposal] = []
         if self.include_cross_sectional:
             for idx, name, hypo, sign in _CS_SEED_BANK:
                 if idx in SKIP:                          # a library formula flagged unsupported
                     continue
-                out.append(HypothesisProposal(
+                xsec.append(HypothesisProposal(
                     name=name, hypothesis=hypo, family="101alpha", expected_sign=sign,
                     candidate_type="cross_sectional", formula=FORMULAS[idx],
                     economic_rationale=f"WQ101 #{idx}: {hypo}."))
+            if self.extended_cs_bank:
+                curated = {i for i, _, _, _ in _CS_SEED_BANK}
+                for idx in sorted(set(FORMULAS) - set(SKIP) - curated):
+                    xsec.append(HypothesisProposal(
+                        name=f"cs-wq101-{idx:03d}",
+                        hypothesis=(f"published WQ101 alpha #{idx} carries cross-sectional "
+                                    f"information on this panel"),
+                        family="101alpha", expected_sign=_EXTENDED_SIGN,
+                        candidate_type="cross_sectional", formula=FORMULAS[idx],
+                        economic_rationale=_EXTENDED_CS_BANK_NOTE.format(idx=idx)))
         if self.include_overlay:
             for term in _round_robin_by_source(context.feature_slots()):
                 slug = term.replace(":", "-").replace("_", "-")
                 for suffix, tmpl, hypo_t, sign in _OVERLAY_TEMPLATES:
-                    out.append(HypothesisProposal(
+                    overlay.append(HypothesisProposal(
                         name=f"ov-{slug}-{suffix}", hypothesis=hypo_t.format(t=term),
                         family="altdata", expected_sign=sign, candidate_type="overlay",
                         formula=tmpl.format(t=term),
@@ -212,4 +276,12 @@ class LibrarySeedProposer:
                             f"Overlay (CR-9): {term} is a broadcast non-OHLCV series; a "
                             f"cross-sectional rank() is identically zero on it, so it enters the "
                             f"funnel as a timing tilt on the existing book. {hypo_t.format(t=term)}.")))
+        # ORDER matters because the batch is truncated at `max_proposals`. Without the extended bank
+        # the order is the historic cross_sectional-then-overlay concatenation, so every pre-v12.2
+        # batch is byte-identical. WITH it, 100 cross-sectional proposals would be emitted before the
+        # first overlay and truncation would starve the overlay leg entirely — collapsing the very
+        # MIXED pool v12.1 built the cohort to adjudicate. So the two types are interleaved
+        # round-robin, the same discipline `_round_robin_by_source` already applies across alt-data
+        # sources (a batch cap must not silently become a type filter).
+        out = xsec + overlay if not self.extended_cs_bank else _interleave(xsec, overlay)
         return out[: context.max_proposals]

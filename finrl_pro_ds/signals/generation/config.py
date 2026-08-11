@@ -160,6 +160,8 @@ _COHORT_DEFAULTS: dict = {
     # here (so an absent key reproduces the pre-v12.1 overlay-only pool byte-for-byte); the shipped
     # configs/crucible_cohort.gates.yaml sets it TRUE. See that file for the rationale + blast radius.
     "include_cross_sectional": False,
+    # v13.0 — apply the funnel's hard-infeasibility (turnover) rule when assembling the cohort pool.
+    "enforce_funnel_feasibility": False,
 }
 
 
@@ -221,7 +223,8 @@ def load_cohort_config(
         min_book_uplift=float(g["min_combination_uplift"]),
         combiner_redundancy_strength=float(c["combiner_redundancy_strength"]),
         analytic_floor_advisory=bool(c["analytic_floor_advisory"]),
-        include_cross_sectional=bool(c["include_cross_sectional"]))
+        include_cross_sectional=bool(c["include_cross_sectional"]),
+        enforce_funnel_feasibility=bool(c["enforce_funnel_feasibility"]))
     mc_kwargs = dict(
         enabled=bool(c["enabled"]), n_reps=int(c["mc_n_replicates"]),
         alpha_cohort=float(c["alpha_cohort"]), block_length=int(c["mc_block_length"]))

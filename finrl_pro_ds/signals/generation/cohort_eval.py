@@ -179,6 +179,7 @@ def assemble_candidate_pool(
     candidate_types: "Mapping[str, str] | None" = None,
     hold_horizon: int = 21,
     ls_min_names: int = 6,
+    fcfg: "FitnessConfig | None" = None,
     base_gross: "np.ndarray | None" = None,
     base_cost: "np.ndarray | None" = None,
     gross_exposure: "np.ndarray | None" = None,
@@ -206,24 +207,53 @@ def assemble_candidate_pool(
     rebalance phase is anchored at index 0, identical under truncation), so slicing a full-panel
     stream to ``[0, n_train)`` is bit-identical to computing it on the truncated panel (LEAK-2).
 
+    FEASIBILITY (v13.0). With ``fcfg`` supplied, a member whose annualized turnover exceeds
+    ``fcfg.turnover_soft_cap * 2`` is CULLED — byte-for-byte the same hard-infeasibility rule
+    :func:`evolve.score` applies (``evolve.py``: "hard-infeasible (turnover/size)"). Without it the
+    cohort adjudicated candidates the funnel itself refuses to trade: the 2026-08-11 ``us_equity``
+    run put 92 cross-sectional members in the pool of which **91 were hard-infeasible on turnover**,
+    and 9 of the 12 ADMITTED members came from that pool. Netting turnover cost into each stream is
+    not a substitute — it makes an infeasible candidate merely unattractive, so a cohort could still
+    be certified PROMISING out of members no one can trade. That is the v11.0 capturability defect
+    exactly: a feasibility fact computed and then consulted by nothing. ``fcfg=None`` preserves the
+    v12.1 behaviour for callers that have no FitnessConfig.
+
     Returns ``(returns, culled)``; see :func:`assemble_overlay_pool` for the pre-registered rule that
     ``culled`` is an EXCLUSION and must never inflate ``n_candidates_seen``."""
     types = dict(candidate_types or {})
     returns: dict[str, np.ndarray] = {}
     culled: list[str] = []
+    max_turnover = None if fcfg is None else float(fcfg.turnover_soft_cap) * 2.0
     for name, formula in formulas.items():
         ct = str(types.get(str(name), _OVERLAY))
-        if ct == _CROSS_SECTIONAL:
-            out = _candidate_returns(str(formula), panel, hold_horizon=int(hold_horizon),
-                                     cost_bps=cost_bps, min_names=int(ls_min_names))
-        elif ct == _OVERLAY:
-            out = _overlay_returns(str(formula), panel, base_book, cost_bps=cost_bps,
-                                   base_gross=base_gross, base_cost=base_cost,
-                                   gross_exposure=gross_exposure)   # F14 (unit-gross if None)
-        else:
+        if ct not in (_CROSS_SECTIONAL, _OVERLAY):
             raise ValueError(
                 f"candidate_type must be 'cross_sectional' or 'overlay'; got {ct!r} for {name!r}")
+        # A member that cannot be SCORED is culled, never fatal — same discipline `evolve.score`
+        # applies ("eval raised: ... -> _INFEASIBLE"). This is load-bearing for the ledger-sourced
+        # pool (v13.0): it replays pre-registrations from EARLIER ticks, and the alt-data bridge
+        # de-duplicates its slot set per tick, so a historical overlay can reference a feature slot
+        # today's panel no longer carries (measured 2026-08-11: `unknown variable:
+        # cot:gold_noncomm_net` took down a whole tick AFTER the cohort had scored 100+ members).
+        # An unscoreable member is missing evidence, not a reason to discard every other member's.
+        try:
+            if ct == _CROSS_SECTIONAL:
+                out = _candidate_returns(str(formula), panel, hold_horizon=int(hold_horizon),
+                                         cost_bps=cost_bps, min_names=int(ls_min_names))
+            else:
+                out = _overlay_returns(str(formula), panel, base_book, cost_bps=cost_bps,
+                                       base_gross=base_gross, base_cost=base_cost,
+                                       gross_exposure=gross_exposure)   # F14 (unit-gross if None)
+        except Exception as exc:                          # noqa: BLE001 - cull, never kill the tick
+            logger.info("cohort pool: %s CULLED (scoring raised %r)", name, exc)
+            culled.append(str(name))
+            continue
         if out is None:
+            culled.append(str(name))
+            continue
+        if max_turnover is not None and float(out[1]) > max_turnover:
+            logger.info("cohort pool: %s CULLED hard-infeasible (turnover %.1f > %.1f/yr)",
+                        name, float(out[1]), max_turnover)
             culled.append(str(name))
             continue
         returns[str(name)] = out[0]
@@ -396,6 +426,7 @@ def evaluate_cohort(
     pool_full, culled = assemble_candidate_pool(
         panel, base_book_full, formulas, cost_bps=cost_bps,
         candidate_types=candidate_types, hold_horizon=hold_horizon, ls_min_names=ls_min_names,
+        fcfg=(fcfg if ccfg.enforce_funnel_feasibility else None),
         base_gross=bg_full, base_cost=bc_full, gross_exposure=ge_full)
     n_culled = len(culled)
     # Composition of the SURVIVING pool (culled members are not in it and must not be counted).

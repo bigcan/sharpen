@@ -38,6 +38,11 @@ class CohortCard:
     cohort_gates_hash: str           # the cohort gate file's own provenance hash
     proposal_ts: str | None = None
     data_snapshot_hash: str | None = None
+    # v13.0: how many members were EXCLUDED before selection (degenerate, unscoreable, or
+    # hard-infeasible on turnover). Without it `n_candidates_seen` is unreadable — 44-of-140 and
+    # 44-of-44 are very different cohorts, and on the 2026-08-11 us_equity pool 96 of 140 were
+    # culled. Same lesson as `n_holdout_tested`: a count is only evidence next to its denominator.
+    n_culled: int | None = None
 
     # verbatim scorer verdict (CR-1)
     verdict: str = "PROMISING"       # "PROMISING" | "LOGGED"
@@ -112,6 +117,7 @@ def card_from_verdict(
     return CohortCard(
         cohort_hash=verdict.pool_content_hash, members=tuple(verdict.members),
         n_members=verdict.n_members, n_candidates_seen=verdict.n_candidates_seen,
+        n_culled=verdict.n_culled,
         crucible_version=crucible_version, funnel_gates_hash=funnel_gates_hash,
         cohort_gates_hash=cohort_gates_hash, proposal_ts=proposal_ts,
         data_snapshot_hash=data_snapshot_hash, verdict=verdict.verdict,

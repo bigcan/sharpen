@@ -68,9 +68,15 @@ def captured(monkeypatch):
     return seen
 
 
+def _as_pool(specs) -> list[tuple[str, str, str]]:
+    """The (candidate_hash, formula, candidate_type) triples the gate consumes (v12.2 — the gate
+    takes a POOL, so a ledger-sourced pool and a tick's fresh specs feed it identically)."""
+    return [(pr.candidate_hash, pr.formula, pr.spec.candidate_type) for pr in specs]
+
+
 def _run(cohort_cfg, ek=None):
     return loop_mod._evaluate_cohort_gate(
-        specs=_SPECS, panel=object(), base_returns={}, timestamps=np.zeros(4),
+        pool=_as_pool(_SPECS), panel=object(), base_returns={}, timestamps=np.zeros(4),
         cfg=object(), ek=(ek if ek is not None else {}), run_id="run-1",
         crucible_version="crucible-v12.1", gates_hash="519158fa1450", proposal_ts="2026-08-10",
         data_snapshot_hash=None, cohort_cfg=cohort_cfg, cohort_mc_kwargs=dict(_MC),
@@ -106,7 +112,7 @@ def test_pool_is_empty_when_no_admitted_type_is_present(captured) -> None:
     """An all-cross-sectional tick with the flag OFF must no-op (return no cards), not crash and not
     silently score cross-sectional specs through the overlay path."""
     cards, prov = loop_mod._evaluate_cohort_gate(
-        specs=[s for s in _SPECS if s.spec.candidate_type == "cross_sectional"],
+        pool=_as_pool([s for s in _SPECS if s.spec.candidate_type == "cross_sectional"]),
         panel=object(), base_returns={}, timestamps=np.zeros(4), cfg=object(), ek={},
         run_id="run-1", crucible_version="crucible-v12.1", gates_hash="519158fa1450",
         proposal_ts="2026-08-10", data_snapshot_hash=None,
@@ -119,7 +125,8 @@ def test_pool_is_empty_when_no_admitted_type_is_present(captured) -> None:
 def test_disabled_gate_still_no_ops(captured) -> None:
     """``enabled: false`` short-circuits before any pool is assembled (manifest byte-identity)."""
     cards, prov = loop_mod._evaluate_cohort_gate(
-        specs=_SPECS, panel=object(), base_returns={}, timestamps=np.zeros(4), cfg=object(), ek={},
+        pool=_as_pool(_SPECS), panel=object(), base_returns={}, timestamps=np.zeros(4),
+        cfg=object(), ek={},
         run_id="run-1", crucible_version="crucible-v12.1", gates_hash="519158fa1450",
         proposal_ts="2026-08-10", data_snapshot_hash=None,
         cohort_cfg=_ccfg(include_cross_sectional=True),

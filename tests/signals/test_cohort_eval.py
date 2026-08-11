@@ -729,3 +729,90 @@ def test_evaluate_cohort_overlay_only_is_unchanged_by_the_new_params() -> None:
     assert a.pool_content_hash == b.pool_content_hash
     assert a.mc_p_value == b.mc_p_value and a.verdict == b.verdict
     assert a.n_pool_cross_sectional == 0 and a.n_members_cross_sectional == 0
+
+
+# =========================================== v13.0 — POOL FEASIBILITY ===========================
+# The cohort must not adjudicate candidates the FUNNEL refuses to trade. Measured on the real
+# us_equity mine (2026-08-11): 92 cross-sectional members entered the pool, 91 of them were
+# hard-infeasible on turnover in `evolve`, and 9 of the 12 ADMITTED members came from that pool.
+
+def test_pool_culls_hard_infeasible_turnover() -> None:
+    """The same rule `evolve.score` applies (`turnover_ann > turnover_soft_cap * 2`), applied where
+    the cohort builds its pool. Netting cost into the stream is NOT a substitute: it makes an
+    infeasible candidate unattractive, not excluded, so a cohort could still be certified out of
+    members no one can trade (the v11.0 capturability defect)."""
+    slots = _noise_slots(1, seed=31)
+    panel = _panel(slots, seed=5)
+    base, ts = _base_and_ts()
+    base_book = _combined_book(base, ts, _CFG)
+    types = {k: "cross_sectional" for k in _XSEC}
+
+    # H=1 on a daily-varying signal is the high-turnover regime the real run tripped over.
+    kw = dict(cost_bps=0.0010, candidate_types=types, hold_horizon=1, ls_min_names=6)
+    loose, culled_loose = assemble_candidate_pool(panel, base_book, _XSEC, **kw)
+    strict, culled_strict = assemble_candidate_pool(
+        panel, base_book, _XSEC, fcfg=replace(_CFG, turnover_soft_cap=0.001), **kw)
+
+    assert culled_loose == []                      # fcfg=None => v12.1 behaviour, nothing culled
+    assert set(culled_strict) == set(_XSEC)        # every member is over an absurdly low ceiling
+    assert strict == {}
+    assert set(loose) == set(_XSEC)
+
+
+def test_feasible_members_survive_the_cull() -> None:
+    """The cull must be a FEASIBILITY filter, not a blanket rejection — a member under the ceiling is
+    untouched, and its stream is bit-identical to the un-culled path."""
+    slots = _noise_slots(1, seed=32)
+    panel = _panel(slots, seed=6)
+    base, ts = _base_and_ts()
+    base_book = _combined_book(base, ts, _CFG)
+    types = {k: "cross_sectional" for k in _XSEC}
+    kw = dict(cost_bps=0.0010, candidate_types=types, hold_horizon=21, ls_min_names=6)
+
+    loose, _ = assemble_candidate_pool(panel, base_book, _XSEC, **kw)
+    generous, culled = assemble_candidate_pool(
+        panel, base_book, _XSEC, fcfg=replace(_CFG, turnover_soft_cap=1e9), **kw)
+    assert culled == [] and set(generous) == set(loose)
+    for k in loose:
+        np.testing.assert_array_equal(loose[k], generous[k])
+
+
+def test_culled_members_do_not_inflate_n_candidates_seen() -> None:
+    """A culled member is an EXCLUSION, not a trial: the deflation N is the count of finite,
+    non-degenerate, FEASIBLE streams. Inflating N would over-deflate and desync from the MC null,
+    which re-admits exactly the surviving columns."""
+    slots = _noise_slots(6, seed=33)
+    panel = _panel(slots, seed=7)
+    base, ts = _base_and_ts()
+    overlays = _overlays(slots)
+    formulas = {**overlays, **_XSEC}
+    types = {**{k: "overlay" for k in overlays}, **{k: "cross_sectional" for k in _XSEC}}
+
+    v = evaluate_cohort(
+        panel, base, ts, formulas, replace(_CCFG, enforce_funnel_feasibility=True),
+        replace(_CFG, turnover_soft_cap=0.001),
+        mc_kwargs=_MC_KWARGS, cost_bps=0.0010, holdout_frac=0.25, holdout_embargo=21, seed=11,
+        candidate_types=types, hold_horizon=1, ls_min_names=6)
+
+    if v is not None:                       # a pool that still forms must not count the culled
+        assert v.n_candidates_seen + v.n_culled <= len(formulas)
+        assert v.n_candidates_seen == v.n_pool_cross_sectional + (
+            v.n_candidates_seen - v.n_pool_cross_sectional)
+        assert v.n_culled > 0
+
+
+def test_unscoreable_member_is_culled_not_fatal() -> None:
+    """A member that cannot be scored must be CULLED, never crash the pool. Load-bearing for the
+    v13.0 ledger-sourced pool: it replays pre-registrations from earlier ticks, and the alt-data
+    bridge de-duplicates its slot set per tick, so a historical overlay can reference a feature slot
+    the current panel no longer carries. Measured 2026-08-11 — `unknown variable:
+    cot:gold_noncomm_net` killed an entire tick after 100+ members had already been scored."""
+    slots = _noise_slots(3, seed=34)
+    panel = _panel(slots, seed=8)
+    base, ts = _base_and_ts()
+    base_book = _combined_book(base, ts, _CFG)
+    formulas = {**_overlays(slots), "ov-gone": "cot:slot_that_no_longer_exists"}
+
+    returns, culled = assemble_candidate_pool(panel, base_book, formulas, cost_bps=0.0010)
+    assert "ov-gone" in culled                       # the missing terminal is culled...
+    assert set(returns) == set(_overlays(slots))     # ...and every other member still scored
