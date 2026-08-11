@@ -402,16 +402,34 @@ class Substrate:
                              "(CorrectedConfig from configs/crucible_corrected_contract.gates.yaml)")
 
 
-def substrate_dirty(*, data_changed: bool, n_fresh_hypotheses: int) -> tuple[bool, str]:
+def substrate_dirty(*, data_changed: bool, n_fresh_hypotheses: int,
+                    cohort_pending: bool = False) -> tuple[bool, str]:
     """The §10.1 eligibility gate. Dirty (mine-worthy) iff new data arrived OR ≥1 fresh, not-yet-
-    scored hypothesis exists. Returns ``(dirty, reason)`` — the reason is recorded in the tick log so
-    the "mined only when dirty" property is auditable across the unattended nights."""
+    scored hypothesis exists OR a COHORT adjudication this substrate has never run is outstanding.
+    Returns ``(dirty, reason)`` — the reason is recorded in the tick log so the "mined only when
+    dirty" property is auditable across the unattended nights.
+
+    ``cohort_pending`` (crucible-v12.2) closes a blind spot that made the gate report "nothing to do"
+    about a test that had never executed. The gate keyed exclusively on PER-CANDIDATE novelty, but a
+    cohort is a distinct adjudication over a SET: on 2026-08-11 ``us_equity``'s 8 cross-sectional
+    pre-registrations had each been tested individually and lost, and the substrate was therefore
+    refused as clean — while the mixed-pool cohort test (a different statistic, with a materially
+    higher measured power profile) had never been run on them even once. That is the same shape as
+    the three defects already in this project's record: a cheap upstream screen silently blocking the
+    gate that is the actual test.
+
+    The FDR intent is preserved, not weakened. A cohort-pending tick charges exactly ONE LORD++ test
+    (ADR-4, one per cohort EVALUATED regardless of pool size), and the condition is edge-triggered by
+    the caller on the cohort's configuration key, so it fires once per configuration rather than
+    every night."""
     if data_changed and n_fresh_hypotheses > 0:
         return True, f"new data + {n_fresh_hypotheses} fresh hypotheses"
     if data_changed:
         return True, "new data arrived on substrate"
     if n_fresh_hypotheses > 0:
         return True, f"{n_fresh_hypotheses} fresh (unscored) hypotheses"
+    if cohort_pending:
+        return True, "cohort configuration has never adjudicated this substrate's pool"
     return False, "no new data and no fresh hypotheses - conserving FDR wealth"
 
 
@@ -454,7 +472,8 @@ CREATE TABLE IF NOT EXISTS fdr_state (
 );
 CREATE TABLE IF NOT EXISTS last_seen (
     substrate_id  TEXT PRIMARY KEY,
-    snapshot_hash TEXT
+    snapshot_hash TEXT,
+    cohort_key    TEXT
 );
 CREATE TABLE IF NOT EXISTS ticks (
     id                INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -512,6 +531,11 @@ class OrchestratorStore:
             ("panel_T", "INTEGER"), ("holdout_bars", "INTEGER"),
             ("implied_mde_delta_sr", "REAL"), ("power_interp_mode", "TEXT"),
             ("n_holdout_tested", "INTEGER")])           # v12.0 (NULL on pre-v12 rows = unknown)
+        # v12.2: `CREATE TABLE IF NOT EXISTS` does not add a column to a store that already exists,
+        # and the production store predates this one — without the migration `last_cohort_key` would
+        # raise on every real run. NULL means "the cohort has never adjudicated this substrate",
+        # which is exactly the right reading for every pre-v12.2 row.
+        _ensure_columns(self._conn, "last_seen", [("cohort_key", "TEXT")])
 
     def close(self) -> None:
         self._conn.close()
@@ -556,6 +580,28 @@ class OrchestratorStore:
             "INSERT INTO last_seen (substrate_id, snapshot_hash) VALUES (?, ?) "
             "ON CONFLICT(substrate_id) DO UPDATE SET snapshot_hash = excluded.snapshot_hash",
             (substrate_id, snapshot_hash))
+        self._conn.commit()
+
+    # --- cohort adjudication key (the 'cohort_pending' leg of substrate_dirty, v12.2) -------------
+    def last_cohort_key(self, substrate_id: str) -> str | None:
+        """The cohort CONFIGURATION key last adjudicated on this substrate (None if the cohort has
+        never rendered a verdict here). ``!=`` the current key ⇒ an adjudication that has never run
+        is outstanding, which is a dirty condition (see :func:`substrate_dirty`).
+
+        Edge-triggered on purpose: the key is written only after a cohort verdict is actually
+        recorded, so a pending cohort fires ONCE per configuration rather than every night. That is
+        what keeps the §10.1 FDR-conservation intent intact while removing the blind spot."""
+        row = self._conn.execute(
+            "SELECT cohort_key FROM last_seen WHERE substrate_id = ?", (substrate_id,)).fetchone()
+        return None if row is None else row["cohort_key"]
+
+    def set_cohort_key(self, substrate_id: str, cohort_key: str) -> None:
+        """Record the cohort configuration that just adjudicated this substrate. Written ONLY on a
+        rendered verdict — never on a skipped or errored tick — so a crash re-runs the cohort."""
+        self._conn.execute(
+            "INSERT INTO last_seen (substrate_id, cohort_key) VALUES (?, ?) "
+            "ON CONFLICT(substrate_id) DO UPDATE SET cohort_key = excluded.cohort_key",
+            (substrate_id, cohort_key))
         self._conn.commit()
 
     def clear_snapshot(self, substrate_id: str) -> None:

@@ -282,6 +282,35 @@ class TrialLedger:
         """Total distinct candidates in the ledger (the cross-run file-drawer N)."""
         return int(self._conn.execute("SELECT COUNT(*) FROM trial_ledger").fetchone()[0])
 
+    def pre_registered_pool(self, run_prefix: str) -> list[tuple[str, str, str]]:
+        """Every PRE-REGISTERED candidate first seen on runs starting with ``run_prefix``, as
+        ``[(candidate_hash, formula, candidate_type), ...]`` sorted by hash (deterministic — the
+        cohort's ``pool_content_hash`` and MC seed depend on it).
+
+        This is the COHORT's ledger-sourced pool (crucible-v12.2). The cohort previously drew only
+        the CURRENT tick's fresh specs, which coupled its ``K`` to one night's proposals (the two
+        cohort verdicts ever rendered ran at K=10 and K=6) and made it unable to adjudicate a
+        substrate whose hypotheses were all already scored — the state ``us_equity`` reached on
+        2026-08-11, where the dirty gate reported "no fresh hypotheses" about a cohort test that had
+        never run. Since ``IR_cohort = δ·√K·hit_rate``, K is a power term, not bookkeeping.
+
+        Scoping is by ``first_seen_run`` prefix because the ledger has no ``substrate_id`` column and
+        run ids are formed ``tick-<substrate_id>-<ts>`` by the orchestrator; the caller passes
+        ``f"tick-{substrate_id}-"``. Rows are restricted to ``spec_json IS NOT NULL`` — that is what
+        distinguishes a written-down PRE-REGISTRATION from an evolved offspring, and admitting
+        offspring would make the pool non-deterministic and break the reproduce contract (ADR-3 (B)).
+
+        NOT a selection: this returns ALL pre-registrations for the substrate, never a
+        performance-ranked subset. Routing a Sharpe-SELECTED pool into a gate that does not price the
+        selection measured FPR 1.000 (2026-08-09); the MC null prices the selection it performs
+        ITSELF, on a pool it is handed whole. Verdict columns are not read here."""
+        rows = self._conn.execute(
+            "SELECT candidate_hash, formula, candidate_type FROM trial_ledger "
+            "WHERE first_seen_run LIKE ? AND spec_json IS NOT NULL AND formula IS NOT NULL "
+            "ORDER BY candidate_hash",
+            (f"{run_prefix}%",)).fetchall()
+        return [(str(a), str(b), str(c)) for a, b, c in rows]
+
     def update_fdr_charge(self, candidate_hash: str, fdr_wealth_charged: float) -> None:
         """ACCUMULATE the per-substrate online-FDR wealth spent on a scored trial (spec §6.1, P3). The
         candidate MUST already exist (the orchestrator records it during mining, then charges FDR).

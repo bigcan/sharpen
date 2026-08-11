@@ -120,6 +120,32 @@ cohort:
   # gates_hash (crucible-v2.0, 519158fa1450) is in a different file and is byte-identical (CRU-1).
   include_cross_sectional: true
 
+  # Does the cohort pool apply the FUNNEL's own hard-infeasibility rule? (crucible-v13.0.)
+  #
+  # MEASURED DEFECT, 2026-08-11, on the first real mixed-pool cohort (us_equity, card
+  # cohort_0a96a0da38b3): `evolve.score` hard-culls a candidate whose annualized turnover exceeds
+  # `turnover_soft_cap * 2` (24/yr on this substrate), and it culled 91 of the 92 cross-sectional
+  # pre-registrations for exactly that reason — so only 1 of 92 reached the per-candidate holdout.
+  # `assemble_candidate_pool` applied NO such rule, so all 92 entered the cohort pool anyway and
+  # 9 of the 12 ADMITTED members were drawn from it. The cohort was adjudicating a book the funnel
+  # refuses to trade.
+  #
+  # Netting turnover cost into each stream is NOT a substitute. It makes an infeasible candidate
+  # unattractive, not excluded — a cohort could still be certified PROMISING out of members nobody
+  # can implement. That is the v11.0 capturability defect in a new place: a feasibility fact that is
+  # computed and then consulted by nothing.
+  #
+  # true (SHIPPED) — the pool applies the identical `turnover_ann > turnover_soft_cap * 2` cull, and
+  #      culled members are recorded in `n_culled` (provenance) WITHOUT inflating
+  #      `n_candidates_seen` (the deflation N counts scored, feasible streams only).
+  # false — pre-v13.0 behaviour, retained so the three existing cohort cards stay reproducible.
+  #
+  # NOT monotone in either direction: a smaller pool means a smaller deflation N (looser) but also
+  # less selection for the MC null to price (can go either way). It is a CORRECTNESS change, not a
+  # tightening — do not reason about it as "stricter". Blast radius: the three cohort cards on disk
+  # (all LOGGED) do not move; a re-run under this file's changed hash is visible in the manifest.
+  enforce_funnel_feasibility: true
+
   # Selection-aware Monte-Carlo null (Doc 2 §3 — the BINDING statistical gate).
   alpha_cohort: 0.05        # new pre-registered gate: cohort passes iff MC p <= alpha_cohort
   mc_n_replicates: 1000     # B; the binding gate wants >= 1000 (Doc 2 §3.3). Use 200 for dev speed.
