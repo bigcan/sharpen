@@ -77,6 +77,11 @@ class CohortConfig:
     # return streams and are indifferent to how a stream was produced. See
     # ``cohort_eval.assemble_candidate_pool`` for why the pairing was wrong before.
     include_cross_sectional: bool = False
+    # When True the cohort pool applies the FUNNEL's own hard-infeasibility rule
+    # (turnover_ann > turnover_soft_cap * 2, the `evolve.score` cull) so the cohort cannot be
+    # certified out of members the funnel refuses to trade (crucible-v13.0). Default False keeps
+    # every pre-v13.0 cohort verdict reproducible; the shipped gates file turns it on.
+    enforce_funnel_feasibility: bool = False
 
 
 @dataclass(frozen=True, slots=True)

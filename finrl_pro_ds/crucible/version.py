@@ -714,7 +714,59 @@ from pathlib import Path
 # hashes and seeds byte-identically to pre-v12.1. The funnel gates_hash (519158fa1450) lives in a
 # different file and is untouched; `configs/crucible_cohort.gates.yaml`'s own hash changes, which is
 # exactly the visible-provenance mechanism the two-file split (ADR-1) exists for.
-CRUCIBLE_VERSION = "crucible-v12.1"
+# v13.0 = THE COHORT IS A TEST THE SCHEDULER CAN SEE, AND THE HYPOTHESIS BANK IS NO LONGER 8.
+# MAJOR: it changes WHICH hypotheses a tick tests and WHEN a tick fires — the v10.0/v12.0 precedent
+# exactly (both were MAJOR for changing which hypotheses are tested, with no gate value moved).
+# No threshold and no gate byte changes here either; the three sealed moats are untouched.
+#
+# TRIGGER, measured 2026-08-11 while trying to run the first mixed-pool cohort on `us_equity`. The
+# substrate refused to mine twice, for two DIFFERENT reasons, and neither was a verdict about alpha:
+#   1. `_CS_SEED_BANK` is 8 formulas, deterministic, and all 8 were already in the ledger ⇒ the
+#      Author deduped every proposal to zero ⇒ `substrate_dirty` reported "no fresh hypotheses". The
+#      only adequately-powered substrate in the project could not be mined AT ALL. The 2026-08-09
+#      root cause had already named the hypothesis bank as the binding constraint (`IR_cohort =
+#      δ·√K·hit_rate` is LINEAR in hit rate); this is that constraint reached operationally.
+#   2. `substrate_dirty` keyed exclusively on PER-CANDIDATE novelty. Those 8 had each been tested
+#      individually and lost, so the substrate read as clean — while the COHORT test over exactly
+#      those hypotheses, a different statistic and the only one with measured power, had never run
+#      once. FOURTH instance of this project's recurring shape: a cheap upstream screen silently
+#      blocking the gate that is the actual test (cf. the pre-v6.0 train re-application, the v12.0
+#      train cull of 8/8 pre-registrations, and the v12.1-era analytic cohort floor).
+#
+# SHIPS:
+#   * `LibrarySeedProposer.extended_cs_bank` (opt-in, `--extended-seed-bank`): the remaining
+#     published WQ101 alphas, 8 -> 100 cross-sectional. Pre-registered with GENERIC priors, and
+#     labelled as such — these are breadth, not 8-style curated economic stories. Proposal types are
+#     INTERLEAVED so a `--max-proposals` cap cannot silently become a type filter (100 xsec would
+#     otherwise be emitted before the first overlay and starve the mixed pool v12.1 exists for).
+#   * `substrate_dirty(..., cohort_pending=)` + `OrchestratorStore.last_cohort_key/set_cohort_key`
+#     (with a `last_seen.cohort_key` migration — the production store predates the column). The
+#     condition is EDGE-TRIGGERED on the cohort's configuration key (gates hash + the
+#     include_cross_sectional policy, since flipping it turns an overlay-only pool into a mixed one),
+#     and the key is written ONLY on a rendered verdict, so a cohort fires once per configuration and
+#     a crashed tick re-runs. The §10.1 FDR-conservation intent is preserved: ADR-4 still charges
+#     exactly ONE test per cohort EVALUATED, independent of pool size.
+#   * `TrialLedger.pre_registered_pool(run_prefix)` + `loop.run_cohort_only` + a `_cohort_only_tick`
+#     orchestrator branch: the cohort can now adjudicate the substrate's WHOLE pre-registered set
+#     (140 on us_equity) instead of one night's batch, without mining — mining would re-score and
+#     re-charge hypotheses whose per-candidate answer is already recorded. The tick records
+#     `mined=False`, because no per-candidate hypothesis was scored and a reader must not mistake it
+#     for a mining night. Offspring are excluded (no `spec_json`): non-deterministic membership would
+#     break `pool_content_hash`, hence the MC seed, hence reproduce (ADR-3 (B)).
+#
+# NOT A POWER CLAIM. `max_cohort_size` is 12, so a 140-member pool does NOT raise admitted K past 12;
+# what it buys is a better menu to select 12 de-correlated members from and more selection
+# multiplicity for the MC null to price. That threshold is a gate value and was not touched.
+#
+# ANTI-SELECTION. `pre_registered_pool` returns ALL of a substrate's pre-registrations, never a
+# performance-ranked subset, and reads no verdict column. Routing a Sharpe-SELECTED pool through a
+# gate that does not price the selection measured FPR 1.000 (2026-08-09); the MC null prices only the
+# selection it performs itself, on a pool handed to it whole. Pinned by a test.
+#
+# CRU-1: every new path is opt-in and defaults OFF (`extended_cs_bank=False`; `cohort_pending` cannot
+# fire when the cohort gate is disabled), so a pre-v13.0 tick's proposal batch, dirty decision and
+# manifest are byte-identical. No recorded verdict moves.
+CRUCIBLE_VERSION = "crucible-v13.0"
 
 # The baseline (pre-gate-repair) system, preserved as a git tag for reproducibility comparisons.
 CRUCIBLE_BASELINE_VERSION = "crucible-v1.0"

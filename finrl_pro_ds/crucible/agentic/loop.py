@@ -154,6 +154,7 @@ def run_hypothesis_loop(
     search_memory_cfg: "SearchMemoryConfig | None" = None,
     search_memory_gates_hash: str | None = None,
     substrate_mde: float | None = None,
+    cohort_pool: list[tuple[str, str, str]] | None = None,
 ) -> HypothesisLoopResult:
     """Run one manual pass. ``evolve_kwargs`` is the runner block from ``load_generation_config``
     (rng_seed/pop_size/… — WITHOUT ``candidate_type``, which the loop sets per group).
@@ -283,7 +284,9 @@ def run_hypothesis_loop(
     # PINNED into the reproduce contract (not the non-gated `extra`) because cohort verdicts + the MC
     # p-value are decision-bearing. Caps at PROMISING (Tier-2 for capital). ------------------------
     cohort_cards, cohort_prov = _evaluate_cohort_gate(
-        specs=specs, panel=panel, base_returns=base_returns, timestamps=timestamps, cfg=cfg, ek=ek,
+        pool=(cohort_pool if cohort_pool is not None
+              else [(pr.candidate_hash, pr.formula, pr.spec.candidate_type) for pr in specs]),
+        panel=panel, base_returns=base_returns, timestamps=timestamps, cfg=cfg, ek=ek,
         run_id=run_id, crucible_version=crucible_version, gates_hash=gates_hash,
         proposal_ts=proposal_ts, data_snapshot_hash=data_snapshot_hash, cohort_cfg=cohort_cfg,
         cohort_mc_kwargs=cohort_mc_kwargs, cohort_gates_hash=cohort_gates_hash,
@@ -312,8 +315,43 @@ def run_hypothesis_loop(
         n_promising=len(cards), dropped=dropped, cohort_cards=cohort_cards)
 
 
+def run_cohort_only(
+    *, panel: Panel, base_returns: dict[str, np.ndarray], timestamps: np.ndarray,
+    cfg: FitnessConfig, evolve_kwargs: dict, cohort_pool: list[tuple[str, str, str]],
+    run_id: str, crucible_version: str, gates_hash: str, proposal_ts: str,
+    data_snapshot_hash: str | None, cohort_cfg: CohortConfig | None,
+    cohort_mc_kwargs: dict | None, cohort_gates_hash: str | None,
+    base_components: "dict[str, SleeveComponents] | None" = None,
+) -> tuple[list[CohortCard], dict]:
+    """Run ONLY the cohort gate, over a caller-supplied pool — no mine, no proposer, no per-candidate
+    verdicts (crucible-v12.2).
+
+    This exists because the cohort is a distinct adjudication over a SET, and a substrate can be
+    "clean" in the per-candidate sense (every hypothesis already individually scored) while a cohort
+    test over exactly those hypotheses has never run. `us_equity` was in precisely that state on
+    2026-08-11: 8 cross-sectional pre-registrations, each tested and lost, and a mixed-pool cohort
+    verdict that had never been rendered on any of them. Mining is the wrong instrument there — it
+    would re-score and re-charge hypotheses whose per-candidate answer is already in the ledger.
+
+    ``cohort_pool`` is ``[(candidate_hash, formula, candidate_type), ...]``, normally
+    ``TrialLedger.pre_registered_pool(f"tick-{substrate_id}-")`` — ALL of the substrate's
+    pre-registrations, never a performance-ranked subset (a Sharpe-selected pool through a gate that
+    does not price the selection measured FPR 1.000; the MC null prices only the selection it
+    performs itself). Costs exactly ONE LORD++ test (ADR-4), charged by the caller.
+
+    Returns ``(cohort_cards, provenance)`` — the same pair :func:`_evaluate_cohort_gate` returns, so
+    the orchestrator folds it into a tick identically to the mined path."""
+    ek = {k: v for k, v in evolve_kwargs.items() if k != "candidate_type"}
+    return _evaluate_cohort_gate(
+        pool=cohort_pool, panel=panel, base_returns=base_returns, timestamps=timestamps, cfg=cfg,
+        ek=ek, run_id=run_id, crucible_version=crucible_version, gates_hash=gates_hash,
+        proposal_ts=proposal_ts, data_snapshot_hash=data_snapshot_hash, cohort_cfg=cohort_cfg,
+        cohort_mc_kwargs=cohort_mc_kwargs, cohort_gates_hash=cohort_gates_hash,
+        base_components=base_components)
+
+
 def _evaluate_cohort_gate(
-    *, specs: list[PreRegisteredSpec], panel: Panel, base_returns: dict[str, np.ndarray],
+    *, pool: list[tuple[str, str, str]], panel: Panel, base_returns: dict[str, np.ndarray],
     timestamps: np.ndarray, cfg: FitnessConfig, ek: dict, run_id: str, crucible_version: str,
     gates_hash: str, proposal_ts: str, data_snapshot_hash: str | None,
     cohort_cfg: CohortConfig | None, cohort_mc_kwargs: dict | None, cohort_gates_hash: str | None,
@@ -339,12 +377,10 @@ def _evaluate_cohort_gate(
     admitted_types = {"overlay"}
     if cohort_cfg.include_cross_sectional:
         admitted_types.add("cross_sectional")
-    formulas = {pr.candidate_hash: pr.formula
-                for pr in specs if pr.spec.candidate_type in admitted_types}
+    formulas = {h: f for h, f, ct in pool if ct in admitted_types}
     if not formulas:
         return [], {}
-    candidate_types = {pr.candidate_hash: pr.spec.candidate_type
-                       for pr in specs if pr.spec.candidate_type in admitted_types}
+    candidate_types = {h: ct for h, f, ct in pool if ct in admitted_types}
     n_xs = sum(1 for t in candidate_types.values() if t == "cross_sectional")
     pch = pool_content_hash(formulas, candidate_types)
     cgh = cohort_gates_hash or ""

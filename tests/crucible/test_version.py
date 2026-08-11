@@ -100,7 +100,13 @@ def test_versions_are_distinct_and_tagged_form() -> None:
     # how a stream was produced; the deflation N grows, which is strictly stricter; ADR-4 still charges
     # ONE LORD++ test per cohort evaluated. CRU-1 holds — an all-overlay pool hashes and seeds
     # byte-identically (pool_content_hash folds candidate_type only for non-overlay members).
-    assert CRUCIBLE_VERSION == "crucible-v12.1"
+    # v13.0 makes the cohort a test the SCHEDULER can see, and lifts the hypothesis bank off 8.
+    # MAJOR (changes which hypotheses a tick tests and when a tick fires — the v10.0/v12.0 rule),
+    # with no threshold and no gate byte moved. Trigger: us_equity refused to mine twice on
+    # 2026-08-11 — once because the 8-formula seed bank was exhausted against its own ledger, once
+    # because substrate_dirty keyed only on per-candidate novelty and so reported "nothing to do"
+    # about a cohort test that had never run. Both paths are opt-in and default off (CRU-1).
+    assert CRUCIBLE_VERSION == "crucible-v13.0"
     assert CRUCIBLE_BASELINE_VERSION == "crucible-v1.0"
     assert CRUCIBLE_VERSION != CRUCIBLE_BASELINE_VERSION
 
