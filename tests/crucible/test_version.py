@@ -17,6 +17,7 @@ ROOT = Path(__file__).resolve().parents[2]
 GATES = ROOT / "configs" / "signal_eval.gates.yaml"
 TAIWAN_GATES = ROOT / "configs" / "taiwan_signal_eval.gates.yaml"
 SMALLCAP_ALTDATA_GATES = ROOT / "configs" / "taiwan_smallcap_altdata.gates.yaml"
+SMALLCAP_MINING_GATES = ROOT / "configs" / "taiwan_smallcap_signal_eval.gates.yaml"
 
 
 def test_versions_are_distinct_and_tagged_form() -> None:
@@ -106,7 +107,12 @@ def test_versions_are_distinct_and_tagged_form() -> None:
     # 2026-08-11 — once because the 8-formula seed bank was exhausted against its own ledger, once
     # because substrate_dirty keyed only on per-candidate novelty and so reported "nothing to do"
     # about a cohort test that had never run. Both paths are opt-in and default off (CRU-1).
-    assert CRUCIBLE_VERSION == "crucible-v13.0"
+    # v13.1 = `taiwan_smallcap` wired as a substrate. MINOR: it ADDS a panel + its base-book binding
+    # + a new gates file, and changes no verdict function and no existing gate byte. The builder was
+    # trapped inside a probe script (the orchestrator could not import it), so the substrate carrying
+    # six causally-aligned per-name channels — and the only PROMISING ever recorded — could be scored
+    # but never mined. All five probe scorecards were re-run and verified numerically identical.
+    assert CRUCIBLE_VERSION == "crucible-v13.1"
     assert CRUCIBLE_BASELINE_VERSION == "crucible-v1.0"
     assert CRUCIBLE_VERSION != CRUCIBLE_BASELINE_VERSION
 
@@ -176,6 +182,19 @@ def test_smallcap_altdata_probe_gates_hash_registered() -> None:
     assert gates_hash(SMALLCAP_ALTDATA_GATES) == "0ccf6dd584f0"
 
 
+def test_smallcap_mining_gates_hash_registered() -> None:
+    """CRU-1 registration of the small/mid-cap MINING gates file (crucible-v13.1).
+
+    Separate from the probe file above, deliberately: that one is a sealed pre-registration whose
+    hash is the anti-p-hacking seal on P1/P2/P3, so appending a `generation:` block to it would have
+    broken the seal on results already recorded. This is a fourth parallel pathway, and pinning it
+    here gives the miner's own gate the same anti-goal-post-move protection — a threshold moved after
+    seeing a mining result trips a red rather than passing silently.
+
+    The three older hashes are asserted unchanged above: wiring a substrate moved no existing gate."""
+    assert gates_hash(SMALLCAP_MINING_GATES) == "ce5331977919"
+
+
 def test_gates_files_are_lf_so_the_moat_is_portable() -> None:
     """The three hashes above are over RAW BYTES, so they are line-ending-sensitive: a stock Windows
     checkout (``core.autocrlf=true``) rewrites every gates YAML to CRLF and moves all three
@@ -188,7 +207,7 @@ def test_gates_files_are_lf_so_the_moat_is_portable() -> None:
     ``.gitattributes`` pins ``configs/*.gates.yaml text eol=lf`` to prevent it. This asserts the rule
     actually took effect in THIS working tree (an editor can still save CRLF), and fails loudly with
     the diagnosis instead of leaving three unexplained hash mismatches."""
-    for p in (GATES, TAIWAN_GATES, SMALLCAP_ALTDATA_GATES):
+    for p in (GATES, TAIWAN_GATES, SMALLCAP_ALTDATA_GATES, SMALLCAP_MINING_GATES):
         assert b"\r\n" not in p.read_bytes(), (
             f"{p.name} has CRLF line endings. gates_hash() is a SHA-256 over raw bytes, so every "
             f"frozen CRU-1 hash in this file will mismatch. This is a CHECKOUT ARTIFACT, not a gate "

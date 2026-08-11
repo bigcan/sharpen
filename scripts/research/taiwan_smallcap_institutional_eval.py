@@ -35,6 +35,7 @@ from finrl_pro_ds.signals.scorecard import (  # noqa: E402
     to_markdown,
     write_scorecard,
 )
+from finrl_pro_ds.crucible.data import taiwan_smallcap_panel as tsp  # noqa: E402
 from finrl_pro_ds.signals.spec import SignalSpec  # noqa: E402
 import taiwan_smallcap_altdata_eval as base  # noqa: E402
 
@@ -44,7 +45,7 @@ _HZ = (1, 5, 10, 21, 63)
 _NEU = ("winsor", "zscore", "sector", "size")
 _UNI = "twse_smallcap_caprank_51_250"
 _CP = "tw_smallcap_standard"
-FLOW_WINDOW = 21          # pre-registered
+FLOW_WINDOW = tsp.FLOW_WINDOW          # pre-registered
 
 # Honest CUMULATIVE count on this substrate. The pre-reg said 5 (3 alt-data + these 2), but R1/R2
 # and S1 have since been run on the SAME panel, so the true count is 8. Using the larger, stricter
@@ -52,21 +53,10 @@ FLOW_WINDOW = 21          # pre-registered
 DECLARED_HYPOTHESES = 8
 
 
-def _flow_events(inst: pd.DataFrame, col: str, out_col: str) -> pd.DataFrame:
-    """Rolling `FLOW_WINDOW`-day SUM of a net-flow column, per stock, carrying its avail_date.
-
-    The sum ends at the row's own trading date and the row is already stamped
-    ``avail_date = date + 1 business day`` by the fetcher (T86 publishes after the close), so the
-    value can only enter the panel on a session strictly after every bar it uses (LEAK-2).
-    """
-    d = inst[["stock_id", "date", "avail_date", col]].copy()
-    d["stock_id"] = d["stock_id"].astype(str)
-    d["date"] = pd.to_datetime(d["date"])
-    d["avail_date"] = pd.to_datetime(d["avail_date"])
-    d = d.sort_values(["stock_id", "date"])
-    d[out_col] = (d.groupby("stock_id")[col]
-                  .rolling(FLOW_WINDOW, min_periods=FLOW_WINDOW).sum().reset_index(level=0, drop=True))
-    return d.dropna(subset=[out_col])[["stock_id", "avail_date", out_col]]
+#: Rolling `FLOW_WINDOW`-day SUM of a net-flow column, per stock, carrying its avail_date. Owned by
+#: the library panel builder since `taiwan_smallcap` was wired as a Crucible substrate, so the miner
+#: and this probe read the identical channel; re-exported here under its original name.
+_flow_events = tsp.flow_events
 
 
 class _FlowIntensity:

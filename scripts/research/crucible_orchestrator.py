@@ -297,6 +297,52 @@ def _build_substrate(args, cfg, ek, meta, sweep, sweep_hash) -> tuple[Substrate,
             base, base_components = intraday_base_sleeves(
                 panel, hold_horizon=int(base_hold), cost_bps=ek["cost_bps"],
                 periods_per_year=float(cfg.periods_per_year), return_components=True)
+        elif meta["panel"] == "taiwan_smallcap":
+            # The cap-rank 51-250 TWSE/TPEx small/mid-cap panel. Unlike every other real substrate
+            # this one carries its alt-data NATIVELY: six per-name (T,N) channels (month-revenue YoY,
+            # margin + short utilization, big-holder concentration, foreign + trust net flow) are
+            # built into the panel by its own builder from local parquets, each already causality-
+            # tripwired by the probe campaign that introduced it. So there is no per-name bridge call
+            # here — `ALL_CHANNELS` IS the per-name surface, and it reaches the cross-sectional
+            # search directly (crucible-v7.1 shape filter).
+            #
+            # The BROADCAST bridge still runs: TWSE/TAIFEX positioning series are per-DAY terminals
+            # the overlay proposer needs, and without any feature slot of that shape a tick emits no
+            # `candidate_type="overlay"` specs and the cohort hook returns before `evaluate_cohort`
+            # is ever called — the failure that kept the selection-aware MC null off the us_equity
+            # substrate until 2026-08-10.
+            import dataclasses
+
+            from finrl_pro_ds.crucible.data.altdata_bridge import bridge_altdata_feature_slots
+            from finrl_pro_ds.crucible.data.taiwan_altdata import (
+                TAIWAN_ALTDATA_ALIASES,
+                taiwan_connectors,
+            )
+            from finrl_pro_ds.crucible.data.taiwan_smallcap_panel import (
+                ALL_CHANNELS,
+                build_taiwan_smallcap_panel,
+            )
+            from finrl_pro_ds.signals.generation.base_sleeves import taiwan_base_sleeves
+            panel = build_taiwan_smallcap_panel(channels=ALL_CHANNELS)
+            if not args.no_altdata_slots:
+                bar_start = np.datetime_as_string(panel.dates.min(), unit="D")
+                bar_end = args.end or np.datetime_as_string(panel.dates.max(), unit="D")
+                slots = bridge_altdata_feature_slots(
+                    bar_dates=panel.dates, start=bar_start, end=bar_end, catalog=catalog,
+                    connectors=taiwan_connectors(), aliases=TAIWAN_ALTDATA_ALIASES)
+                if slots:
+                    panel = dataclasses.replace(
+                        panel, feature_slots={**panel.feature_slots, **slots})
+                log.info("taiwan_smallcap: %d native per-name channels + %d bridged broadcast slots",
+                         len(ALL_CHANNELS), len(slots))
+            # Same TX/TE/TF futures book as the `taiwan` substrate — see config.py's
+            # _WIRED_SUBSTRATES note for the measurement that chose it over the US ETF core.
+            # `start=None` lets the sleeve take the PANEL's own first bar (2005) rather than
+            # args.start (2008 by default), so the comparator covers every bar the candidate marks.
+            base_hold = meta.get("base_hold_horizon") or ek["hold_horizon"]
+            base, base_components = taiwan_base_sleeves(
+                panel, hold_horizon=int(base_hold), cost_bps=ek["cost_bps"],
+                start=None, end=args.end, return_components=True)
         elif meta["panel"] == "taiwan":
             import dataclasses
 
