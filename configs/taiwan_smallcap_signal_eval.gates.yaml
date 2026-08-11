@@ -1,0 +1,107 @@
+# Gates for MINING the Taiwan small/mid-cap substrate with the Crucible orchestrator.
+#
+# WHY THIS IS A SEPARATE FILE FROM configs/taiwan_smallcap_altdata.gates.yaml. That one is the
+# SEALED pre-registration of the 2026-07-15 probe campaign — its hash is the anti-p-hacking seal on
+# P1/P2/P3, and appending a `generation:` block to it would change that hash and break the seal on
+# results already recorded. This file carries the SAME funnel blocks (so the miner is judged on the
+# same universe/cost/neutralization reality the probes were) plus the `generation:` block the
+# orchestrator reads. Registering a NEW gates file is CRU-1 MINOR: it cannot move any recorded
+# verdict, and the three frozen hashes are untouched.
+#
+# TWO DISJOINT CONSUMERS, no key overlap (same split as configs/taiwan_signal_eval.gates.yaml):
+#   - universe/coverage/.../promotion  → Gates.from_yaml() (the T0-T5 IC funnel)
+#   - generation                       → signals.generation.config (the C3 miner)
+#
+# Scope caveats baked into these numbers (read before trusting any verdict):
+#   - Universe = cap-rank 51-250 small/mid band, monthly PIT membership. NOT survivorship-free (the
+#     free FinMind feed enumerates CURRENTLY-LISTED names, and this is the band where delisting is
+#     most common) ⇒ every number here is an UPPER BOUND. panel.meta.survivorship_free=False and the
+#     scorecard prints it.
+#   - The sector partition is a mandatory neutralization control and is NOT point-in-time; it is
+#     pinned to pool.frozen.parquet + a sector_map_sha (P1-REPRO-01). Do not un-pin it.
+universe:
+  id: twse_smallcap_caprank_51_250
+  min_names_per_day: 60            # a real cross-section (~200-name band); days below are excluded
+  min_adv_usd: 0.0                 # ADV FLOOR is enforced upstream in the universe builder (TWD),
+                                   # not by Gates; kept 0 here so the funnel does not double-cut.
+coverage:
+  min_days: 1000                   # ~4y; the 集保 shareholding channel is the binding short one (~2016+)
+  max_nan_frac: 0.60               # alt-data (monthly/weekly, forward-filled) is sparser than price;
+                                   # early bars before 13m revenue / first 集保 print are legitimately NaN
+  max_ohlc_violations: 0           # DATA-CLEAN: any OHLC violation halts (PF-XCHECK)
+gross_power:
+  horizons: [1, 5, 10, 21, 63]
+  primary_horizon: 21              # monthly rebalance = LOW TURNOVER (the only tax-survivable regime)
+  promising_ic_ir: 0.05
+  promising_ic_tstat: 3.0
+deflation:
+  promising_dsr: 0.90
+  fdr_q_max: 0.10
+  use_effective_n: false
+  hlz_t_min: 3.0
+  require_hlz: false
+cpcv:
+  enabled: true
+  n_groups: 6
+  k_test: 2
+  embargo_days: 5
+robustness:
+  min_subperiod_ic_ir: 0.0
+  recent_oos_years: 2
+capturability:
+  # Taiwan cost trio — 0.30% securities-transaction TAX is SELL-side only, converted to the
+  # harness's symmetric one-way model (~half buys / half sells per rebalance):
+  #   standard ≈ 0.5·(buy comm ~0.06%) + 0.5·(sell comm ~0.06% + 0.30% tax) ≈ 0.0021 (~2× US).
+  cost_models:
+    frictionless: 0.0
+    us_equiv_ref: 0.0010           # US equity standard — CONTRAST ONLY, not the Taiwan reality
+    standard: 0.0021               # Taiwan e-broker discounted commission + 0.30% sell tax
+    harsh: 0.0029                  # Taiwan full 0.1425% commission (undiscounted) + sell tax
+  cost_wall_caution: 0.30
+neutralization:
+  winsor_pct: [0.01, 0.99]
+  controls: [sector, size]         # size = log trailing TWD ADV; sector = FinMind industry_category
+promotion:
+  survivorship_free_required: true # a GO earns only "PROMISING, forward-incubate" — never a position
+  tier2_audit_required: true       # PIT rebuild + Tier-2 deep lifecycle audit before ANY capital
+
+generation:                          # Component 3 — the Crucible mining substrate.
+                                     # Read ONLY by signals.generation.config. NEVER hardcode these.
+  enabled: false                     # opt-in (GP8-01); a real run passes --force explicitly
+  panel: taiwan_smallcap             # cap-rank 51-250 daily panel (crucible/data/taiwan_smallcap_panel)
+  base_sleeves: [tsmom]              # TX/TE/TF futures TSMOM — the SAME book as the `taiwan`
+                                     # substrate. Chosen by measurement on this panel's own clock
+                                     # (SR +0.273, finite on 5291/5292 bars) over the US ETF core
+                                     # (SR +0.511 but only 87.3% of bars match an ETF session).
+                                     # See _WIRED_SUBSTRATES in signals/generation/config.py.
+  periods_per_year: 252.0            # daily substrate
+  hold_horizon: 21                   # monthly rebalance — the only tax-survivable regime here
+  pop_size: 200
+  n_generations: 40
+  rng_seed: 7                        # determinism (ADR-C3-6)
+  elite_frac: 0.30
+  cost_bps: 0.0021                   # the TAIWAN one-way reality (commission + 0.30% sell tax), NOT
+                                     # the 0.0010 US default the `taiwan` ETF cell uses. Charged to
+                                     # the candidate AND the base book on their own turnover. A
+                                     # taxed market is the substrate's defining constraint: pricing
+                                     # a small-cap L/S book at US friction would manufacture edges
+                                     # that cannot be traded here (cf. crucible-v11.0 capturability).
+  ls_min_names: 60                   # min active names for a rank-L/S book. Matches the funnel's
+                                     # min_names_per_day, so a day too thin for the funnel to SCORE
+                                     # also produces a flat candidate book rather than a 6-name bet.
+  max_ast_nodes: 24                  # complexity / dimensional bound (ADR-C3-4/5)
+  turnover_soft_cap: 12.0            # ann turnover where the penalty starts
+  lambda_turnover: 0.05
+  lambda_complexity: 0.10
+  min_combination_uplift: 0.10       # PROMISING needs ΔSR_oos ≥ this vs the TSMOM base book
+  hlz_t_min: 3.0                     # on the MARGINAL contribution b_aug-b_base (GP4-03)
+  promising_dsr: 0.90
+  max_base_corr: 0.70                # GP4-01: reject a candidate collinear with the base sleeve
+  delta_median_min: 0.0              # median(ΔSR paths) floor — central path must not be a loss
+  frac_positive_min: 0.50            # min fraction of CPCV paths with ΔSR > 0 (majority-positive)
+  holdout_frac: 0.25                 # embargoed held-out tail for FINAL validation (ADR-C3-3)
+  holdout_embargo_days: 21
+  cpcv_n_groups: 6
+  cpcv_k_test: 2
+  cpcv_embargo_days: 21
+  cpcv_purge_horizon: 1              # GP4-05: right-seam purge (book return at t reaches t+1)
