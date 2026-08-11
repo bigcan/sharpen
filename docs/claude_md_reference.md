@@ -157,6 +157,18 @@ docker/live/
 python scripts/research/crucible_orchestrator.py --mode synthetic --nights 4      # noise panel, reproducible, no data cost
 python scripts/research/crucible_orchestrator.py --mode real --start 2008-01-01 --nights 4   # real data, ticks only when substrate_dirty
 
+# Which substrate a real run mines comes from `generation.panel` in the --config gates file, NOT a
+# CLI flag. The wired panels are {cross_asset, taiwan, taiwan_smallcap, us_equity, intraday,
+# intraday_fx} (signals/generation/config.py::_WIRED_SUBSTRATES); each pins the exact base book the
+# runner builds, so a config naming a book the runner does not build fails fast instead of silently
+# scoring against nothing.
+python scripts/research/crucible_orchestrator.py --mode real --nights 1 --force \
+    --config configs/taiwan_smallcap_signal_eval.gates.yaml   # cap-rank 51-250 TW small/mid-cap
+# NOTE this substrate stamps implied MDE ΔSR 1.55 against the guard's 0.50 ceiling, so the power
+# guard REFUSES it; mining it anyway needs an explicit --force-underpowered (an operator decision —
+# it spends LORD++ FDR wealth at low detection probability). Measure before deciding:
+python scripts/research/crucible_real_alpha_breadth.py --panel taiwan_smallcap --hold 21
+
 # Manual single-cycle loop (P2, no orchestrator)
 python scripts/research/crucible_hypothesis_loop.py --mode {synthetic|real} [--start YYYY-MM-DD]
 

@@ -766,7 +766,46 @@ from pathlib import Path
 # CRU-1: every new path is opt-in and defaults OFF (`extended_cs_bank=False`; `cohort_pending` cannot
 # fire when the cohort gate is disabled), so a pre-v13.0 tick's proposal batch, dirty decision and
 # manifest are byte-identical. No recorded verdict moves.
-CRUCIBLE_VERSION = "crucible-v13.0"
+# `crucible-v13.1` is the **MINOR** bump that wires `taiwan_smallcap` as a substrate: the cap-rank
+# 51-250 TWSE/TPEx small/mid-cap daily panel becomes something the orchestrator can MINE, not only
+# something four probe scripts could score.
+#
+# WHAT WAS ACTUALLY WRONG. The panel builder lived inside
+# `scripts/research/taiwan_smallcap_altdata_eval.py` and the other three probe scripts reached it by
+# `sys.path` injection. The orchestrator could not import it at all, so the one substrate in this
+# project carrying six causally-aligned per-name alt-data channels — and the only PROMISING ever
+# recorded (P1 `tw_smallcap_mom_rev`) — had a full evaluation path and NO mining path. The two halves
+# of the system could not meet on it, the same shape as the v12.1 cross-sectional mispairing.
+#
+# SHIPS:
+#   * `crucible/data/taiwan_smallcap_panel.py` — the builder, promoted verbatim into the library with
+#     its causal helpers, plus the flow/short channels that had been re-implemented in the two
+#     2026-07-31 probe scripts. `balance_util` is now ONE function for the margin and short legs of
+#     `margin_short.parquet`, which differ only in which column is divided; they were hand-copied and
+#     a divergence between them would have been invisible (both produce well-formed numbers).
+#   * `taiwan_smallcap` in `_WIRED_SUBSTRATES` (book: TX/TE/TF futures TSMOM, shared with `taiwan`)
+#     + an orchestrator branch + `configs/taiwan_smallcap_signal_eval.gates.yaml` (a NEW file — the
+#     probe gates file is a sealed pre-registration and appending to it would break that seal).
+#
+# THE BOOK IS A MEASUREMENT, NOT A CONVENTION. Both candidate comparators were priced on this panel's
+# own clock at hold 21 / 10bps: TX/TE/TF futures TSMOM SR +0.273 on 5291 of 5292 bars, versus the
+# validated US ETF core SR +0.511 on only 4620 (87.3%). The binding rule is that the comparator must
+# not bleed; the Taiwan book clears it, so the higher Sharpe does not buy enough to accept a book
+# that is FLAT on 12.7% of the panel — that gap is the same free-pass channel a bleeding comparator
+# opens. `us_equity` had no such choice (its native comparator is a recorded NO-GO).
+#
+# NOT A DISCOVERY CLAIM, and specifically not a power claim. Wiring a substrate says the miner can
+# now reach it; whether it can DETECT anything there is a separate measurement the power guard makes
+# on its own (`crucible_real_alpha_breadth.py --panel taiwan_smallcap`). The substrate is also
+# survivorship-biased by construction — the free FinMind feed enumerates currently-listed names, in
+# the band where delisting is most common — so every number it produces is an UPPER BOUND, and
+# `panel.meta.survivorship_free = False` carries that into every scorecard.
+#
+# CRU-1: the three frozen gate hashes are untouched (`519158fa1450` / `22a18172be1a` /
+# `0ccf6dd584f0`); the new gates file is a fourth, registered in tests. Every changed probe script
+# was re-run and its scorecard verified byte-identical to the pre-refactor artifact. No recorded
+# verdict moves.
+CRUCIBLE_VERSION = "crucible-v13.1"
 
 # The baseline (pre-gate-repair) system, preserved as a git tag for reproducibility comparisons.
 CRUCIBLE_BASELINE_VERSION = "crucible-v1.0"

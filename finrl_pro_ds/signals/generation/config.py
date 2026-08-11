@@ -19,6 +19,21 @@ from .fitness import FitnessConfig
 _WIRED_SUBSTRATES: dict[str, frozenset[str]] = {
     "cross_asset": frozenset({"tsmom", "rates_carry"}),
     "taiwan": frozenset({"tsmom"}),
+    # The cap-rank 51-250 TWSE/TPEx small/mid-cap daily panel
+    # (crucible/data/taiwan_smallcap_panel.py) — the substrate the 2026-07/08 probe campaigns were
+    # scored on, which until now had an evaluation path and NO mining path.
+    #
+    # It SHARES the `taiwan` book (TX/TE/TF futures TSMOM) rather than importing the US ETF core the
+    # way `us_equity` does, and that is a measurement, not a convention. Both candidates were priced
+    # on this panel's own clock at hold 21 / 10bps:
+    #   * TX/TE/TF futures TSMOM     SR +0.273, finite on 5291 of 5292 bars
+    #   * US ETF {tsmom,rates_carry} SR +0.511, but only 4620 of 5292 bars (87.3%) match an ETF
+    #     session — on the other 672 the base book marks nothing while the candidate does.
+    # The binding constraint is THE COMPARATOR MUST NOT BLEED, and the Taiwan book clears it (+0.273
+    # > 0), so the higher Sharpe does not buy enough to accept a comparator that is flat on 12.7% of
+    # the panel — that gap is the same free-pass channel a bleeding book opens. `us_equity` had no
+    # such choice: its native comparator (large-cap cross-sectional momentum) is a recorded NO-GO.
+    "taiwan_smallcap": frozenset({"tsmom"}),
     # S553-cont-152: top-300 PIT S&P 500 names, daily (crucible/data/us_equity_panel.py). The book is
     # the SAME validated {tsmom, rates_carry} ETF core as `cross_asset`, computed on the ETF panel and
     # joined onto the equity clock by `us_equity_base_sleeves` — deliberately NOT an equity-native

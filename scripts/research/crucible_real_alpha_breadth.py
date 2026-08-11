@@ -63,7 +63,7 @@ OUT = ROOT / "results" / "signal_eval" / "crucible_equity_breadth"
 #: NOTE `n_eff_realized` itself is INVARIANT to this — it is (IR/IC)^2/rpy with IR = (m/s)*sqrt(rpy),
 #: so rpy cancels exactly. Only the derived columns move.
 PANEL_PPY = {"us_equity": 252.0, "cross_asset": 252.0, "taiwan": 252.0,
-             "intraday_fx": 5694.0, "intraday": 5694.0}
+             "taiwan_smallcap": 252.0, "intraday_fx": 5694.0, "intraday": 5694.0}
 
 NEU = ("winsor", "zscore")     # sector unknown for former members; size omitted to stay generic
 MIN_ABS_IC = 0.004             # below this the (IR/IC)^2 inversion is numerically meaningless
@@ -111,7 +111,8 @@ def main() -> int:
     ap.add_argument("--k", type=int, default=300)
     ap.add_argument("--hold", type=int, default=1)
     ap.add_argument("--panel", default="us_equity",
-                    choices=("us_equity", "cross_asset", "taiwan", "intraday_fx", "intraday"),
+                    choices=("us_equity", "cross_asset", "taiwan", "taiwan_smallcap",
+                             "intraday_fx", "intraday"),
                     help="which WIRED substrate to measure (uses that substrate's own builder)")
     ap.add_argument("--min-names", type=int, default=None,
                     help="min active names per bar; defaults to 30 (us_equity) or 6 (small panels)")
@@ -129,6 +130,9 @@ def main() -> int:
     elif args.panel == "taiwan":
         from finrl_pro_ds.data.taiwan_panel_loader import load_taiwan_panel
         panel = load_taiwan_panel(None, None)
+    elif args.panel == "taiwan_smallcap":
+        from finrl_pro_ds.crucible.data.taiwan_smallcap_panel import build_taiwan_smallcap_panel
+        panel = build_taiwan_smallcap_panel()
     elif args.panel == "intraday_fx":
         from finrl_pro_ds.crucible.data.intraday_panel import build_fx_majors_panel
         panel = build_fx_majors_panel()
@@ -137,7 +141,7 @@ def main() -> int:
         panel = build_intraday_panel()
     univ = panel.active.astype(bool)
     min_names = args.min_names if args.min_names is not None else (
-        30 if args.panel == "us_equity" else 6)
+        30 if args.panel in ("us_equity", "taiwan_smallcap") else 6)
     with np.errstate(invalid="ignore", divide="ignore"):
         rets = np.diff(np.log(panel.close), axis=0, prepend=np.nan)
     ppy = PANEL_PPY[args.panel]

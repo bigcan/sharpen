@@ -76,6 +76,44 @@ def test_unknown_panel_is_rejected(tmp_path: Path) -> None:
         load_generation_config(p)
 
 
+def test_taiwan_smallcap_substrate_is_accepted(tmp_path: Path) -> None:
+    """panel=taiwan_smallcap + the TSMOM-only TX/TE/TF book (the wired small/mid-cap substrate)."""
+    p = tmp_path / "tw_sc.yaml"
+    p.write_text("generation: {enabled: true, panel: taiwan_smallcap, base_sleeves: [tsmom]}\n",
+                 encoding="utf-8")
+    fit, ek = load_generation_config(p)
+    assert fit.n_groups == 6
+    meta = load_generation_meta(p)
+    assert meta["panel"] == "taiwan_smallcap" and meta["base_sleeves"] == ["tsmom"]
+
+
+def test_taiwan_smallcap_rejects_the_us_book(tmp_path: Path) -> None:
+    """The measurement chose the TX/TE/TF book over the US ETF core; naming the latter fails fast
+    rather than silently scoring candidates against a book the runner never builds."""
+    p = tmp_path / "tw_sc_bad.yaml"
+    p.write_text("generation: {panel: taiwan_smallcap, base_sleeves: [tsmom, rates_carry]}\n",
+                 encoding="utf-8")
+    with pytest.raises(ValueError, match="base_sleeves for panel='taiwan_smallcap'"):
+        load_generation_config(p)
+
+
+def test_shipped_taiwan_smallcap_gates_generation_block_is_valid() -> None:
+    """configs/taiwan_smallcap_signal_eval.gates.yaml is the miner's entry point for this substrate.
+
+    `cost_bps` is pinned because it is the substrate's defining constraint: 0.0021 is the Taiwan
+    one-way reality (commission + the 0.30% sell-side transaction tax), roughly 2x the US 0.0010 the
+    other daily cells use. Pricing a small-cap L/S book at US friction would manufacture edges that
+    cannot be traded here."""
+    gates = ROOT / "configs" / "taiwan_smallcap_signal_eval.gates.yaml"
+    fit, ek = load_generation_config(gates)
+    assert fit.periods_per_year == 252.0 and ek["hold_horizon"] == 21
+    assert ek["cost_bps"] == 0.0021
+    meta = load_generation_meta(gates)
+    assert meta["panel"] == "taiwan_smallcap"
+    assert meta["base_sleeves"] == ["tsmom"]
+    assert meta["enabled"] is False                    # opt-in stays off; a real run passes --force
+
+
 def test_shipped_taiwan_gates_generation_block_is_valid() -> None:
     """The shipped configs/taiwan_signal_eval.gates.yaml carries a valid `taiwan` generation block
     (step 4) — the runner's opt-in gate is off (real run uses --force) and the book is TSMOM-only."""
