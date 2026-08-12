@@ -113,6 +113,31 @@ def _card_for(cand: Candidate, ct: str, report: GenerationReport,
     )
 
 
+def _holdout_rejections(report: GenerationReport, ct: str) -> set[tuple[str, str]]:
+    """``(candidate_type, formula)`` keys that REACHED the holdout gate and FAILED it.
+
+    Keyed on the type as well as the formula because the two mining groups are scored against
+    different contexts (an overlay multiplies the base book, a cross-sectional genome does not), so
+    "this formula was adjudicated" is only meaningful together with the group that adjudicated it.
+    Entries with no ``holdout_passes`` key (``degenerate`` / ``fitness raised``) are NOT rejections —
+    scoring never produced a verdict on them."""
+    return {(ct, str(hv["formula"])) for hv in report.holdout_validation
+            if hv.get("holdout_passes") is False and hv.get("formula") is not None}
+
+
+def _rejection_class(*, search_memory_cfg: "SearchMemoryConfig | None", substrate_mde: float | None,
+                     cfg: FitnessConfig, corrected_cfg: "CorrectedConfig | None") -> str | None:
+    """U4 class for a candidate the holdout gate REJECTED — ``DECISIVE`` when this substrate had the
+    power to resolve an economically interesting edge, ``UNDERPOWERED`` when it did not. ``None``
+    (never classified) when the search memory is detached or the substrate carries no power stamp;
+    the caller is responsible for having established that a rejection actually happened."""
+    if search_memory_cfg is None:
+        return None
+    return classify_rejection(implied_mde=substrate_mde,
+                              economic_floor=_economic_floor(cfg, corrected_cfg),
+                              cfg=search_memory_cfg)
+
+
 def _economic_floor(cfg: FitnessConfig, corrected_cfg: "CorrectedConfig | None") -> float:
     """The smallest marginal ΔSR the ACTIVE decision contract would call a discovery — the yardstick U4
     measures a rejection's decisiveness against. Under the corrected contract that is
@@ -175,7 +200,9 @@ def run_hypothesis_loop(
     was no ⇒ terminal, the family dies) or ``UNDERPOWERED`` (it did not ⇒ parked, re-testable when the
     substrate deepens). Both default to None ⇒ no classification, byte-identical to pre-U4: the
     ``verdict`` column and the manifest are untouched either way, since the class lives in its own
-    nullable ledger column (:mod:`crucible.search_memory`)."""
+    nullable ledger column (:mod:`crucible.search_memory`). The classification covers EVERY candidate
+    the holdout gate adjudicated, whichever of the two ledger loops below writes its row — see the G1
+    comment there for why restricting it to the surfaced set recorded zero classes for 5 weeks."""
     ledger = author.ledger
     n_before = ledger.count()
 
@@ -205,6 +232,12 @@ def run_hypothesis_loop(
     reports: dict[str, GenerationReport] = {}
     cards: list[DiscoveryCard] = []
     verdicts: dict[str, str] = {}
+    # U4 (G1 fix): every ``(candidate_type, formula)`` the holdout gate ADJUDICATED and REJECTED, across
+    # both mining groups. Accumulated here rather than looked up per surfaced candidate because the
+    # holdout-tested population and the SURFACED population are different sets — see the second ledger
+    # loop below, where the majority of them are written.
+    holdout_rejected: set[tuple[str, str]] = set()
+    n_classified = 0                             # rejections that actually got a class on a ledger row
     for ct in ("cross_sectional", "overlay"):
         seeds = [pr.formula for pr in specs if pr.spec.candidate_type == ct]
         if not seeds:
@@ -214,6 +247,7 @@ def run_hypothesis_loop(
                         base_components=base_components, contract=contract,
                         corrected_cfg=corrected_cfg, lord_level=lord_level, **ek)
         reports[ct] = report
+        holdout_rejected |= _holdout_rejections(report, ct)
         promising_hashes = {candidate_hash(c.formula) for c in report.promising}
         # Record every surfaced genome to the ledger (file-drawer): the hall-of-fame UNION the
         # gate-passers. report.promising is NOT guaranteed a subset of hall_of_fame, so a PROMISING
@@ -231,14 +265,13 @@ def run_hypothesis_loop(
             # U4: classify only a candidate that ACTUALLY REACHED the holdout gate and failed it. A
             # train-pre-filter cull (or an offspring blocked by `prereg_only`) was never tested
             # out-of-sample, so calling it a "rejection" — decisive or otherwise — would invent a
-            # negative result that no test produced. `_holdout_entry` returns None for those.
+            # negative result that no test produced. `holdout_rejected` holds neither of those.
             rej_class = None
-            if verdict != _PROMISING and search_memory_cfg is not None:
-                hv_e = _holdout_entry(report, c.formula)
-                if hv_e is not None and hv_e.get("holdout_passes") is False:
-                    rej_class = classify_rejection(
-                        implied_mde=substrate_mde, economic_floor=_economic_floor(cfg, corrected_cfg),
-                        cfg=search_memory_cfg)
+            if verdict != _PROMISING and (ct, c.formula) in holdout_rejected:
+                rej_class = _rejection_class(search_memory_cfg=search_memory_cfg,
+                                             substrate_mde=substrate_mde, cfg=cfg,
+                                             corrected_cfg=corrected_cfg)
+                n_classified += rej_class is not None
             ledger.record(TrialRecord(
                 candidate_hash=chash, crucible_version=crucible_version,
                 family=(pr.spec.family if pr else None), candidate_type=ct,
@@ -268,15 +301,48 @@ def run_hypothesis_loop(
     # SCORED_NOT_SELECTED (NON-killing). LEDGER-ONLY — the run manifest's `verdicts` keeps documenting
     # surfaced genomes, so a synthetic null run (0 promising) stays byte-identical (reproduce contract).
     # The monotone upsert (C7-04) preserves each row's CR-2 spec_json / proposal_ts / family.
+    #
+    # U4 (G1 fix — a repair to the crucible-v10.0 capability, not a new one): these rows carry the
+    # REJECTION CLASS too. "Not surfaced" and "not tested" are different facts, and under
+    # `offspring_policy: prereg_only` (v12.0) they came apart completely: the holdout gate
+    # adjudicates PRE-REGISTERED specs, while `hall_of_fame` is
+    # `ranked[:10]` over every genome the search scored — which the offspring win on train fitness by
+    # construction. Measured on the us_equity ticks: 20 of 20 surfaced rows were offspring
+    # (spec_json NULL) and 145 of 145 pre-registrations landed HERE, so of the 98 candidates that
+    # reached the holdout gate, ZERO passed through the classifying branch above. That is why
+    # `rejection_class` was NULL in every store that has the column while `n_holdout_tested` was 98 —
+    # the class was computed over the surfaced set and the adjudicated set never intersected it.
+    # The VERDICT is deliberately unchanged: `rejection_class` is its own nullable column, so the
+    # manifest and the reproduce contract stay byte-identical (this is ledger-only, as U4 was).
     for pr in specs:
         if pr.candidate_hash in verdicts:
             continue
+        rej_class = (_rejection_class(search_memory_cfg=search_memory_cfg,
+                                      substrate_mde=substrate_mde, cfg=cfg,
+                                      corrected_cfg=corrected_cfg)
+                     if (pr.spec.candidate_type, pr.formula) in holdout_rejected else None)
+        n_classified += rej_class is not None
         ledger.record(TrialRecord(
             candidate_hash=pr.candidate_hash, crucible_version=crucible_version,
             family=pr.spec.family, candidate_type=pr.spec.candidate_type, formula=pr.formula,
             economic_rationale=pr.economic_rationale, first_seen_run=run_id,
             proposal_ts=pr.proposal_ts, verdict=_SCORED_NOT_SELECTED,
-            data_snapshot_hash=data_snapshot_hash))
+            data_snapshot_hash=data_snapshot_hash,
+            rejection_class=rej_class,
+            implied_mde_at_test=(substrate_mde if rej_class is not None else None)))
+
+    # State the search-memory outcome out loud. A silent zero here is the shape of the defect this
+    # closes: it read identically whether the classifier disagreed or was never reached. The count is
+    # of ROWS WRITTEN, which under `offspring_policy: all` can be fewer than the adjudicated set (an
+    # offspring outside the hall of fame gets no file-drawer row at all — pre-existing, NOT U4).
+    if holdout_rejected:
+        _cls = _rejection_class(search_memory_cfg=search_memory_cfg, substrate_mde=substrate_mde,
+                                cfg=cfg, corrected_cfg=corrected_cfg)
+        log.info("U4 search memory: %d holdout rejections, %d classified %s (substrate MDE %s, "
+                 "economic floor %.3f)", len(holdout_rejected), n_classified,
+                 _cls or "NOT AT ALL — no class recorded",
+                 "unmeasured" if substrate_mde is None else f"{substrate_mde:.3f}",
+                 _economic_floor(cfg, corrected_cfg))
 
     # --- Cohort gate (Phase 4, Doc 1/2): OPT-IN weak-signal ensemble over THIS tick's OVERLAY pool.
     # Reads scored return streams only (post-moat, CR-1). Disabled ⇒ no-op AND manifest byte-identical
