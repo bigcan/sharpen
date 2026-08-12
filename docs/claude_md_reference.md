@@ -178,6 +178,13 @@ python scripts/research/crucible_governance.py --lockbox <path> --gov <path> --o
 # Verify a past run reproduces bit-identical from its manifest
 python scripts/research/crucible_reproduce.py results/crucible_orchestrator/<mode>/<tick_ts>
 
+# Campaign record -- READ BEFORE MINING. Rebuilds the tick-level facts from every store (results/,
+# other worktrees, scratch), dedupes rehearsal copies, and classifies each tick TESTED vs
+# SCREENED_ONLY/SCREENED_UNKNOWN so a `promising=0` is never misread as a result.
+python scripts/research/crucible_mining_log.py --root C:/FinRL/FinRL-Pro_DS --root C:/tmp
+# -> docs/research/crucible_mining_log_facts.md (generated) + crucible_mining_log.md (curated:
+#    per-campaign question / binding constraint / what would reopen it, plus the substrate board)
+
 # Support scripts
 python scripts/research/generate_alphas.py                  # base sleeve generation
 python scripts/research/measure_altdata_pool_diversity.py    # data-breadth audit
