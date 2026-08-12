@@ -3,7 +3,7 @@
 Regenerate with `python scripts/research/crucible_mining_log.py`. **Do not hand-edit** —
 curated campaign entries and lessons live in `crucible_mining_log.md`.
 
-Stores scanned: **23** · tick rows: **109** (50 unique, 59 rehearsal duplicates)
+Stores scanned: **23** · tick rows: **109** (50 unique, 59 rehearsal duplicates) · scorecard batches: **15** (3 PROMISING cards)
 
 
 ## Per-substrate rollup (unique ticks only)
@@ -71,6 +71,28 @@ Stores scanned: **23** · tick rows: **109** (50 unique, 59 rehearsal duplicates
 | 48 | 2026-08-11T01:50:28 | `us_equity` | **COHORT_ONLY** | 0 | 0 | 0 | 0 | 7.06e-06 | 4930 | 1726 | 1.31 | `results/crucible_orchestrator/real` | cohort configuration has never adjudicated this substrate's pool |
 | 49 | 2026-08-11T03:15:13 | `us_equity` | **TESTED** | 145 | 20 | 98 | 0 | 0.0482 | - | - | - | `results/crucible_sidecar/us_equity_h21/real` | new data + 145 fresh hypotheses |
 | 50 | 2026-08-11T04:43:51 | `us_equity` | **TESTED** | 145 | 20 | 97 | 0 | 0.0482 | - | - | - | `results/crucible_sidecar/us_equity_h21_ho60/real` | new data + 145 fresh hypotheses |
+
+## Scorecard batches — mining OUTSIDE the orchestrator
+
+Pre-registered probes scored through `signals/eval_harness.py`. They write no tick, so the tick tables above cannot see them — and **every PROMISING in project history is here, not there.**
+
+| batch | H | trials | multiplicity | verdicts | PROMISING | universe | names | store |
+|---|---|---|---|---|---|---|---|---|
+| `country_momentum` | 21 | 2 | 2 (preregistered) | LOGGED 2 | - | intl_country_equity_etf | - | `results/country_momentum` |
+| `crypto_xsec` | 5 | 3 | 3 (preregistered) | LOGGED 3 | - | crypto_perp_10 | - | `results/crypto_xsec` |
+| `demo_synthetic` | 5 | 4 | - | LOGGED 4 | - | synthetic | - | `results/signal_eval/demo_synthetic` |
+| `sp500_alpha101_full` | 5 | 100 | - | LOGGED 100 | - | current S&P 500 constituents (datasets/s-and-p-500-companies) | - | `results/signal_eval/sp500_alpha101_full` |
+| `sp500_alpha101_v1` | 5 | 17 | - | LOGGED 17 | - | current S&P 500 constituents (datasets/s-and-p-500-companies) | - | `results/signal_eval/sp500_alpha101_v1` |
+| `sp500_demo_v1` | 5 | 4 | - | LOGGED 4 | - | current S&P 500 constituents (datasets/s-and-p-500-companies) | - | `results/signal_eval/sp500_demo_v1` |
+| `xlg_top100` | 5 | 100 | - | LOGGED 100 | - | top-100 S&P500 by market cap | - | `results/signal_eval/xlg_megacap_gate/top100` |
+| `xlg_top50` | 5 | 100 | - | LOGGED 100 | - | top-50 S&P500 by market cap | - | `results/signal_eval/xlg_megacap_gate/top50` |
+| `taiwan_smallcap_altdata` | 21 | 3 | 3 (preregistered) | LOGGED 2, PROMISING 1 | **tw_smallcap_mom_rev** | twse_smallcap_caprank_51_250 | 612 | `results/taiwan_smallcap_altdata` |
+| `taiwan_smallcap_altdata` | 63 | 3 | 3 (preregistered) | LOGGED 2, PROMISING 1 | **tw_smallcap_mom_rev** | twse_smallcap_caprank_51_250 | 612 | `results/taiwan_smallcap_altdata_lowturn` |
+| `taiwan_smallcap_institutional` | 21 | 2 | 8 (preregistered) | LOGGED 2 | - | twse_smallcap_caprank_51_250 | 612 | `results/taiwan_smallcap_institutional` |
+| `taiwan_smallcap_price` | 21 | 2 | 7 (preregistered) | LOGGED 1, PROMISING 1 | **tw_smallcap_ivol** | twse_smallcap_caprank_51_250 | 612 | `results/taiwan_smallcap_price` |
+| `taiwan_smallcap_short` | 21 | 1 | 8 (preregistered) | LOGGED 1 | - | twse_smallcap_caprank_51_250 | 612 | `results/taiwan_smallcap_short` |
+| `taiwan_xsec_mom_twse_largecap_current_45` | 21 | 3 | - | LOGGED 3 | - | twse_largecap_current_45 | 45 | `results/taiwan_xsec_momentum` |
+| `taiwan_xsec_mom_twse_pit_adv_floor_delisted` | 21 | 3 | - | LOGGED 3 | - | twse_pit_adv_floor_delisted | 184 | `results/taiwan_xsec_momentum_pit` |
 
 ## Stores
 

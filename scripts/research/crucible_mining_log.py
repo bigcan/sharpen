@@ -133,6 +133,55 @@ def read_ledger(db: Path) -> dict:
     return agg
 
 
+def harvest_scorecards(roots: list[Path], checkouts: list[Path]) -> list[dict]:
+    """Pre-registered probe batches scored through `signals/eval_harness.py`, NOT the orchestrator.
+
+    These are mining records by any reasonable definition — pre-registered specs, a multiplicity
+    count, a panel, and a verdict per card — and every PROMISING this project has ever recorded
+    lives here rather than in a tick. They are invisible to `orchestrator.db`, so a log built only
+    from ticks would report zero discoveries across the whole history and be wrong about it.
+
+    Deduped by RESOLVED path: several worktrees reach the primary `results/` through a junction, so
+    the same batch is otherwise counted many times.
+    """
+    seen: dict[Path, Path] = {}
+    for root in roots:
+        if not root.is_dir():
+            continue
+        for p in root.rglob("scorecard.json"):
+            if ".git" in p.parts or ".mypy_cache" in p.parts:
+                continue
+            seen.setdefault(p.resolve(), p)
+    out: list[dict] = []
+    for resolved in sorted(seen):
+        try:
+            d = json.loads(resolved.read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            continue
+        cards = d.get("cards") or []
+        verdicts: dict[str, int] = {}
+        for c in cards:
+            v = c.get("verdict") or "(none)"
+            verdicts[v] = verdicts.get(v, 0) + 1
+        pm = d.get("panel_meta") or {}
+        out.append({
+            "label": _label(resolved.parent, checkouts)[0],
+            "batch_name": d.get("batch_name"),
+            "primary_horizon": d.get("primary_horizon"),
+            "n_trials": d.get("n_trials"),
+            "n_multiplicity": d.get("n_multiplicity"),
+            "multiplicity_source": d.get("multiplicity_source"),
+            "provenance": d.get("multiplicity_provenance"),
+            "n_cards": len(cards),
+            "verdicts": verdicts,
+            "promising": [c.get("name") for c in cards if c.get("verdict") == "PROMISING"],
+            "universe": pm.get("universe_def"),
+            "n_names": pm.get("n_names_pool"),
+            "survivorship_free": pm.get("survivorship_free"),
+        })
+    return out
+
+
 def classify(t: dict) -> str:
     if (t.get("status") or "").upper() == "ERROR":
         return "ERROR"
@@ -269,14 +318,16 @@ def _n(v, nd=3):
     return str(v)
 
 
-def render(stores: list[dict], rows: list[dict]) -> str:
+def render(stores: list[dict], rows: list[dict], scorecards: list[dict]) -> str:
     live = [r for r in rows if not r["duplicate"]]
     out: list[str] = []
     out.append("# Crucible mining log — FACTS (auto-generated)\n")
     out.append("Regenerate with `python scripts/research/crucible_mining_log.py`. **Do not hand-edit** —\n"
                "curated campaign entries and lessons live in `crucible_mining_log.md`.\n")
+    n_prom_cards = sum(len(s["promising"]) for s in scorecards)
     out.append(f"Stores scanned: **{len(stores)}** · tick rows: **{len(rows)}** "
-               f"({len(live)} unique, {len(rows) - len(live)} rehearsal duplicates)\n")
+               f"({len(live)} unique, {len(rows) - len(live)} rehearsal duplicates) · "
+               f"scorecard batches: **{len(scorecards)}** ({n_prom_cards} PROMISING cards)\n")
 
     out.append("\n## Per-substrate rollup (unique ticks only)\n")
     out.append("| substrate | window | ticks | mined | TESTED | screened-only | screened-unknown | "
@@ -304,6 +355,20 @@ def render(stores: list[dict], rows: list[dict]) -> str:
                    f"{_n(r['n_holdout_tested'])} | {_n(r['n_promising'])} | "
                    f"{_n(r['fdr_charged_total'], 3)} | {_n(r['panel_T'])} | {_n(r['holdout_bars'])} | "
                    f"{_n(r['implied_mde_delta_sr'])} | `{store}`{tag} | {reason} |")
+
+    out.append("\n## Scorecard batches — mining OUTSIDE the orchestrator\n")
+    out.append("Pre-registered probes scored through `signals/eval_harness.py`. They write no tick, so "
+               "the tick tables above cannot see them — and **every PROMISING in project history is "
+               "here, not there.**\n")
+    out.append("| batch | H | trials | multiplicity | verdicts | PROMISING | universe | names | store |")
+    out.append("|---|---|---|---|---|---|---|---|---|")
+    for s in scorecards:
+        mult = (f"{s['n_multiplicity']} ({s['multiplicity_source']})"
+                if s["n_multiplicity"] is not None else "-")
+        vs = ", ".join(f"{k} {v}" for k, v in sorted(s["verdicts"].items())) or "-"
+        prom = ", ".join(f"**{p}**" for p in s["promising"]) or "-"
+        out.append(f"| `{s['batch_name']}` | {_n(s['primary_horizon'])} | {_n(s['n_trials'])} | {mult} | "
+                   f"{vs} | {prom} | {s['universe'] or '-'} | {_n(s['n_names'])} | `{s['label']}` |")
 
     out.append("\n## Stores\n")
     out.append("| store | class | ticks | ledger rows | versions | classified rejections |")
@@ -348,14 +413,16 @@ def main() -> int:
     roots = [Path(r) for r in args.root] if args.root else checkouts
     stores = scan(roots, checkouts)
     rows = flatten(stores)
-    md = render(stores, rows)
+    scorecards = harvest_scorecards(roots, checkouts)
+    md = render(stores, rows, scorecards)
 
     # Relative paths resolve against the CWD, not the main checkout: when this runs from a worktree
     # the log belongs on THAT branch, not in the primary checkout it happens to scan.
     out = Path(args.out).resolve()
     out.parent.mkdir(parents=True, exist_ok=True)
     out.write_text(md, encoding="utf-8")
-    print(f"[mining-log] {len(stores)} stores, {len(rows)} ticks -> {out}")
+    print(f"[mining-log] {len(stores)} stores, {len(rows)} ticks, "
+          f"{len(scorecards)} scorecard batches -> {out}")
 
     if args.jsonl:
         jl = Path(args.jsonl).resolve()
