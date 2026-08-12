@@ -3,7 +3,7 @@
 Regenerate with `python scripts/research/crucible_mining_log.py`. **Do not hand-edit** —
 curated campaign entries and lessons live in `crucible_mining_log.md`.
 
-Stores scanned: **23** · tick rows: **109** (50 unique, 59 rehearsal duplicates) · scorecard batches: **15** (3 PROMISING cards)
+Stores scanned: **23** · tick rows: **109** (50 unique, 59 rehearsal duplicates) · scorecard batches: **15** (3 PROMISING cards) · ad-hoc probe artifacts: **80** (39 with a declared verdict)
 
 
 ## Per-substrate rollup (unique ticks only)
@@ -93,6 +93,101 @@ Pre-registered probes scored through `signals/eval_harness.py`. They write no ti
 | `taiwan_smallcap_short` | 21 | 1 | 8 (preregistered) | LOGGED 1 | - | twse_smallcap_caprank_51_250 | 612 | `results/taiwan_smallcap_short` |
 | `taiwan_xsec_mom_twse_largecap_current_45` | 21 | 3 | - | LOGGED 3 | - | twse_largecap_current_45 | 45 | `results/taiwan_xsec_momentum` |
 | `taiwan_xsec_mom_twse_pit_adv_floor_delisted` | 21 | 3 | - | LOGGED 3 | - | twse_pit_adv_floor_delisted | 184 | `results/taiwan_xsec_momentum_pit` |
+
+## Ad-hoc probe artifacts — no scorecard, own schema
+
+Selected by CONTENT (signal-evaluation vocabulary, no RL-run vocabulary), never by path. Decisions are quoted verbatim from each artifact; nothing is inferred from the numbers.
+
+
+**Declared verdicts — 39**
+
+| probe | decision | headline | kind | artifact |
+|---|---|---|---|---|
+| _txo_vrp_validation_selftest | **NO-GO (edge was an artifact of spot/2bps/constant-IV-delta modeling, or fails DSR)** | gross_sharpe_ann=1.47 | probe | `C:/tmp/finrl-july2026-f2b/_txo_vrp_validation_selftest/vrp_validation_report.json` |
+| verdict_pre_move | **GO** | min_net_sharpe=0.5 | probe | `C:/tmp/verdict_pre_move.json` |
+| carry_falsification | **NO_GO** | pooled_net_sharpe=0.229 | probe | `results/carry_falsification/results.json` |
+| carry falsification (linear, pre-RL, 2nd-factor) | **NO_GO** | pooled_net_sharpe=0.229 | probe | `results/carry_falsification/verdict.json` |
+| commodity_tsmom | **NO-GO** | standalone_sharpe_5bp=0.356 | probe | `results/commodity_tsmom/commodity_tsmom_sleeve.json` |
+| country_momentum | **NO-GO** | standalone_sharpe_5bp=0.409 | probe | `results/country_momentum/country_tsmom_sleeve.json` |
+| crypto_xsec | **NO-GO** | standalone_sharpe_10bp=-0.067 | probe | `results/crypto_xsec/crypto_tsmom_sleeve.json` |
+| eurusd_3h | **NO-GO** | min_sharpe_bar=0.3 | probe | `results/eurusd_3h/eurusd_3h.json` |
+| eurusd_3h | **NO-GO** | gross_sharpe=0.272 | probe | `results/eurusd_3h/eurusd_3h_reversal.json` |
+| fx_majors | **NO-GO** | pooled_gross_sharpe=0.579 | probe | `results/fx_majors/fx_majors_reversal.json` |
+| letf_substitution | **NO_GO** | base_net_sharpe_2bps=0.489 | probe | `results/letf_substitution/results.json` |
+| multispeed_tsmom | **NO-GO** | diff_sharpe=0.145 | probe | `results/multispeed_tsmom/multispeed_tsmom.json` |
+| options_vrp | **NO-GO** | min_net_sharpe=0.5 | probe | `results/options_vrp/instrument_ab_verdict.json` |
+| options_vrp | **NO-GO** | net_sharpe=-0.578 | probe | `results/options_vrp/skew_verdict.json` |
+| options_vrp | **GO** | min_net_sharpe=0.5 | probe | `results/options_vrp/verdict.json` |
+| portfolio_frontier | **PROCEED_no_S1** | causal_sharpe=0.467 | probe | `results/portfolio_frontier/audit_2sleeve.json` |
+| sleeve-timing falsification (linear proxy, pre-RL gate) | **RL_NOT_JUSTIFIED_ship_static** | baseline_static_rp_oos_sharpe=0.517 | probe | `results/portfolio_frontier/sleeve_timing_verdict.json` |
+| scalp_eval | **NO_GO** | best_net_sharpe_realistic=-0.744 | probe | `results/scalp_eval/scalp_results.json` |
+| commodity_carry_sleeve_eval | **NO_ADD** | book2_net_sharpe_full=0.587 | probe | `results/signal_eval/commodity_carry_sleeve_eval.json` |
+| defensive_sleeve_eval | **UNCORRELATED_UPLIFT_UNPROVEN** | book2_net_sharpe_full=0.587 | probe | `results/signal_eval/defensive_sleeve_eval.json` |
+| tailwind_v1 | **BLOCK_multiplicity** | causal_sharpe=0.412 | probe | `results/tailwind_v1/audit_tailwind.json` |
+| taiwan_intraday_momentum | **NO-GO / FALSIFIED (decayed or cost-killed; TX bid-ask-bounce class)** | gross_sharpe=0.655 | probe | `results/taiwan_intraday_momentum/intraday_momentum_report.json` |
+| taiwan_intraday_momentum_cashclose | **NO-GO / FALSIFIED (decayed or cost-killed; TX bid-ask-bounce class)** | gross_sharpe=1.17 | probe | `results/taiwan_intraday_momentum_cashclose/intraday_momentum_report.json` |
+| taiwan_intraday_momentum_gamma | **PROXY INCONCLUSIVE / NO-GO -> conditioning does not lift the thin TX edge** | gross_sharpe=1.23 | probe | `results/taiwan_intraday_momentum_gamma/gamma_conditioned_report.json` |
+| taiwan_intraday_momentum_rescue | **NO RESCUE -> all filters fail floor/lift/null; thin decaying base stands (breadth is the live thread)** | net_sharpe_floor=0.5 | calibration | `results/taiwan_intraday_momentum_rescue/rescue_filters_1300_1330.json` |
+| taiwan_intraday_momentum_rescue | **NO RESCUE -> all filters fail floor/lift/null; thin decaying base stands (breadth is the live thread)** | net_sharpe_floor=0.5 | calibration | `results/taiwan_intraday_momentum_rescue/rescue_filters_1315_1345.json` |
+| taiwan_tx_canary | **NO-GO / FALSIFIED (no frictionless edge — BTC/gold class)** | oos_directional_sharpe_ann=1.25 | probe | `results/taiwan_tx_canary/canary_report.json` |
+| taiwan_tx_canary_sg1 | **NO-GO / FALSIFIED (no frictionless edge — BTC/gold class)** | oos_directional_sharpe_ann=3.11 | probe | `results/taiwan_tx_canary_sg1/canary_report.json` |
+| taiwan_txo_vrp | **NO-GO (cost-killed / disguised equity beta - the standing VRP class)** | gross_sharpe_ann=-0.445 | probe | `results/taiwan_txo_vrp/vrp_scout_report.json` |
+| taiwan_txo_vrp_deltahedge | **GO (delta-hedged TXO VRP harvestable net of hedge cost; proceed to fuller validation + Tier-2 tail audit before capital)** | gross_sharpe_ann=1.19 | probe | `results/taiwan_txo_vrp_deltahedge/vrp_deltahedge_report.json` |
+| taiwan_txo_vrp_extension | **NO-GO-FINAL (book closes permanently)** | reconciliation_net_sharpe_1345=0.483 | probe | `results/taiwan_txo_vrp_extension/vrp_extension_report.json` |
+| taiwan_txo_vrp_validation | **NO-GO (edge was an artifact of spot/2bps/constant-IV-delta modeling, or fails DSR)** | gross_sharpe_ann=0.793 | probe | `results/taiwan_txo_vrp_validation/vrp_validation_report.json` |
+| taiwan_txo_vrp_validation_weekly | **NO-GO (edge was an artifact of spot/2bps/constant-IV-delta modeling, or fails DSR)** | gross_sharpe_ann=0.48 | probe | `results/taiwan_txo_vrp_validation_weekly/vrp_validation_report.json` |
+| value_falsification | **NO_GO_value_weak** | xsvalue_pooled_net_sharpe=-0.364 | probe | `results/value_falsification/results.json` |
+| cross-asset VALUE falsification (linear, pre-RL) | **NO_GO_value_weak** | xsvalue_pooled_net_sharpe=-0.364 | probe | `results/value_falsification/verdict.json` |
+| vol_managed_overlay | **NO-GO** | base_sharpe=0.601 | probe | `results/vol_managed_overlay/vol_managed_overlay.json` |
+| vwap_avwap | **NO_GO** | best_vwap_net_sharpe=-2.91 | probe | `results/vwap_avwap/intraday_results.json` |
+| vwap_avwap | **NO_GO** | best_vwap_net_sharpe_2bps=0.608 | probe | `results/vwap_avwap/results.json` |
+| xsec_momentum | **GO** | pooled_TSMOM_monthly_net_sharpe=0.601 | probe | `results/xsec_momentum/results.json` |
+
+**No declared verdict — 41.** Probe-like numbers with no decision field and no sibling artifact that has one: the conclusion lives only in `MEMORY.md` or `randd_log.md`. `calibration` rows are instrument measurement, where having no verdict is correct; `probe` rows are the real gap.
+
+| probe | kind | headline | artifact |
+|---|---|---|---|
+| orb_eval | **probe** | - | `C:/tmp/orb_eval/orb_1h_manifest.json` |
+| orb_eval | **probe** | - | `C:/tmp/orb_eval/orb_5m_manifest.json` |
+| xlg_entry | **probe** | sma_causal_sharpe=0.677 | `C:/tmp/xlg_entry/xlg_entry_results.json` |
+| xlg_reweight | **probe** | - | `C:/tmp/xlg_reweight/stage0_results.json` |
+| cross_asset_paper | **probe** | - | `results/cross_asset_paper/multi_sleeve_paper_verdict.json` |
+| cross_asset_paper | **probe** | - | `results/cross_asset_paper/paper_validation_verdict.json` |
+| crucible_power_units | calibration | sharpe_floor=0.5 | `results/crucible_power_units/fx_majors_round.json` |
+| crucible_power_units | **probe** | sharpe_floor=0.5 | `results/crucible_power_units/v1_range_costed.json` |
+| crucible_prereg_forensics | calibration | - | `results/crucible_prereg_forensics/us_equity_prereg_forensics.json` |
+| crucible_uplift_null | calibration | - | `results/crucible_uplift_null/uplift_null_cross_asset.json` |
+| crucible_uplift_null | calibration | - | `results/crucible_uplift_null/uplift_null_cross_asset_keep-tsmom.json` |
+| crucible_uplift_null | calibration | - | `results/crucible_uplift_null/uplift_null_cross_asset_quick.json` |
+| crucible_uplift_null | calibration | - | `results/crucible_uplift_null/uplift_null_cross_asset_randregime.json` |
+| crucible_uplift_null | calibration | - | `results/crucible_uplift_null/uplift_null_taiwan.json` |
+| crucible_uplift_null | calibration | - | `results/crucible_uplift_null/uplift_null_taiwan_cost0p0.json` |
+| crucible_uplift_null | calibration | - | `results/crucible_uplift_null/uplift_null_taiwan_quick.json` |
+| crucible_uplift_null | calibration | - | `results/crucible_uplift_null/uplift_null_taiwan_randregime.json` |
+| crucible_uplift_null | calibration | - | `results/crucible_uplift_null/uplift_null_taiwan_randregime_cost0p0.json` |
+| crucible_uplift_null | calibration | - | `results/crucible_uplift_null/uplift_null_taiwan_sr0p0.json` |
+| crucible_uplift_null | calibration | - | `results/crucible_uplift_null/uplift_null_taiwan_sr0p5.json` |
+| crucible_uplift_null | calibration | - | `results/crucible_uplift_null/uplift_null_taiwan_sr1p0.json` |
+| crucible_uplift_null | calibration | - | `results/crucible_uplift_null/uplift_null_taiwan_sr1p5.json` |
+| fable_verdict | **probe** | p_sharpe_le_0=0.001 | `results/fable_verdict/tsmom_reproduction.json` |
+| fable_verdict | **probe** | sharpe=0.401 | `results/fable_verdict/untouched_universe_result.json` |
+| funding_arb_xsec_dispersion | **probe** | - | `results/funding_arb_xsec_dispersion/results.json` |
+| multisleeve_frontier | **probe** | max_sharpe_sr=0.877 | `results/multisleeve_frontier/multisleeve_frontier.json` |
+| linear_only | **probe** | median_window_core_net_sharpe=1.91 | `results/options_vrp_pipeline/linear_only/linear_baseline.json` |
+| regime_eval | **probe** | - | `results/prism_research/regime_eval/verdict.json` |
+| crucible_equity_breadth | calibration | - | `results/signal_eval/crucible_equity_breadth/real_alpha_breadth_cross_asset_h1.json` |
+| crucible_equity_breadth | calibration | - | `results/signal_eval/crucible_equity_breadth/real_alpha_breadth_h1.json` |
+| crucible_equity_breadth | calibration | - | `results/signal_eval/crucible_equity_breadth/real_alpha_breadth_h2.json` |
+| crucible_equity_breadth | calibration | - | `results/signal_eval/crucible_equity_breadth/real_alpha_breadth_intraday_fx_h1.json` |
+| crucible_equity_breadth | calibration | - | `results/signal_eval/crucible_equity_breadth/real_alpha_breadth_taiwan_h1.json` |
+| crucible_equity_breadth | calibration | - | `results/signal_eval/crucible_equity_breadth/real_alpha_breadth_us_equity_h2.json` |
+| distress_filter | **probe** | - | `results/signal_eval/distress_filter/results.json` |
+| momentum_confirmed | **probe** | - | `results/signal_eval/momentum_confirmed/horizon_results.json` |
+| momentum_confirmed | **probe** | - | `results/signal_eval/momentum_confirmed/results.json` |
+| xlg_megacap_gate | **probe** | sharpe=0.849 | `results/signal_eval/xlg_megacap_gate/gate_summary.json` |
+| xlg_megacap_gate | **probe** | sharpe=0.849 | `results/signal_eval/xlg_megacap_gate/overlay_backtest.json` |
+| xlg_megacap_gate | **probe** | - | `results/signal_eval/xlg_megacap_gate/pit_validation.json` |
+| strengthen | **probe** | sharpe=0.536 | `results/xsec_momentum/strengthen/strengthen_results.json` |
 
 ## Stores
 

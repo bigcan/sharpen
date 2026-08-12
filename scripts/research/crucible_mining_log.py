@@ -43,6 +43,8 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
+import re
 import sqlite3
 from collections import defaultdict
 from pathlib import Path
@@ -182,6 +184,140 @@ def harvest_scorecards(roots: list[Path], checkouts: list[Path]) -> list[dict]:
     return out
 
 
+# --- ad-hoc probe harvesting -------------------------------------------------------------------
+# A third corpus: probes that predate the scorecard harness (or never used it) and write their own
+# JSON. There is no schema to key on, so selection is by CONTENT, never by path — a path allowlist
+# would silently drop the next probe someone writes.
+#
+# A file is probe-like if it speaks signal-evaluation vocabulary and does NOT speak RL-run
+# vocabulary. That single rule separates 37 alpha probes from 84 gmgp1/sg1/funding-arb run verdicts
+# that also carry a `decision` field and have no business in a mining log.
+#
+# Selection vocabulary matches as SUBSTRINGS on purpose: these keys appear inside snake_case
+# compounds (`pooled_net_sharpe`, `turnover_ann`, `gross_sharpe_ann`), so anchoring on word
+# boundaries silently drops half the corpus. The tokens are long enough that a hex hash cannot
+# collide with them. The calibration vocabulary is the exception — see below.
+_SIGNAL_VOCAB = ("universe", "neutral", "ic_ir", "frictionless", "turnover", "net_sharpe", "sleeve")
+# `fold` and `hpo` matter only for the verdict-LESS class: among files that declare a decision they
+# change the split by zero, but without them 16 walk-forward HPO window dumps and an RL
+# re-verification land in the orphan table. Two tokens are deliberately NOT here, each measured:
+# `max_drawdown` and `pf_` are RL-flavoured but four real probes report them (scalp_eval, both
+# taiwan_tx_canary reports, vwap_avwap), so excluding on them loses genuine mining records.
+_RL_VOCAB = ("profit_factor", "checkpoint", "n_seeds", "episode", "fold", "hpo")
+# Word-anchored, and no bare "mde": a 3-char token matches inside content hashes, which mislabelled
+# a live probe (`commodity_tsmom`) as calibration.
+_CALIB_VOCAB = (r"\b(calibration|implied_mde|mde_delta|mde_sweep|power_curve|uplift_null|"
+                r"lord_depletion|n_eff|breadth)")
+_GENERIC_DIRS = {"results", "signal_eval", "real", "synthetic", "tmp", "out", "output"}
+_ADHOC_MAX_DEPTH = 3
+_ADHOC_MAX_BYTES = 2_000_000
+
+
+def _decision_of(d: dict) -> str | None:
+    for key in ("decision", "verdict"):
+        v = d.get(key)
+        if isinstance(v, str):
+            return v
+        if isinstance(v, dict) and isinstance(v.get("decision"), str):
+            return v["decision"]
+    return None
+
+
+def _headline(d: dict) -> str | None:
+    """First sharpe-ish scalar within two levels — enough to recognise the result, never to judge it."""
+    def scan(obj, depth):
+        if depth > 2 or not isinstance(obj, dict):
+            return None
+        for k, v in obj.items():
+            if "sharpe" in k.lower() and isinstance(v, (int, float)):
+                return f"{k}={v:.3g}"
+        for v in obj.values():
+            got = scan(v, depth + 1)
+            if got:
+                return got
+        return None
+    return scan(d, 0)
+
+
+def harvest_adhoc(roots: list[Path], checkouts: list[Path]) -> list[dict]:
+    """Probe artifacts with no scorecard. Two classes, both reported.
+
+    DECLARED             the artifact states its own decision (GO / NO_GO_... / verdict string)
+    NO_DECLARED_VERDICT  probe-like numbers, no decision anywhere in the file -- the conclusion
+                         exists only in MEMORY.md or a randd_log entry, which is the defect
+
+    Nothing is inferred from the numbers. A probe that never wrote down its own verdict is recorded
+    as not having written one; reading a GO/NO-GO off its Sharpe here would manufacture a result.
+    """
+    seen: dict[Path, Path] = {}
+    for root in roots:
+        if not root.is_dir():
+            continue
+        for dirpath, dirnames, filenames in os.walk(root):
+            rel = Path(dirpath).relative_to(root)
+            if len(rel.parts) >= _ADHOC_MAX_DEPTH:
+                dirnames[:] = []
+            dirnames[:] = [d for d in dirnames
+                           if d not in {".git", ".mypy_cache", "wandb", "__pycache__", "cards",
+                                        "node_modules", ".venv"}]
+            for fn in filenames:
+                if not fn.endswith(".json") or fn.startswith("run_data_"):
+                    continue          # run_data_*.json are WandB history dumps, not probe artifacts
+                p = Path(dirpath) / fn
+                seen.setdefault(p.resolve(), p)
+
+    parsed: dict[Path, tuple[dict, str | None]] = {}
+    for resolved in seen:
+        try:
+            if resolved.stat().st_size > _ADHOC_MAX_BYTES:
+                continue
+            d = json.loads(resolved.read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            continue
+        if not isinstance(d, dict) or ("cards" in d and "batch_name" in d):
+            continue              # scorecards are harvested by harvest_scorecards()
+        blob = json.dumps(d)[:200_000].lower()
+        if not any(k in blob for k in _SIGNAL_VOCAB) or any(k in blob for k in _RL_VOCAB):
+            continue
+        parsed[resolved] = (d, blob)
+
+    declared_dirs = {p.parent for p, (d, _) in parsed.items() if _decision_of(d)}
+    rows: list[dict] = []
+    for resolved, (d, blob) in sorted(parsed.items()):
+        decision = _decision_of(d)
+        # A verdict-less file next to a file that DID declare one is that campaign's supporting
+        # detail, not a missing verdict. Only orphans are worth flagging.
+        if decision is None and resolved.parent in declared_dirs:
+            continue
+        label, klass = _label(resolved.parent, checkouts)
+        parent = resolved.parent.name
+        rows.append({
+            "label": f"{label}/{resolved.name}",
+            "store_class": klass,
+            "name": next((v for v in (d.get("test"), d.get("name"), d.get("batch_name"))
+                          if isinstance(v, str) and v),
+                         resolved.stem if parent in _GENERIC_DIRS else parent),
+            "decision": decision,
+            "status": "DECLARED" if decision else "NO_DECLARED_VERDICT",
+            "kind": "calibration" if re.search(_CALIB_VOCAB, blob) else "probe",
+            "headline": _headline(d),
+        })
+
+    # Stale checkouts under scratch hold byte-copies of repo artifacts. Same FILENAME, same decision
+    # and same headline float is the same result reported twice; keep the canonical copy. Filename is
+    # part of the key so two genuinely different probes that happen to share a verdict string both
+    # survive.
+    seen_result: set[tuple] = set()
+    out: list[dict] = []
+    for r in sorted(rows, key=lambda x: (x["store_class"] != "canonical", x["label"])):
+        ident = (Path(r["label"]).name, r["decision"], r["headline"])
+        if r["decision"] is not None and ident in seen_result:
+            continue
+        seen_result.add(ident)
+        out.append(r)
+    return sorted(out, key=lambda x: (x["status"] != "DECLARED", x["label"]))
+
+
 def classify(t: dict) -> str:
     if (t.get("status") or "").upper() == "ERROR":
         return "ERROR"
@@ -318,16 +454,19 @@ def _n(v, nd=3):
     return str(v)
 
 
-def render(stores: list[dict], rows: list[dict], scorecards: list[dict]) -> str:
+def render(stores: list[dict], rows: list[dict], scorecards: list[dict],
+           adhoc: list[dict]) -> str:
     live = [r for r in rows if not r["duplicate"]]
     out: list[str] = []
     out.append("# Crucible mining log — FACTS (auto-generated)\n")
     out.append("Regenerate with `python scripts/research/crucible_mining_log.py`. **Do not hand-edit** —\n"
                "curated campaign entries and lessons live in `crucible_mining_log.md`.\n")
     n_prom_cards = sum(len(s["promising"]) for s in scorecards)
+    n_declared = sum(1 for a in adhoc if a["status"] == "DECLARED")
     out.append(f"Stores scanned: **{len(stores)}** · tick rows: **{len(rows)}** "
                f"({len(live)} unique, {len(rows) - len(live)} rehearsal duplicates) · "
-               f"scorecard batches: **{len(scorecards)}** ({n_prom_cards} PROMISING cards)\n")
+               f"scorecard batches: **{len(scorecards)}** ({n_prom_cards} PROMISING cards) · "
+               f"ad-hoc probe artifacts: **{len(adhoc)}** ({n_declared} with a declared verdict)\n")
 
     out.append("\n## Per-substrate rollup (unique ticks only)\n")
     out.append("| substrate | window | ticks | mined | TESTED | screened-only | screened-unknown | "
@@ -369,6 +508,28 @@ def render(stores: list[dict], rows: list[dict], scorecards: list[dict]) -> str:
         prom = ", ".join(f"**{p}**" for p in s["promising"]) or "-"
         out.append(f"| `{s['batch_name']}` | {_n(s['primary_horizon'])} | {_n(s['n_trials'])} | {mult} | "
                    f"{vs} | {prom} | {s['universe'] or '-'} | {_n(s['n_names'])} | `{s['label']}` |")
+
+    declared = [a for a in adhoc if a["status"] == "DECLARED"]
+    orphans = [a for a in adhoc if a["status"] != "DECLARED"]
+    out.append("\n## Ad-hoc probe artifacts — no scorecard, own schema\n")
+    out.append("Selected by CONTENT (signal-evaluation vocabulary, no RL-run vocabulary), never by "
+               "path. Decisions are quoted verbatim from each artifact; nothing is inferred from the "
+               "numbers.\n")
+    out.append(f"\n**Declared verdicts — {len(declared)}**\n")
+    out.append("| probe | decision | headline | kind | artifact |")
+    out.append("|---|---|---|---|---|")
+    for a in declared:
+        out.append(f"| {a['name']} | **{a['decision']}** | {a['headline'] or '-'} | {a['kind']} | "
+                   f"`{a['label']}` |")
+    out.append(f"\n**No declared verdict — {len(orphans)}.** Probe-like numbers with no decision "
+               "field and no sibling artifact that has one: the conclusion lives only in `MEMORY.md` "
+               "or `randd_log.md`. `calibration` rows are instrument measurement, where having no "
+               "verdict is correct; `probe` rows are the real gap.\n")
+    out.append("| probe | kind | headline | artifact |")
+    out.append("|---|---|---|---|")
+    for a in orphans:
+        flag = "**probe**" if a["kind"] == "probe" else a["kind"]
+        out.append(f"| {a['name']} | {flag} | {a['headline'] or '-'} | `{a['label']}` |")
 
     out.append("\n## Stores\n")
     out.append("| store | class | ticks | ledger rows | versions | classified rejections |")
@@ -414,7 +575,8 @@ def main() -> int:
     stores = scan(roots, checkouts)
     rows = flatten(stores)
     scorecards = harvest_scorecards(roots, checkouts)
-    md = render(stores, rows, scorecards)
+    adhoc = harvest_adhoc(roots, checkouts)
+    md = render(stores, rows, scorecards, adhoc)
 
     # Relative paths resolve against the CWD, not the main checkout: when this runs from a worktree
     # the log belongs on THAT branch, not in the primary checkout it happens to scan.
@@ -422,7 +584,7 @@ def main() -> int:
     out.parent.mkdir(parents=True, exist_ok=True)
     out.write_text(md, encoding="utf-8")
     print(f"[mining-log] {len(stores)} stores, {len(rows)} ticks, "
-          f"{len(scorecards)} scorecard batches -> {out}")
+          f"{len(scorecards)} scorecard batches, {len(adhoc)} ad-hoc artifacts -> {out}")
 
     if args.jsonl:
         jl = Path(args.jsonl).resolve()
