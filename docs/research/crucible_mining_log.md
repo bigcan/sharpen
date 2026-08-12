@@ -265,11 +265,22 @@ evidence about the hypothesis **bank**, not a verdict on the markets
 
 ## Instrumentation gaps
 
-- **G1 — `rejection_class` is empty in every store that has the column** (13 of 21). The ledger cannot
-  currently distinguish a DECISIVE kill from an UNDERPOWERED one, which is exactly the distinction
-  `is_readmissible` needs. Cause not yet established: `loop.py:236-241` sets it only for candidates
-  that reach the holdout gate *and* fail it, so either that path is unreached or `search_memory_cfg`
-  is not arriving. Worth one session.
+- **G1 — `rejection_class` was empty in every store that has the column. ✅ CAUSE FOUND + FIXED
+  2026-08-12.** The classifier was never disagreeing; it was never reached. `search_memory_cfg` DID
+  arrive (`search_memory_gates_hash` is pinned in the manifests), and `us_equity`'s power stamp is a
+  finite 1.312 ΔSR — so both of the suspected conditions held. The failure was a **set mismatch**: the
+  class was computed while writing the SURFACED rows (`hall_of_fame ∪ promising`), but under
+  `offspring_policy: prereg_only` (v12.0) the holdout gate adjudicates PRE-REGISTERED specs, while
+  `hall_of_fame` is `ranked[:10]` over every genome the search scored — which offspring win on train
+  fitness by construction. Measured in the ledgers: **20/20 surfaced rows are offspring** (`spec_json`
+  NULL) and **145/145 pre-registrations** were written by the second ledger loop, which recorded no
+  class at all. The two sets never intersected, so 98 adjudicated rejections produced 0
+  classifications. Fixed in `loop.py` by classifying on "the holdout gate rejected this
+  `(candidate_type, formula)`" in **both** ledger loops; regression test
+  `test_every_holdout_adjudicated_rejection_carries_a_class` (it fails 6/7 on the pre-fix code).
+  ⚠ **The Flags line will keep firing for the 15 pre-fix stores and cannot be back-filled** — the
+  holdout adjudications live only in the in-memory `GenerationReport`, never in the manifest or any
+  store. It clears for stores written after the fix.
 - **G2 — `crucible_hypothesis_loop.py` writes no tick row**, so manual cycles are invisible to the
   orchestrator record. The extractor labels those stores `manual-cycle` from a bare `trial_ledger.db`
   but cannot recover mined/scored/holdout counts. It does not yet parse `loop_summary.json`, which
@@ -282,7 +293,12 @@ evidence about the hypothesis **bank**, not a verdict on the markets
   against machine loss. Anything that must survive in git belongs in `docs/research/`.
 - **G4 — `--no-power-guard` runs record no power at all.** C12's ticks have NULL `panel_T`,
   `holdout_bars`, and `implied_mde_delta_sr` — the runs that most need their power stated are the
-  ones that state none.
+  ones that state none. **This now has a second consequence:** with no MDE stamp, `classify_rejection`
+  fail-safes to `None`, so a `--no-power-guard` run still records no `rejection_class` even after the
+  G1 fix. That is correct (an unmeasured test cannot be called decisive OR underpowered), but it means
+  a sidecar run buys no search memory. When a run needs to proceed on an underpowered substrate but
+  should still STAMP its power, use the default `--power-gates` with `--force-underpowered` (which
+  overrides the refusal and keeps the stamp) rather than `--no-power-guard` (which drops the stamp).
 - **G5 — Ad-hoc probe artifacts. ✅ HARVESTED 2026-08-12.** 80 artifacts, selected by content rather
   than by a path allowlist, so the next probe someone writes is picked up automatically.
 - **G6 — 20 probes carry no verdict of their own** (opened by G5's harvest). Their conclusion lives
