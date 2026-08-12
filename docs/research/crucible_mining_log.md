@@ -9,7 +9,7 @@ Two files, two jobs:
 
 | file | authored by | contains |
 |---|---|---|
-| `crucible_mining_log_facts.md` | `scripts/research/crucible_mining_log.py` | every tick found in every store, deduped, classified. **Never hand-edit.** |
+| `crucible_mining_log_facts.md` | `scripts/research/crucible_mining_log.py` | every tick in every store, deduped and classified, plus every `scorecard.json` probe batch. **Never hand-edit.** |
 | this file | a human/agent after each campaign | why the campaign was run, what bound it, what it rules out, what would reopen it |
 
 ```bash
@@ -28,6 +28,15 @@ Pass every scratch root explicitly. Decisive runs keep landing there (see gap **
    investigations were spent re-deriving the same misreading.
 3. **`crucible_hypothesis_loop.py` writes no tick.** A manual cycle produces a `trial_ledger.db` and
    `loop_summary.json` only, so mining done that way is invisible to `orchestrator.db`.
+4. **A whole corpus mines outside the orchestrator.** 15 pre-registered probe batches were scored
+   through `signals/eval_harness.py`, which writes a `scorecard.json` and no tick. **Every PROMISING
+   in project history is in that corpus** — a tick-only log would report zero discoveries ever and be
+   wrong about it. Harvested since 2026-08-12.
+
+⚠ **Counting gotcha.** Several worktrees reach the primary store through a Windows **junction**
+(`.claude/worktrees/<wt>/results/crucible_orchestrator` → `results/crucible_orchestrator`), which
+`Get-Item -LinkType` does not report on the parent. A naive file walk counts those stores 2–5 times.
+The extractor keys everything on the **resolved** path, so junction copies collapse automatically.
 
 ## Campaign entry schema
 
@@ -122,6 +131,44 @@ Mining needs an explicit `--force-underpowered`, an operator call not yet taken.
 
 ---
 
+## Campaigns outside the orchestrator — the scorecard corpus
+
+Backfilled 2026-08-12. 15 batches, **332 scored cards, 3 PROMISING across 2 distinct signals** — all
+of them here, none in a tick. Verdicts are the batch's own; the caveats below are what later work
+did to them.
+
+### P-TW · Taiwan small/mid-cap probe series (5 batches, cap-rank 51–250, 612 names)
+Four pre-registered campaigns on the panel later wired as `taiwan_smallcap` (C13). 11 cards at
+H=21/63 against a declared multiplicity of 3–8.
+- **`tw_smallcap_mom_rev` — PROMISING at H=21 *and* H=63** (`taiwan_smallcap_altdata`,
+  `..._lowturn`, spec `60680e61ff85`). Month-revenue drift; incubate-only. ⚠ Its capturability did
+  not reproduce after the sector map — a mandatory neutralization control — was silently
+  re-enumerated (issue P1-REPRO-01); numbers are now pinned to `pool.frozen.parquet` +
+  `sector_map_sha`, and both readings leave the verdict unchanged.
+- **`tw_smallcap_ivol` — PROMISING** (`taiwan_smallcap_price`, spec `27d38ce84ff5`). ⚠ **Superseded:**
+  it is frictionless **−0.627** net, which is precisely what motivated the `crucible-v11.0`
+  capturability gate. Quote frictionless *and* net whenever citing it.
+- `taiwan_smallcap_institutional` (2 cards) and `taiwan_smallcap_short` (1 card): all LOGGED.
+- Survivorship: `survivorship_free = False` on all five — the free FinMind feed enumerates
+  currently-listed names in the band where delisting is most common, so every number is an UPPER
+  BOUND.
+
+### P-US · Liquid US large-cap cross-section (4 batches, 321 cards, **all LOGGED**)
+`sp500_alpha101_full` (100), `sp500_alpha101_v1` (17), `xlg_top100` (100), `xlg_top50` (100), all at
+H=5 with **no declared multiplicity** — read them as exploratory, not as pre-registered tests.
+This is the empirical backing for the standing "liquid large-cap X-sec CLOSED" verdict.
+
+### P-XSEC · Taiwan cross-sectional momentum, the survivorship pair (2 batches, 6 cards, all LOGGED)
+`taiwan_xsec_mom_twse_largecap_current_45` (45 current names) vs
+`taiwan_xsec_mom_twse_pit_adv_floor_delisted` (184 PIT names incl. delisted). The pair exists to
+separate momentum from the size/survivorship confound — the useful artifact is the *contrast*, and
+neither side survived.
+
+### P-MISC · `country_momentum` (2), `crypto_xsec` (3), `demo_synthetic` (4)
+Pre-registered country-ETF and crypto cross-section probes plus the harness demo. All LOGGED.
+
+---
+
 ## Substrate board
 
 | substrate | ticks | mined | TESTED | holdout-tested | PROMISING | wealth | MDE | status |
@@ -134,7 +181,9 @@ Mining needs an explicit `--force-underpowered`, an operator call not yet taken.
 | `taiwan_smallcap` | 0 | 0 | 0 | 0 | – | 0 | 1.554 | **WIRED, never mined** — power guard refuses |
 
 Counts are from the facts file; MDE is the production-config value. `us_equity`'s 237 holdout tests
-include the two scratch H=21 runs.
+include the two sidecar H=21 runs. **`PROMISING` here is the orchestrator record only** — the three
+PROMISING cards live in the scorecard corpus above, on `taiwan_smallcap`, which has never been
+mined by a tick.
 
 ## What the record teaches
 
@@ -166,7 +215,8 @@ evidence about the hypothesis **bank**, not a verdict on the markets
 ## Before mining, in order
 
 1. `python scripts/research/crucible_mining_log.py` — has this substrate/config been mined? At what
-   cost? Was the prior zero TESTED or VACUOUS?
+   cost? Was the prior zero TESTED or VACUOUS? Check the **scorecard batches** too: a probe series
+   may already have tested this hypothesis outside the orchestrator.
 2. Measure breadth on the *actual bank* (`crucible_real_alpha_breadth.py --panel <s>`), not the
    covariance participation ratio.
 3. Check power and turnover **together** (`crucible_hold_horizon_tradeoff.py`) — L5.
@@ -186,7 +236,8 @@ evidence about the hypothesis **bank**, not a verdict on the markets
   is not arriving. Worth one session.
 - **G2 — `crucible_hypothesis_loop.py` writes no tick row**, so manual cycles are invisible to the
   orchestrator record. The extractor labels those stores `manual-cycle` from a bare `trial_ledger.db`
-  but cannot recover mined/scored/holdout counts.
+  but cannot recover mined/scored/holdout counts. It does not yet parse `loop_summary.json`, which
+  carries some of them.
 - **G3 — Deliberately-separate accounts need a durable home. ✅ CONVENTION SET 2026-08-12.** The two
   H=21 campaigns that closed `us_equity` (C12) were written to `C:/tmp` — the right call for the
   LORD++ account, wrong for the record, since the finding evaporates when tmp is cleared. They now
@@ -196,3 +247,13 @@ evidence about the hypothesis **bank**, not a verdict on the markets
 - **G4 — `--no-power-guard` runs record no power at all.** C12's ticks have NULL `panel_T`,
   `holdout_bars`, and `implied_mde_delta_sr` — the runs that most need their power stated are the
   ones that state none.
+- **G5 — Probes that emit ad-hoc JSON instead of a scorecard are still uncovered.** Nine-plus
+  directories (`results/crucible_calibration*`, `crucible_power_units`, `crucible_lord_depletion`,
+  `crucible_uplift_null`, `crucible_prereg_forensics`, `crucible_crossmarket_power`,
+  `crucible_intraday_power`, `crucible_scout_us_equity`, `crucible_hold_tradeoff`,
+  `signal_eval/crucible_equity_breadth`, plus `signal_eval/{distress_filter,momentum_confirmed}` and
+  `value_falsification`) each define their own result schema. Most are **instrument calibration**
+  — power curves, null calibrations, breadth measurement — which is not mining and does not belong in
+  a campaign ledger. But `distress_filter`, `momentum_confirmed` and `value_falsification` are real
+  probe verdicts with no scorecard, so they are recorded in `MEMORY.md` and nowhere in this log.
+  Harvesting them needs a common schema, not more extractor special-cases.
