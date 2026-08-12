@@ -9,7 +9,7 @@ Two files, two jobs:
 
 | file | authored by | contains |
 |---|---|---|
-| `crucible_mining_log_facts.md` | `scripts/research/crucible_mining_log.py` | every tick in every store, deduped and classified, plus every `scorecard.json` probe batch. **Never hand-edit.** |
+| `crucible_mining_log_facts.md` | `scripts/research/crucible_mining_log.py` | all three corpora — orchestrator ticks (deduped, classified), `scorecard.json` batches, and ad-hoc probe artifacts. **Never hand-edit.** |
 | this file | a human/agent after each campaign | why the campaign was run, what bound it, what it rules out, what would reopen it |
 
 ```bash
@@ -28,10 +28,12 @@ Pass every scratch root explicitly. Decisive runs keep landing there (see gap **
    investigations were spent re-deriving the same misreading.
 3. **`crucible_hypothesis_loop.py` writes no tick.** A manual cycle produces a `trial_ledger.db` and
    `loop_summary.json` only, so mining done that way is invisible to `orchestrator.db`.
-4. **A whole corpus mines outside the orchestrator.** 15 pre-registered probe batches were scored
+4. **Two whole corpora mine outside the orchestrator.** 15 pre-registered probe batches were scored
    through `signals/eval_harness.py`, which writes a `scorecard.json` and no tick. **Every PROMISING
    in project history is in that corpus** — a tick-only log would report zero discoveries ever and be
-   wrong about it. Harvested since 2026-08-12.
+   wrong about it. A further **80 ad-hoc probe artifacts** carry their own schemas, including the
+   **GO** on the project's only validated edge (`xsec_momentum`, TSMOM net SR 0.601). Both harvested
+   since 2026-08-12.
 
 ⚠ **Counting gotcha.** Several worktrees reach the primary store through a Windows **junction**
 (`.claude/worktrees/<wt>/results/crucible_orchestrator` → `results/crucible_orchestrator`), which
@@ -169,6 +171,40 @@ Pre-registered country-ETF and crypto cross-section probes plus the harness demo
 
 ---
 
+## The ad-hoc probe corpus
+
+Backfilled 2026-08-12. **80 artifacts: 39 with a declared verdict, 41 without.** These predate the
+scorecard harness or never used it, so each defines its own JSON schema. The extractor selects them
+by **content** — signal-evaluation vocabulary, no RL-run vocabulary — never by path, which is what
+separates 39 alpha probes from the 84 gmgp1/sg1/funding-arb run verdicts that also carry a
+`decision` field and have no business in a mining log.
+
+This recovers the whole falsification sweep: TXO VRP (6 artifacts), Taiwan intraday momentum (5),
+VWAP/AVWAP, ORB, LETF substitution, carry, value, commodity/country/crypto TSMOM sleeves, scalp,
+options VRP, the sleeve frontier. Two live GOs sit in it:
+- **`xsec_momentum` → GO**, `pooled_TSMOM_monthly_net_sharpe = 0.601`. This is the project's sole
+  validated edge, and it is a probe artifact — never a Crucible tick.
+- **`taiwan_txo_vrp_deltahedge` → GO** — ⚠ **superseded**, see L7.
+
+### ⚠ L7 — a decision string is a snapshot, not the standing verdict
+`taiwan_txo_vrp_deltahedge/vrp_deltahedge_report.json` says **GO**. Two later artifacts in the same
+family say `NO-GO (edge was an artifact of spot/2bps/constant-IV-delta modeling)` and
+`NO-GO-FINAL (book closes permanently)`. `options_vrp/verdict.json` likewise says GO on a workstream
+`MEMORY.md` records as CLOSED for USDC contamination. **Order these by campaign, and treat
+`MEMORY.md`'s GO/NO-GO ledger as the authority on what a family concluded** — the table below is
+evidence, not adjudication.
+
+### The real gap: 20 probes never wrote down their own verdict
+Of the 41 verdict-less artifacts, 21 are `calibration` (null calibrations, power curves, breadth
+measurement — having no verdict is correct there). The other 20 are **probes whose conclusion exists
+only in `MEMORY.md` or `randd_log.md`**: `distress_filter`, `momentum_confirmed` (×2),
+`xlg_megacap_gate` (×3), `fable_verdict` (×2), `multisleeve_frontier`, `funding_arb_xsec_dispersion`,
+`xsec_momentum/strengthen`, `orb_eval` (×2), `xlg_entry`, `xlg_reweight`, and others. Nothing is
+inferred from their numbers — reading a GO/NO-GO off a Sharpe here would manufacture a result the
+probe never claimed. **New probes must write a `decision` field.**
+
+---
+
 ## Substrate board
 
 | substrate | ticks | mined | TESTED | holdout-tested | PROMISING | wealth | MDE | status |
@@ -247,13 +283,9 @@ evidence about the hypothesis **bank**, not a verdict on the markets
 - **G4 — `--no-power-guard` runs record no power at all.** C12's ticks have NULL `panel_T`,
   `holdout_bars`, and `implied_mde_delta_sr` — the runs that most need their power stated are the
   ones that state none.
-- **G5 — Probes that emit ad-hoc JSON instead of a scorecard are still uncovered.** Nine-plus
-  directories (`results/crucible_calibration*`, `crucible_power_units`, `crucible_lord_depletion`,
-  `crucible_uplift_null`, `crucible_prereg_forensics`, `crucible_crossmarket_power`,
-  `crucible_intraday_power`, `crucible_scout_us_equity`, `crucible_hold_tradeoff`,
-  `signal_eval/crucible_equity_breadth`, plus `signal_eval/{distress_filter,momentum_confirmed}` and
-  `value_falsification`) each define their own result schema. Most are **instrument calibration**
-  — power curves, null calibrations, breadth measurement — which is not mining and does not belong in
-  a campaign ledger. But `distress_filter`, `momentum_confirmed` and `value_falsification` are real
-  probe verdicts with no scorecard, so they are recorded in `MEMORY.md` and nowhere in this log.
-  Harvesting them needs a common schema, not more extractor special-cases.
+- **G5 — Ad-hoc probe artifacts. ✅ HARVESTED 2026-08-12.** 80 artifacts, selected by content rather
+  than by a path allowlist, so the next probe someone writes is picked up automatically.
+- **G6 — 20 probes carry no verdict of their own** (opened by G5's harvest). Their conclusion lives
+  only in `MEMORY.md` / `randd_log.md`, which means the artifact cannot be audited against the claim
+  made about it. Fix forward: a `decision` field is cheap and every new probe should write one. Do
+  not backfill by inferring decisions from the stored numbers.
