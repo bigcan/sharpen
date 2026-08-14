@@ -500,10 +500,93 @@ mis-specified, not satisfied. It is **not** being retroactively lowered — the 
 stands as written, with §11 recording the corrected specification for any future re-run.
 
 **BALLAST on free data: NO-GO.** The measured edge is fully accounted for by survivorship bias. No
-GPU work is justified. This is the negative screen operating exactly as designed and at the intended
+GPU work is justified. (§8c revises the *mechanism* behind this — pool quality, not loser-holding —
+and shows the inflation estimate probably overstates the damage. The verdict stands; the confidence
+in its magnitude does not.) This is the negative screen operating exactly as designed and at the intended
 cost — the project was killed by measurement, before any RL was built.
 
 ---
+
+## 8c. Exit-exposure test — the sleeves DO avoid deteriorating names. This corrects §8b's mechanism.
+
+`scripts/research/ballast_exit_exposure.py`, `results/ballast_v1/exit_exposure.json`.
+
+### Why this had to be run
+
+G1b establishes that the measured margin is inflated. It does **not** establish *why*, and the two
+candidate mechanisms have opposite implications for whether paid data is worth buying:
+
+* **Loser-holding** — the sleeves buy deteriorating names and the free panel hides the damage. If
+  so, complete data makes everything strictly worse and BALLAST is dead.
+* **Pool quality** — the sleeves avoid deteriorating names fine, but the *selection pool* is
+  pre-filtered to companies that stayed in the index for another decade, so the top-K is drawn from
+  guaranteed long-run winners. If so, there is an offsetting effect complete data would reveal: a
+  long-only book is scored against the **actual** index, which held Lehman/SIVB/FRC all the way
+  down, and **you get no credit for avoiding a name that is not in your data**.
+
+### Method
+
+For every index EXIT among priceable names in 2007-2014, look back 252/126/63/21 trading days and
+record where the exiting name sat in that day's cross-section. `score_percentile` is the rank of the
+blended core score among active names — self-normalizing, so no matched control is needed: under
+"no avoidance skill and no adverse selection" it averages 0.50. Events are split by the name's
+126-day market-relative return before exit (`< −20%` ⇒ "decline", the failure proxy; the rest are
+mostly mergers, which pay a premium and are *good* to hold).
+
+### Result — 74 exit events, 33 unique names, 14 decline
+
+| Cohort | Days before exit | Score percentile | CI95 | Held | Base rate |
+|---|---|---|---|---|---|
+| **decline** | 252 | **0.294** | [0.17, 0.41] | **0.000** | 0.241 |
+| decline | 126 | 0.253 | [0.11, 0.39] | 0.071 | 0.236 |
+| decline | 63 | 0.194 | [0.09, 0.30] | 0.000 | 0.235 |
+| decline | 21 | **0.085** | [0.04, 0.13] | 0.000 | 0.233 |
+| other | 252 | 0.538 | [0.37, 0.71] | 0.333 | 0.224 |
+| other | 126 | 0.499 | [0.34, 0.66] | 0.235 | 0.219 |
+| other | 63 | 0.462 | [0.30, 0.63] | 0.316 | 0.220 |
+| other | 21 | 0.443 | [0.28, 0.61] | 0.263 | 0.219 |
+
+Every decline-cohort CI excludes 0.50, the percentile falls monotonically as exit approaches, and
+the book held **zero** of them at three of the four horizons against a ~23% base rate. The merger
+cohort sits at roughly the base rate, which is the desired behaviour.
+
+### The circularity caveat — read the h=252 row, not the h=21 row
+
+The "decline" label is a 126-day market-relative return, and `momentum` (12-1 return) and `trend`
+(price vs 200d MA) are built from almost exactly that. So **the h=21 and h=63 readings are close to
+tautological** — the cohort is partly defined by the signal being tested.
+
+The h=252 reading is the informative one: there the score date precedes the classification window
+entirely, so nothing about the score can be a restatement of the label. It still shows percentile
+**0.294 with zero holdings**. A full year before exit, before the measured decline even begins, the
+sleeves already ranked these names in the bottom 30% and owned none of them.
+
+Generalizes: when classifying a cohort by a variable that is also (a component of) the signal under
+test, only the horizons where the score strictly precedes the classification window carry
+information. Report them separately rather than averaging across horizons.
+
+### What this changes, and what it does not
+
+**Mechanism: pool quality, not loser-holding.** The §8b hypothesis that the sleeves were partly
+buying the exit cohort is **refuted**. G1b's degradation comes from the selection pool being
+pre-enriched with future winners.
+
+**It does not overturn the NO-GO,** for one reason: **SPY is cap-weighted.** A company on its way to
+zero has already shrunk to a trivial index weight by the time it fails — so the benchmark barely
+suffers from the failures the strategy so cleanly avoids. Avoidance credit is large against an
+equal-weight benchmark and small against SPY specifically. (The book is closer to equal-weight, so
+per name held it is *more* exposed to a failure than SPY is — it simply does not hold them.)
+
+**It does weaken the extrapolation.** G1b measured the mild deletion cohort and extended that slope
+to the severe missing cohort. This test shows the strategy treats the two very differently (0.294 vs
+0.538 at h=252), so adding the severe cohort to the pool is likely closer to neutral than the
+deletion cohort was, and the −0.237 inflation probably **overstates** the damage.
+
+**Standing judgement: ~30-35% that delisting-complete data flips this to a genuine GO** (revised up
+from ~20% before this test). Below even odds, and n=14 decline names is thin. Recommendation
+unchanged but better supported: buy one month of vendor data, rebuild 2007-2014, re-run P2 + G1b
+only — days of CPU, no GPU, OOS budget intact. That resolves the exact quantity §8b and §8c
+disagree about, rather than arguing it from two partial measurements.
 
 ## 9. Open decision: the data spine (operator call — involves spending)
 
