@@ -37,10 +37,22 @@ def main() -> int:
     while True:
         done_all = True
         for label, name in STUDIES.items():
-            try:
-                st = optuna.load_study(study_name=name, storage=storage)
-            except Exception as e:                     # study not created yet / transient DB blip
-                print(f"[{label}] study unavailable: {type(e).__name__}", flush=True)
+            # RETRY BEFORE REPORTING. The remote Postgres returns the occasional
+            # StorageInternalError on a freshly-opened connection; worker logs show zero
+            # storage errors during the same window, so it is this poller's connection and
+            # not the training runs. Reporting every blip over a 17h run trains the reader
+            # to ignore the monitor, which is exactly when a real failure gets missed.
+            st = None
+            for attempt in range(3):
+                try:
+                    st = optuna.load_study(study_name=name, storage=storage)
+                    break
+                except Exception as e:
+                    last = e
+                    time.sleep(5 * (attempt + 1))
+            if st is None:
+                print(f"[{label}] study unavailable after 3 tries: {type(last).__name__}",
+                      flush=True)
                 done_all = False
                 continue
             finished = [t for t in st.trials
