@@ -1,0 +1,178 @@
+# GMGP1-SPX500 variant B — LONG-ONLY — Stage 1 HPO
+#
+# First application of GMGP1 to US equities. Paired A/B against
+# configs/gmgp1_spx500_ls_hpo.yaml (variant A, long/short); the two files are identical
+# except for `env.long_only` and the wandb tags, so any performance gap is attributable to
+# the short constraint and not to a second incidental difference. Keep them that way — if
+# you change a knob here, change it there.
+#
+# WHY SPX500_USD AND NOT SPY, since the request named SPY. Both were pursued; the choice is
+# a MEASURED one, not a convenience. Dukascopy publishes a real SPY ETF CFD tick feed
+# (`SPYUSUSD`, verified decoding to $543.10 on 2024-06-12 and correctly empty on Juneteenth),
+# but its IP rate limiter makes the pull infeasible: 6 concurrent workers returned 0/48
+# requests, 1 worker returned 48/48 but degraded to all-503 after ~25 minutes of steady
+# pulling, and single probes then took 28s each — a projected 18-75h just to download.
+# OANDA's SPX500_USD is the SAME UNDERLYING MARKET that SPY tracks (S&P 500), goes back to
+# 2010, and pages 5000 candles per request. Operator confirmed the substitution 2026-08-15.
+#
+# WHAT THE SUBSTITUTION CHANGES, stated so results are not over-read:
+#   * It is the INDEX, not the ETF — no dividend/expense-ratio tracking difference, and no
+#     share-borrow constraint on the short side (variant A's shorts are therefore FREE here,
+#     which flatters A relative to a real SPY short that pays a borrow fee).
+#   * It trades ~23h/day, 5 days/week, versus SPY's 6.5h RTH. Overnight index moves are
+#     TRADEABLE BARS here rather than untradeable gaps. This is the more favourable setup
+#     for a swing agent and it roughly triples bar density (see multiplicity note below).
+#
+# STANDING EVIDENCE, recorded so the result is read against the right prior: single-asset
+# directional RL is FALSIFIED on this platform (GMGP1-BTC clean de-leaked re-baseline
+# 2026-07-20, net WF PF 0.977, edge absent even frictionless; gold and XAUUSD likewise).
+# The prior for equities is therefore negative and another NO-GO is the honest expected
+# outcome. This runs because US equities are a genuinely untested underlying with a
+# different return-generating process (equity risk premium + overnight drift, versus the
+# driftless perp), and because the long-only arm tests a distinct hypothesis: that the
+# variance removed by banning shorts is worth more than the flexibility lost.
+# See MEMORY.md NO-GO ledger before proposing any follow-on.
+
+data:
+  file_path: "data/processed/spx500_1min.parquet"
+  ticker: "SPX500"
+  handler_type: "multiscale"
+  # 24-month train window (protocol v2 §3.5.2 calendar-anchored minimum is 22mo).
+  # 2025-01 onward is deliberately untouched here — it is the walk-forward + recent-OOS
+  # reserve, so HPO never sees it. 2019-2021 is held for optional earlier WF folds.
+  train_start_date: "2022-01-03"
+  train_end_date: "2023-12-29"
+  val_start_date: "2024-01-02"
+  val_end_date: "2024-06-28"
+  test_start_date: "2024-07-01"
+  test_end_date: "2024-12-31"
+
+features:
+  scales: [15, 60, 240]          # 15-min decision, 1h trend, 4h regime
+  window_size: 30
+  features_per_scale: 8           # TC-OPT: 8 aligns Conv1d input for Tensor Cores
+  asset_class: "cfd_equity"
+
+env:
+  mdp_version: "v7"
+  long_only: true                 # <-- THE ONLY SUBSTANTIVE DIFFERENCE vs variant A
+                                  # Enforced in the ENV, not the policy: the SAC actor is
+                                  # hardwired tanh->[-1,1] and never reads action_space.low,
+                                  # so narrowing the Box alone would be inert.
+  initial_balance: 100000.0
+  window_size: 30
+  features_per_scale: 8           # must match features.features_per_scale
+  # MEASURED, not assumed: OANDA SPX500_USD bid/ask sampled n=6000 across three regimes
+  # (2022 bear, 2024, 2026) gives median spread 0.911 bps of mid => one-way half-spread
+  # 0.456 bps. Set 0.46 bps one-way (0.91 bps round trip). Steady-state from step 0 — NO
+  # fee curriculum (BUG-01; curricula forbidden outside HPO sensitivity runs).
+  taker_fee: 0.000046
+  slippage_base_bps: 0.0
+  deadband_threshold: 0.25        # HPO sweeps this
+  atr_cap_percentile: 90
+  atr_cap_max_position: 0.5
+  max_leverage: 1.0               # unlevered — keeps the A/B clean
+  episode_length: 500             # 500 x 15min = 125h ~ 5.4 trading days at 23h/day
+  random_start: true
+  max_drawdown_pct: 0.30
+  scales: [15, 60, 240]
+  # REQUIRED, not optional: the index closes over the weekend (~48h+ hole), and protocol v2
+  # §3 rejects a manifest whose max_gap_bars exceeds 1 day unless gap_detection is set.
+  # Zeroes returns above 3x ATR, removing untradeable weekend jumps the agent cannot act
+  # inside. Identical in both variants, so it cannot bias the A/B.
+  gap_detection: true
+  gap_atr_mult: 3.0
+  reward:
+    mode: "dsr"
+    dsr_eta: 0.001                # HPO sweeps
+    dsr_scale: 1.0
+
+network:
+  scale_encoder:
+    input_size: 8
+    channels: [32, 64, 64, 64]
+    kernel_size: 3
+    output_dim: 64
+  private_dim: 5
+  fusion_dim: 256
+  window_size: 30
+
+# Placeholder HPs — geometric midpoints of the broad search space in
+# finrl_pro_ds/hpo/objective.py:132-144. narrow_mode: false => every dim is resampled per
+# trial and these are NOT used as priors. There is no donor study for equities, so a narrow
+# search would have no anchor to narrow around.
+agents:
+  sac:
+    lr_actor: 4.5e-5
+    lr_critic: 4.5e-5
+    lr_alpha: 4.5e-5
+    gamma: 0.975
+    tau: 1.4e-4
+    batch_size: 512
+    buffer_size: 500000           # DO NOT CHANGE — multiplicity rule is defined against 500K
+    initial_alpha: 0.158
+    learning_starts: 5000
+    update_interval: 4
+    actor_update_freq: 2
+    gradient_clip: 3.16
+    checkpoint_interval: 200000
+
+training:
+  total_timesteps: 400000         # overridden to steps_per_trial during HPO
+  log_interval: 1000
+  use_amp: true
+  amp_dtype: "bfloat16"
+  torch_compile: true
+  num_envs: 20
+
+hpo:
+  enabled: true
+  objective: "profit_factor"      # BUG-01 / protocol v2 §4 stage 1
+  trials: 30
+  # Multiplicity (§3.5.1) = steps_per_trial / bars_in_train_window. SPX500 at ~23h/day
+  # yields FAR more bars than an RTH equity: the 24mo train window holds ~48K 15-min bars,
+  # so 400K/trial is ~8x. That is BELOW the 15-40x productive zone, and it is deliberate:
+  # §4 stage 1 explicitly sanctions it ("~8x on a 63K-bar window ... under-trained for L1
+  # but acceptable for HPO since L1 multiseed is the real validation filter"). The L1
+  # multiseed config raises total_timesteps into the productive zone — do NOT copy 400K
+  # forward to stage 2.
+  steps_per_trial: 400000
+  wall_clock_hours_estimate: 24
+  narrow_mode: false
+  enqueue_baseline: false
+  # DISTINCT per variant, and load-bearing. run_full_pipeline.py used to hardcode the
+  # study name to "hpo_sac"; against the shared Postgres backend that would pool this
+  # variant's trials with the other one's and select a best trial across BOTH, which
+  # would destroy the A/B. The storage URL itself is NOT committed — it is passed at
+  # launch via --hpo_storage from DISTRIBUTED_HPO_DB_URL in .env.
+  study_name: "gmgp1_spx500_lo_hpo_20260815"
+
+gates:
+  # HPO stage
+  hpo_pf_floor: 1.2
+  hpo_min_trials_completed: 20
+  entropy_floor: 0.01
+  q_div_max: 100.0
+  action_sat_max: 0.9
+  # L1 multiseed stage — 5 seeds (exploratory, NOT prop-firm / live-capital; §4 stage 2
+  # requires N>=10 only for capital-bound workstreams, and this one is barred from capital
+  # until a Tier-2 deep lifecycle audit per CLAUDE.md).
+  l1_seeds: 5
+  l1_pf_floor: 1.5
+  l1_pf_cv_max: 0.30
+  # Walk-forward stage
+  wf_windows: 4
+  wf_pf_floor: 1.1
+  # Recent-OOS stage
+  oos_pf_floor: 1.1
+  oos_hold_ratio: 0.8
+  oos_watch_ratio: 0.6
+  recent_oos_days: 60
+
+wandb:
+  project: "FinRL-Pro-DS"
+  # Deliberately NO prop-firm / ftmo / velotrade tag: this is exploratory research, and
+  # those tags flip the §8.2 drift + safe-mode gate blocks to BLOCKING
+  # (validate_config.py:_is_prop_firm). Adding one later means declaring those 8 keys.
+  tags: ["gmgp1-spx500", "SPX500", "SAC", "15min", "equity", "hpo", "steady-state",
+         "long-only", "variant-b", "ab-test"]

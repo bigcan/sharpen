@@ -89,10 +89,22 @@ def run_hpo(base_config, n_trials, steps_per_trial, device, agent_type="bdq"):
 
     # Run optimization
     logger.info(f"Creating Optuna study (storage={base_config.get('hpo', {}).get('storage')})...")
+    # STUDY NAME MUST BE CONFIGURABLE, and this was a latent data-corruption bug on shared
+    # storage. It was hardcoded to f"hpo_{agent_type}" with load_if_exists=True, which is
+    # harmless against the default per-run sqlite but silently WRONG against the shared
+    # Postgres in DISTRIBUTED_HPO_DB_URL: every SAC workstream would converge on one study
+    # named "hpo_sac", so two configs run against that storage would pool their trials and
+    # best-trial selection would range over BOTH. That is fatal for a paired A/B such as
+    # gmgp1-spx500 long-short vs long-only, where the whole design rests on the two searches
+    # being independent. Falls back to the old name when unset, so every existing caller and
+    # every sqlite-backed run is byte-identical.
+    _hpo_cfg = base_config.get("hpo", {}) or {}
+    _study_name = _hpo_cfg.get("study_name") or f"hpo_{agent_type}"
+    logger.info("Optuna study_name=%s", _study_name)
     study = optuna.create_study(
         direction="maximize",
-        storage=base_config.get("hpo", {}).get("storage"),
-        study_name=f"hpo_{agent_type}",
+        storage=_hpo_cfg.get("storage"),
+        study_name=_study_name,
         load_if_exists=True,
         sampler=create_sampler(base_config.get("hpo", {})),
         # FIX HPO-1: Disable inter-trial pruning for swing MDP.
@@ -877,6 +889,15 @@ def main():
         print("="*60 + "\n")
 
         hpo_config = base_config.get("hpo", {})
+        # --hpo_storage was DECLARED but never applied — a dead flag, so the only way to
+        # reach shared storage was to commit a credentialed URL into a tracked YAML. Wire it
+        # here so the Postgres URL is supplied at launch time from .env instead. Config value
+        # still wins when the flag is absent.
+        if args.hpo_storage:
+            hpo_config = dict(hpo_config)
+            hpo_config["storage"] = args.hpo_storage
+            base_config["hpo"] = hpo_config
+            logger.info("HPO storage overridden from --hpo_storage (shared study backend)")
         final_config = copy.deepcopy(base_config)
 
         if args.backtest_only:
