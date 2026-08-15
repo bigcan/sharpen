@@ -158,6 +158,94 @@ long-only). It should be tested **only** as a candidate overlay inside the exist
 admission rule `s2 > s1·(√(2+2ρ)−1)` ([[project_alpha_search_16_probes_2026_07_31]]) against the
 current sleeve, not as a new workstream.
 
+---
+
+# Addendum (2026-08-15) — the overlay was tested, and two operator probes
+
+Follow-on to §7. Scripts: `etf_overlay_vs_tsmom_admission.py`,
+`etf_overlay_admission_stress.py`, `etf_concentration_family_gradient.py`.
+
+## A1. The 36m/36m overlay does NOT earn admission to TAILWIND
+
+Applied the pre-existing admission rule `s2 > s1·(√(2+2ρ)−1)` exactly as it was applied to the
+country/crypto/commodity sleeves, against the rebuilt base book (cross-asset TSMOM, s1 = **0.601**).
+
+| Variant | s2 | ρ | threshold | verdict | combined (equal-risk) |
+|---|---|---|---|---|---|
+| A dollar-neutral Q5−Q1 | 0.374 | +0.002 | 0.250 | **ADMIT** (+0.125) | 0.689 (+0.088) |
+| B long-only Q5 − SPY | 0.171 | +0.051 | 0.270 | REJECT (−0.099) | 0.533 (−0.068) |
+
+Variant A's pass is a **false positive**, and the reason is the finding worth keeping:
+
+```
+beta_SPY       +0.075  (t +3.90)
+beta_TECH_rel  +0.107  (t +4.70)
+alpha ann      +0.0038 (t +0.34)      R2 0.137
+Sharpe after hedging SPY + tech:  0.080   (was 0.374)  =>  REJECT
+```
+
+The sleeve is the same tech-beta trade in long/short clothing. Its ρ ≈ 0 against the base book is
+not evidence of a distinct premium — it only says the cross-asset TSMOM book carries no tech tilt.
+Verdict robust to ρ ∈ [−0.10, +0.10] (threshold never exceeds 0.290 vs hedged 0.080).
+
+> ⚠ **DEFECT IN THE ADMISSION RULE (generalises beyond this candidate).** The rule reads only
+> `(s1, s2, ρ)`. **A candidate can be uncorrelated with the base book and still be pure beta.** It
+> tests diversification against *one book*, not against the factor space. Same defect class as the
+> Crucible gate where a pure-beta candidate passed 3 of 5 legs with `guards.max_market_beta` inert.
+> **Fix: apply the rule to the FACTOR-HEDGED candidate return.** Under that correction this
+> candidate rejects cleanly and the rule still admits genuinely orthogonal sleeves.
+
+Secondary stresses, each independently damaging: breakeven **borrow cost is only 1.27%/yr** on the
+50%-short leg (survives 1%, dies at 2%; the Q1 leg is small thematic funds); margin halves across
+sample halves (+0.166 → +0.078). Short-leg breadth is fine (median 51 names) — that check passes.
+
+## A2. Operator probes: XLG and IWY — concentration and growth are inception-date artifacts
+
+Both are fair challenges: neither fund is a sector bet or levered beta (XLG's beta is **0.937,
+below the market**, with a smaller drawdown than SPY in every window).
+
+**XLG** (S&P 500 Top 50): excess +0.32%/yr (20y), +1.28%/yr (10y), Sharpe 0.595 vs 0.575, maxDD
+−52.4% vs −55.2%, and it beat SPY in **90.5%** of rolling 3y windows over 10y. But over its full
+21.1 years: **FF6 alpha −0.05%/yr (t=−0.08)**, −0.62%/yr once tech is controlled. Its mega-cap tilt
+(SMB −0.247) contributed **−0.0001** to return — the loading is real, the premium wasn't.
+
+**IWY** (Russell Top 200 Growth): the best non-levered fund measured, +2.52%/yr, Sharpe 0.851 vs
+0.797. Also the luckiest inception available — **2009-09-28**, six months after the bottom. Of its
+16.2%/yr excess-over-cash, **87% is plain market beta**; residual +0.57%/yr at **t=0.97**.
+
+**The decisive test — order each family by inception, measure every fund on its own window:**
+
+| concentration | inception | excess || growth | inception | excess |
+|---|---|---|---|---|---|---|
+| OEF (S&P 100) | 2000-10 | **−0.25%** || SPYG (S&P 500 Gr) | 2000-10 | **−1.01%** |
+| XLG (Top 50) | 2005-05 | +0.12% || IWF (R1000 Gr) | 2000-05 | **−0.27%** |
+| MGC (Mega Cap) | 2007-12 | +0.36% || IVW (S&P 500 Gr) | 2000-05 | +0.30% |
+| IWY (Top 200 Gr) | 2009-09 | +2.52% || VUG / MGK | 2004-01 / 2007-12 | +1.38% / +2.34% |
+| | | || IWY / SCHG | 2009-09 / 2010-01 | +2.52% / +2.12% |
+
+**corr(inception order, excess) = +0.886 (concentration), +0.829 (growth).** Every fund in either
+family that spans the dot-com bust is at or below SPY; every fund launched after 2004 beats it, and
+the later the launch the bigger the margin. These are not funds of differing merit — they are one
+strategy sampled from different start dates. OEF, the only concentration vehicle covering a full
+mega-cap cycle, **underperforms over 25.8 years** with a −50.9% drawdown and 6.5 years underwater.
+
+The gradient runs forward too: measured from 2022, IWY is **−0.26%/yr**, IWF −0.84%, VUG −0.39%.
+
+**Mechanism.** Cap-concentration is mechanically *momentum-of-market-cap* — you hold more of
+whatever already grew, and more of it than the cap-weighted index does. It compounds while mega-cap
+leadership persists and inverts when it breaks. XLG remains a defensible *holding* (mild quality
+tilt, better Sharpe, lower DD); it is not an alpha.
+
+> Method notes. IWY was a **false positive in the first attribution run** (t=2.632, "survived" FDR)
+> — an artifact of the demeaned-TECH-factor bug in §4; with the mean retained, t = 0.97. A second
+> bug was caught and fixed here: the within-fund start-year grid compared a fund's post-inception
+> series against SPY measured from the requested year, inflating IWY's "2006" cell to +5.82%. Cells
+> where the fund did not yet exist are now NaN. The family table was never affected (it uses
+> inception for both legs).
+
+Prior project work on XLG (S553-cont-75) tested 10 entry/timing rules against buy-and-hold XLG (all
+10 negative IR) but never asked whether XLG beats SPY. This fills that gap.
+
 ## Data caveats
 
 - Survivors-only universe; base rates are upper bounds (§1).
