@@ -76,6 +76,48 @@ from finrl_pro_ds.hpo.sampler import create_sampler  # noqa: E402
 
 
 
+def _resolve_hpo_storage(storage):
+    """Turn a Postgres URL into an RDBStorage that survives a long, DB-idle trial.
+
+    THIS EXISTS BECAUSE IT KILLED A FULL OVERNIGHT RUN. The shared backend is Neon
+    (serverless Postgres), which suspends compute and terminates idle connections. Optuna
+    only touches the DB at trial start and trial end, so a 104-minute trial leaves the
+    connection idle for the whole of it; the commit at the end then died with
+
+        psycopg.errors.AdminShutdown: terminating connection due to administrator command
+
+    which Optuna surfaces as StorageInternalError and `_run_trial` converts into
+    `assert False, "Should not reach."` — taking the worker process down. All 6 workers of
+    the gmgp1-spx500 A/B died this way at 2026-08-15 ~23:20, each having completed its full
+    400K training steps first, so ~10 GPU-hours produced zero recorded trials.
+
+    Two independent defences, because either alone leaves a hole:
+      * `pool_pre_ping` + short `pool_recycle` — SQLAlchemy validates (and transparently
+        reopens) a connection before use, so a connection killed while idle is replaced
+        instead of raising.
+      * `heartbeat_interval` — Optuna writes periodically DURING a trial, which both keeps
+        the serverless instance from idling out and lets a genuinely dead worker's trial be
+        reclaimed rather than sitting RUNNING forever (exactly the 6 orphaned RUNNING trials
+        this failure left behind).
+
+    Non-Postgres storages (the sqlite default, or an already-constructed storage object)
+    pass through untouched, so no existing workstream changes behaviour.
+    """
+    if not isinstance(storage, str) or not storage.startswith("postgresql"):
+        return storage
+    return optuna.storages.RDBStorage(
+        url=storage,
+        engine_kwargs={
+            "pool_pre_ping": True,   # revalidate before use — the core fix
+            "pool_recycle": 280,     # under Neon's idle cutoff
+            "connect_args": {"connect_timeout": 30},
+        },
+        heartbeat_interval=60,
+        grace_period=600,
+        failed_trial_callback=optuna.storages.RetryFailedTrialCallback(max_retry=1),
+    )
+
+
 def run_hpo(base_config, n_trials, steps_per_trial, device, agent_type="bdq"):
     """Phase 1: Hyperparameter Optimization with Optuna. Supports BDQ and PPO agents."""
     logger.info(f"Starting HPO: {n_trials} trials, {steps_per_trial} steps each")
@@ -103,7 +145,7 @@ def run_hpo(base_config, n_trials, steps_per_trial, device, agent_type="bdq"):
     logger.info("Optuna study_name=%s", _study_name)
     study = optuna.create_study(
         direction="maximize",
-        storage=_hpo_cfg.get("storage"),
+        storage=_resolve_hpo_storage(_hpo_cfg.get("storage")),
         study_name=_study_name,
         load_if_exists=True,
         sampler=create_sampler(base_config.get("hpo", {})),
