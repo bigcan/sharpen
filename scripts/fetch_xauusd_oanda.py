@@ -80,7 +80,8 @@ def candles_to_rows(candles: list, price: str) -> list:
 
 
 def fetch_range(token: str, start: pd.Timestamp, end: pd.Timestamp,
-                granularity: str, price: str) -> pd.DataFrame:
+                granularity: str, price: str,
+                instrument: str = INSTRUMENT) -> pd.DataFrame:
     step_s = GRANULARITY_SECONDS[granularity]
     chunk_span = pd.Timedelta(seconds=step_s * 4900)  # stay under 5000 cap
 
@@ -88,7 +89,7 @@ def fetch_range(token: str, start: pd.Timestamp, end: pd.Timestamp,
     cursor = start
     req_count = 0
     while cursor < end:
-        candles = fetch_chunk(token, INSTRUMENT, granularity, cursor, price, count=5000)
+        candles = fetch_chunk(token, instrument, granularity, cursor, price, count=5000)
         req_count += 1
         if not candles:
             cursor = cursor + chunk_span
@@ -118,6 +119,10 @@ def fetch_range(token: str, start: pd.Timestamp, end: pd.Timestamp,
 
 def main():
     ap = argparse.ArgumentParser()
+    # --instrument added 2026-08-15: the paginator here is instrument-agnostic and was the
+    # only working OANDA puller in the repo, so gmgp1-spy reuses it rather than forking a
+    # second copy. Default keeps every existing XAU_USD invocation byte-identical.
+    ap.add_argument("--instrument", default=INSTRUMENT, help="OANDA instrument, e.g. SPX500_USD")
     ap.add_argument("--start", default="2024-01-01", help="ISO date, UTC")
     ap.add_argument("--end", default=None, help="ISO date, UTC (default: now)")
     ap.add_argument("--granularity", default="M15", choices=list(GRANULARITY_SECONDS))
@@ -134,17 +139,17 @@ def main():
     start = pd.Timestamp(args.start, tz="UTC")
     end = pd.Timestamp(args.end, tz="UTC") if args.end else pd.Timestamp.now(tz="UTC")
 
-    print(f"Fetching {INSTRUMENT} {args.granularity} price={args.price} "
+    print(f"Fetching {args.instrument} {args.granularity} price={args.price} "
           f"{start.date()} -> {end.date()}", flush=True)
 
-    df = fetch_range(token, start, end, args.granularity, args.price)
+    df = fetch_range(token, start, end, args.granularity, args.price, args.instrument)
     if df.empty:
         print("No bars returned.", file=sys.stderr)
         sys.exit(1)
 
     DATA_DIR.mkdir(parents=True, exist_ok=True)
     out = Path(args.output) if args.output else (
-        DATA_DIR / f"xauusd_{args.granularity.lower()}_{args.price.lower()}.parquet")
+        DATA_DIR / f"{args.instrument.lower()}_{args.granularity.lower()}_{args.price.lower()}.parquet")
     df.to_parquet(out, index=False)
 
     span_d = (df["timestamp"].iloc[-1] - df["timestamp"].iloc[0]).total_seconds() / 86400
