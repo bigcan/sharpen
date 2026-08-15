@@ -85,11 +85,25 @@ def fetch_hour(instr: str, when: dt.datetime, session: requests.Session,
     for attempt in range(retries):
         try:
             r = session.get(url, timeout=timeout, headers=UA)
+            # RETRY ON HTTP ERROR STATUS, NOT JUST ON RequestException. The feed throttles
+            # hard with 503 (a 2026-08-15 probe took 503 on 5/5 opening requests, then served
+            # every one of them on a backed-off retry). Breaking here sent 503 down to the
+            # `status_code != 200` branch below, which reads as "weekend / holiday" — the exact
+            # silent-gap failure this module's docstring warns about, one level up: connection
+            # errors were hardened, HTTP statuses were not. A throttled pull would have
+            # recorded absent history with no error surfaced.
+            if r.status_code in (429, 500, 502, 503, 504):
+                if attempt == retries - 1:
+                    return None                      # exhausted — caller COUNTS this
+                time.sleep(0.8 * (2 ** attempt))
+                continue
             break
         except requests.RequestException:
             if attempt == retries - 1:
                 return None                          # exhausted — caller COUNTS this, never silently drops
             time.sleep(0.4 * (2 ** attempt))
+    if r is None:
+        return None
     if r.status_code != 200 or not r.content:
         return pd.DataFrame()                        # weekend / holiday — legitimately empty
     try:
