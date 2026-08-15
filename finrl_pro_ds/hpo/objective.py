@@ -16,10 +16,28 @@ import torch
 import wandb
 
 from finrl_pro_ds.hpo.env_factory import create_vector_env
-from finrl_pro_ds.hpo.evaluate import evaluate_for_hpo
+from finrl_pro_ds.hpo.evaluate import buy_and_hold_total_return, evaluate_for_hpo
 from finrl_pro_ds.logging import trial_namespaced
 
 logger = logging.getLogger("FinRL.HPO")
+
+# Buy-and-hold hurdle cache. The eval env is REBUILT every trial, so this must be keyed by
+# the eval WINDOW rather than by env identity — caching on id(env) would both miss (new
+# object each trial) and risk collisions as ids are recycled. The hurdle depends only on the
+# data window and the fixed env economics, none of which the HPO sampler varies, so one
+# measurement per window is correct and saves a full rollout per trial.
+_BH_HURDLE_CACHE: dict[tuple, float] = {}
+
+
+def _buy_hold_hurdle(eval_env, bar_minutes, data_cfg=None, key=None):
+    """Median buy-and-hold total return on the eval window, measured once and reused."""
+    if key is None:
+        d = data_cfg or {}
+        key = (d.get("file_path"), d.get("val_start_date"), d.get("val_end_date"))
+    if key not in _BH_HURDLE_CACHE:
+        _BH_HURDLE_CACHE[key] = buy_and_hold_total_return(eval_env, max_steps=50000)
+        logger.info("Buy-and-hold hurdle for %s = %.4f", key, _BH_HURDLE_CACHE[key])
+    return _BH_HURDLE_CACHE[key]
 
 
 def _parse_frequency_to_minutes(freq: str) -> float:
@@ -440,6 +458,7 @@ def make_objective(base_config, steps_per_trial, agent_type, device, trial_recor
             tc_values = []
             completion_pcts = []
             terminated_early_count = 0
+            total_returns = []
             for eval_seed in [42, 123, 7]:
                 eval_env.reset(seed=eval_seed)
                 pf, tc, diag = evaluate_for_hpo(
@@ -449,14 +468,46 @@ def make_objective(base_config, steps_per_trial, agent_type, device, trial_recor
                 )
                 pf_values.append(pf)
                 tc_values.append(tc)
+                total_returns.append(diag.get("_debug/eval_total_return", 0.0))
                 completion_pcts.append(diag.get("_debug/eval_completion_pct", 1.0))
                 terminated_early_count += int(diag.get("_debug/eval_terminated_early", 0))
             profit_factor = float(np.median(pf_values))
             trade_count = int(np.median(tc_values))
+            agent_total_return = float(np.median(total_returns))
             mean_completion_pct = float(np.mean(completion_pcts))
 
-            # Activity constraint — kill lazy holding agents
-            min_trades = 30
+            _gates = config.get("gates", {}) or {}
+
+            # BENCHMARK HURDLE (opt-in, default OFF so no existing workstream changes).
+            # Guards the failure mode that the activity constraint below is a crude proxy
+            # for: a long-biased book that simply HOLDS through a rising eval window scores
+            # well without timing anything. Comparing to buy-and-hold on the same window
+            # tests the thing we actually care about, and unlike a raw turnover floor it is
+            # not biased against low-turnover-by-construction variants (a long-only book can
+            # only alternate long<->flat, so it produces far fewer position changes than a
+            # two-sided one that also flips long<->short).
+            if _gates.get("hpo_require_beat_buy_hold", False):
+                bh_return = _buy_hold_hurdle(eval_env, hpo_bar_minutes,
+                                             data_cfg=config.get("data", {}))
+                if agent_total_return <= bh_return:
+                    wandb.log({f"{trial_prefix}/killed": "below_buy_hold",
+                               f"{trial_prefix}/total_return": agent_total_return,
+                               f"{trial_prefix}/buy_hold_return": bh_return})
+                    logger.info("Trial %d: KILLED (total_return %.4f <= buy&hold %.4f)",
+                                trial.number, agent_total_return, bh_return)
+                    trial_records.append({"trial": trial.number, "mean_reward": _mean_train_reward,
+                                          "val_pf": -999.0, "trade_count": trade_count,
+                                          "status": "killed_below_buy_hold",
+                                          "hps": dict(trial.params)})
+                    return -999.0
+
+            # Activity constraint — kill lazy holding agents.
+            # Threshold is CONFIGURABLE (CLAUDE.md: numeric gates live in the gate YAML, not
+            # in code). It was hardcoded at 30, which is not variant-neutral: measured on
+            # gmgp1-spx500, 0/1 long/short trials but 3/3 long-only trials were killed by it
+            # at 7/20/22 trades, because banning shorts removes roughly half the achievable
+            # position changes. Default stays 30 so every existing workstream is unchanged.
+            min_trades = int(_gates.get("hpo_min_trades", 30))
             if trade_count < min_trades:
                 wandb.log({f"{trial_prefix}/killed": "lazy_agent", f"{trial_prefix}/trades": trade_count})
                 logger.info("Trial %d: KILLED (only %d trades, min=%d)", trial.number, trade_count, min_trades)
