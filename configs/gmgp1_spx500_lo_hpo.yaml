@@ -151,6 +151,19 @@ gates:
   # HPO stage
   hpo_pf_floor: 1.2
   hpo_min_trials_completed: 20
+  # ACTIVITY FLOOR — lowered from the hardcoded 30 and now declared here per CLAUDE.md.
+  # MEASURED 2026-08-15 on the first launch of this very A/B: 0/1 long/short trials were
+  # killed by the old floor but 3/3 long-only trials were (at 7, 20 and 22 trades). Banning
+  # shorts removes roughly half the achievable position changes (long<->flat only, never
+  # long<->short), so a floor of 30 is not variant-neutral and was silently handing variant B
+  # an empty search. 10 kills genuinely inert policies without encoding that bias.
+  hpo_min_trades: 10
+  # BENCHMARK HURDLE — replaces what the turnover floor was really guarding against. The HPO
+  # eval window (2024-01..06) is a +14.6% bull, so a long-biased book that simply HOLDS
+  # scores well while timing nothing; this rejects any trial that fails to beat buy-and-hold
+  # on that same window. Compared on TOTAL RETURN, which has one definition for switching and
+  # non-switching books alike (profit factor does not). Identical in both variants.
+  hpo_require_beat_buy_hold: true
   entropy_floor: 0.01
   q_div_max: 100.0
   action_sat_max: 0.9
