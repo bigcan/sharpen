@@ -246,6 +246,46 @@ tilt, better Sharpe, lower DD); it is not an alpha.
 Prior project work on XLG (S553-cont-75) tested 10 entry/timing rules against buy-and-hold XLG (all
 10 negative IR) but never asked whether XLG beats SPY. This fills that gap.
 
+## A3. PPA (aerospace & defense) — the last non-tech name, closed by one event
+
+Applying the strictest filter available (beat SPY on **return AND Sharpe in all three windows**)
+leaves **16 of 196 funds**. Thirteen are the same trade (semis → tech → growth → levered); XLG and
+OEF are the concentration bet from A2. **PPA is the only survivor that is none of those** — and its
+tech loading is **negative (−0.11)**, so it is genuinely orthogonal to every other winner. Its
+sibling ITA is the same shape (β 0.96, alpha +3.18%/yr t 1.19, tech −0.16). It therefore needed its
+own falsification rather than an inherited one. Script: `etf_defense_ppa_closure.py`.
+
+**It passes the inception-date test** — the one that closed growth and concentration:
+`corr(inception order, excess) = +0.587` across PPA/ITA/XAR/DFEN, and **non-monotone** — ITA
+launched *after* PPA and earns less (+1.94% vs +2.49%). Compare +0.886 / +0.829. Defense is not a
+start-date artifact. It is a different failure mode.
+
+**The binding test is the event split:**
+
+| Window | Excess CAGR | FF5+MOM alpha | t | +XLI alpha | b_XLI | b_mkt given XLI |
+|---|---|---|---|---|---|---|
+| full (20.8y) | +2.49%/yr | +2.83%/yr | 1.26 | +2.91% | +0.74 | +0.18 |
+| **ex-rearmament (16.2y)** | **+0.28%/yr** | **−0.17%/yr** | **−0.07** | +0.96% | +0.67 | +0.26 |
+| rearmament only (4.6y) | +10.73%/yr | +8.75%/yr | 1.55 | +6.56% | **+0.94** | −0.06 |
+
+**Over the first 16 years of its life PPA returned 28 bps/yr over SPY with an alpha of exactly
+zero.** The whole record is one 4.6-year geopolitical repricing. It is also ~3/4 industrials —
+adding XLI drops market beta 0.91 → 0.18, and in 2022+ PPA is 0.94×XLI with *negative* market beta.
+
+Episodes (non-overlapping): +5.09%/yr (2005-08, GFC) · +0.69% (2009-13) · +2.69% (2014-18) ·
+**−11.45%** (2019-21) · **+10.73%** (2022-26). Calendar years beating SPY: **12 of 22** — a coin
+flip, with the mean carried by a few enormous years (+17.1% 2007, +18.0% 2013, +27.7% 2022, +19.4%
+2025) against −17.9% 2020 and −21.8% 2021.
+
+**Crash-hedge hypothesis TESTED and REJECTED.** Both winning episodes coincide with equity stress,
+and TAILWIND has the precedent of reclassifying BAB from a premium into a crash hedge on exactly
+this evidence. It does not hold: in the **worst** SPY decile PPA *underperforms* (−0.47%/mo), and
+only **27.3%** of total active return comes from the worst two deciles (20.3% of months) versus
+BAB's 383%-from-crash-days signature. Mildly bad-month tilted; not insurance.
+
+⇒ **PPA is an event-driven cyclical on industrials beta, not a premium and not a hedge.** Holding it
+is a forecast that rearmament continues. The outperformer list is now fully accounted for.
+
 ## Data caveats
 
 - Survivors-only universe; base rates are upper bounds (§1).
