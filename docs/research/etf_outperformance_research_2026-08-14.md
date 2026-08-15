@@ -283,8 +283,49 @@ this evidence. It does not hold: in the **worst** SPY decile PPA *underperforms*
 only **27.3%** of total active return comes from the worst two deciles (20.3% of months) versus
 BAB's 383%-from-crash-days signature. Mildly bad-month tilted; not insurance.
 
-⇒ **PPA is an event-driven cyclical on industrials beta, not a premium and not a hedge.** Holding it
-is a forecast that rearmament continues. The outperformer list is now fully accounted for.
+**COMPOSITION — and a correction to "one event".** Verified from fund data: 63 holdings,
+cap-weighted, top names **RTX 8.26% · GE Aerospace 7.10% · Boeing 7.07% · Lockheed 6.37% · General
+Dynamics 4.80%**. Regressing PPA on an equal-weight defense-prime basket (LMT/NOC/GD/LHX) vs a
+commercial-aero basket (BA/GE/TDG/HEI):
+
+```
+PPA ~= 0.49 x defense primes + 0.42 x commercial aero      R2 0.892
+```
+
+| Window | b_PRIME | b_COMM | primes ann. | commercial ann. | SPY |
+|---|---|---|---|---|---|
+| full | 0.49 | 0.42 | +14.8% | +18.8% | +11.4% |
+| pre-COVID (→2019-12) | 0.54 | 0.38 | +16.3% | +19.2% | +9.5% |
+| COVID (2020-21) | 0.49 | 0.40 | +6.7% | **+3.0%** | **+23.4%** |
+| post-2022 | 0.41 | **0.51** | +14.1% | **+25.3%** | +12.7% |
+
+**PPA is ~half a government contractor and ~half an air-travel-cycle play** — the ampersand in
+"Aerospace & Defense" is doing real work, and the two halves have opposite drivers. That is the
+structural reason the record is episodic rather than smooth.
+
+> ⚠ **CORRECTION to the framing above.** A3 originally attributed the post-2022 run to rearmament
+> alone. The decomposition shows the **commercial leg outran the defense leg** in that window
+> (+25.3% vs +14.1%/yr) with PPA's loading shifting toward it (0.51 vs 0.41). The surge is **TWO
+> independent cycles coinciding** — European rearmament *and* the post-COVID commercial-aero
+> recovery off a collapsed base. "One geopolitical repricing" was too narrow. The 2020-21 collapse
+> is the same structure inverted: COVID destroyed the commercial half while a tech-led melt-up ran
+> away from the defensive half. **Verdict unchanged** — episodic, not a premium.
+
+> ⚠ **CAVEAT on these baskets:** they are **survivor-selected** (names large *today*), so their
+> return LEVELS are inflated — the tell is that both baskets "beat SPY" by more than the actual
+> 63-holding fund did. The loadings and the cross-era comparison are the usable output; the basket
+> return levels are not a clean sector measure.
+
+⇒ **PPA is an episodic cyclical spanning two unrelated cycles, on industrials beta — not a premium
+and not a hedge.** Holding it is a joint forecast on defense budgets and air travel.
+
+**The one genuinely open thread:** an **exclusion premium**. Many ESG mandates cannot hold weapons
+manufacturers; if a persistent buyer base is structurally absent the sector should clear at a higher
+expected return (the tobacco/gambling "sin premium" argument). This is the only mechanism proposed
+here that would produce a *premium* rather than an episode, it is **untested**, and testing it needs
+an exclusion-flow proxy rather than a price series. Logged, not claimed.
+
+The outperformer list is now fully accounted for.
 
 ## Data caveats
 
