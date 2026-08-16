@@ -489,17 +489,29 @@ def make_objective(base_config, steps_per_trial, agent_type, device, trial_recor
             if _gates.get("hpo_require_beat_buy_hold", False):
                 bh_return = _buy_hold_hurdle(eval_env, hpo_bar_minutes,
                                              data_cfg=config.get("data", {}))
-                if agent_total_return <= bh_return:
-                    wandb.log({f"{trial_prefix}/killed": "below_buy_hold",
-                               f"{trial_prefix}/total_return": agent_total_return,
-                               f"{trial_prefix}/buy_hold_return": bh_return})
-                    logger.info("Trial %d: KILLED (total_return %.4f <= buy&hold %.4f)",
-                                trial.number, agent_total_return, bh_return)
-                    trial_records.append({"trial": trial.number, "mean_reward": _mean_train_reward,
-                                          "val_pf": -999.0, "trade_count": trade_count,
-                                          "status": "killed_below_buy_hold",
-                                          "hps": dict(trial.params)})
-                    return -999.0
+                beat = bool(agent_total_return > bh_return)
+                # RECORDED, NOT RETURNED — and this distinction is the whole point.
+                # Collapsing a failed hurdle to a -999 sentinel destroys the search: with
+                # every trial scoring identically, TPE sees a perfectly flat landscape and
+                # degenerates to random sampling. Measured on this very study — 9 completed
+                # trials per arm, `distinct_values=[-999.0]`, i.e. the sampler had ZERO
+                # information to steer with and the remaining budget would have been random
+                # search wearing a TPE label. A negative result from that is nearly
+                # worthless: it cannot distinguish "no hyperparameters clear the bar" from
+                # "we never searched properly".
+                # So the objective stays profit_factor (BUG-01 holds) and the hurdle moves
+                # to BEST-TRIAL SELECTION, where a gate belongs.
+                trial.set_user_attr("total_return", float(agent_total_return))
+                trial.set_user_attr("buy_hold_return", float(bh_return))
+                trial.set_user_attr("beat_buy_hold", beat)
+                wandb.log({f"{trial_prefix}/total_return": agent_total_return,
+                           f"{trial_prefix}/buy_hold_return": bh_return,
+                           f"{trial_prefix}/beat_buy_hold": int(beat)})
+                if not beat:
+                    logger.info(
+                        "Trial %d: below buy&hold (%.4f <= %.4f) — kept for search signal, "
+                        "excluded from best-trial selection",
+                        trial.number, agent_total_return, bh_return)
 
             # Activity constraint — kill lazy holding agents.
             # Threshold is CONFIGURABLE (CLAUDE.md: numeric gates live in the gate YAML, not

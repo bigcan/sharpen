@@ -118,6 +118,41 @@ def _resolve_hpo_storage(storage):
     )
 
 
+def _select_best_trial(study):
+    """Best COMPLETE trial, preferring those that cleared the buy-and-hold hurdle.
+
+    The hurdle is enforced HERE rather than by collapsing failed trials to a sentinel value
+    in the objective, because a sentinel flattens the search landscape and reduces TPE to
+    random sampling (see the note in hpo/objective.py). Keeping the objective informative
+    and gating at selection gets both properties: a real search, and a winner that actually
+    beat the benchmark.
+
+    If NOTHING cleared the hurdle, that is itself the finding — it is surfaced loudly and
+    the unfiltered best is returned so the pipeline still produces an artifact, rather than
+    silently promoting a sub-benchmark model as though it had passed.
+    """
+    completed = [t for t in study.trials
+                 if t.state == optuna.trial.TrialState.COMPLETE and t.value is not None]
+    if not completed:
+        return study.best_trial
+
+    qualified = [t for t in completed if t.user_attrs.get("beat_buy_hold") is True]
+    if qualified:
+        best = max(qualified, key=lambda t: t.value)
+        logger.info("Best trial %d selected from %d/%d that beat buy-and-hold (PF=%.4f)",
+                    best.number, len(qualified), len(completed), best.value)
+        return best
+
+    # Only meaningful when the hurdle was actually in force for this study.
+    if any("beat_buy_hold" in t.user_attrs for t in completed):
+        logger.warning(
+            "NO TRIAL BEAT BUY-AND-HOLD (0/%d). Falling back to the unfiltered best trial "
+            "so downstream stages still receive hyperparameters, but this result must be "
+            "read as a NEGATIVE: the search found nothing that clears the passive benchmark.",
+            len(completed))
+    return study.best_trial
+
+
 def run_hpo(base_config, n_trials, steps_per_trial, device, agent_type="bdq"):
     """Phase 1: Hyperparameter Optimization with Optuna. Supports BDQ and PPO agents."""
     logger.info(f"Starting HPO: {n_trials} trials, {steps_per_trial} steps each")
@@ -186,7 +221,7 @@ def run_hpo(base_config, n_trials, steps_per_trial, device, agent_type="bdq"):
     _analyze_hpo_correlation(trial_records, agent_type)
 
     # Log best results
-    best = study.best_trial
+    best = _select_best_trial(study)
     agent_key = agent_type if agent_type in ("ppo", "iqn", "sac") else "bdq"
     best_params = {
         "env": {"reward": {}},
