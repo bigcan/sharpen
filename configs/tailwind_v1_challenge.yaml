@@ -21,27 +21,29 @@
 #   * DON'T bank-and-derisk. Banking only helps when running hot; at low vol it just
 #     adds timeouts.
 #
-# VOL CHOICE — 1.5× (this file). The P(pass)-MAXIMISER is 1.0× (10% vol, P(pass) 0.746
-# FTMO step1) but E[days]≈196 (~10 months) with a ~10% slow-drift timeout tail. 1.5×
-# (≈15% book vol) is the SENSIBLE COMPROMISE the simulator flags: P(pass) 0.711 with the
-# timeout tail collapsing to ~0 (resolves fast), and it hedges against a hidden
-# inactivity / deadline rule. Frontier (FTMO step1, mom+BAB, no bank):
-#     vol×   eff.vol  P(pass)  daily-breach  DD-breach  timeout
-#     1.0    10%      0.746    0.034         0.120      0.099
-#     1.5    15%      0.711    0.090         0.191      0.008   <-- THIS FILE
-#     2.0    20%      0.633    0.165         0.201      0.000
+# VOL CHOICE — 1.0× / 10% effective vol (RE-SIZED 2026-08-17; this file was 1.5× / 15%).
+#   The original 1.5× choice traded P(pass) for SPEED: 0.711 vs 0.746, accepting a fatter
+#   daily-breach rate to collapse a ~10% slow-drift timeout tail, on the reasoning that a
+#   hidden inactivity rule might exist. **The forward-path render then REJECTED it** — that
+#   trade is not available at an acceptable termination rate:
+#     vol×   eff.vol  P(pass)  daily-breach  DD-breach  timeout   render
+#     1.0    10%      0.746    0.034         0.120      0.099     CLEAR   <-- THIS FILE
+#     1.5    15%      0.711    0.090         0.191      0.008     FLAGS (3 legs failed)
+#     2.0    20%      0.633    0.165         0.201      0.000     —
 #     3.0+   30%+     <0.55    0.267+        ...        daily-limit BINDS (do NOT run hot)
-#   Two-phase funded probability at 1.5× ≈ 0.711 × ~0.85 ≈ 0.60 per attempt (both firms;
-#   Velotrade == FTMO after the static-DD correction). At 1.0× it is ≈0.65.
+#   At 15% the render measured max DD −24.4%, 12 days past the 4% internal halt, and a
+#   NEEDLESS-TERMINATION rate of 12.1% — one in eight otherwise-WINNING challenges thrown away
+#   by our own kill. At 10%: DD −16.7%, daily-breach 0.0018, needless 5.0%. So 1.0× is not a
+#   concession — it is both the P(pass) maximiser AND the only cell that survives the render.
+#   The ~10% timeout tail is the accepted cost, and both firms have NO deadline (verified
+#   2026-07-02), which is the load-bearing assumption that makes it acceptable.
+#   Two-phase funded ≈ 0.65 per attempt at 1.0× (vs ≈0.60 at 1.5×).
 #
-# HOW 1.5× IS REALISED (composition-preserving leverage, NOT a re-combination):
-#   Every per-asset / gross lever below is EXACTLY 1.5× the own-capital tailwind_v1.yaml
-#   value; risk_parity.target_portfolio_vol stays null. The convex inverse-vol combine
-#   (weights sum to 1) is scale-invariant, so scaling each asset's vol target 1.5×
-#   scales every sleeve return 1.5× and therefore the combined book 1.5× with its
-#   composition byte-unchanged — the faithful realisation of the simulator's "1.5× the
-#   normalised book". lev_cap and max_gross are scaled 1.5× too so the cap does not clip
-#   (and thus under-lever) the intended 1.5×.
+# HOW THE SIZING IS REALISED — see the env: block below for the measured lever mapping.
+#   Short version: `max_gross_exposure` is the ONLY lever that binds on real data
+#   (executor vol ≈ 0.0334 × max_gross); `target_vol_asset` and `lev_cap` SATURATE against
+#   real ETF vols and are effectively free. The previous "all three levers scaled 1.5×"
+#   description was right by accident — it worked only because max_gross was one of the three.
 #
 # ⚠️ NOT A GREEN LIGHT TO ATTEMPT. This wires the vehicle; it does NOT authorise a live
 # challenge. A real attempt spends the challenge fee + trades a funded account = capital,
@@ -139,19 +141,44 @@ features:
   vol_window: 63
   include_baseline_weight: true
 
-# ---------- ENV — the ONLY difference vs own-capital: the three vol levers scaled 1.5×.
-# target_vol_asset 0.10->0.15, lev_cap 2.0->3.0, max_gross_exposure 3.0->4.5. Everything
-# else (fees, slippage, reward, penalties) is byte-identical to tailwind_v1.yaml so the
-# book composition + cost model are unchanged — this is pure leverage. ----------
+# ---------- ENV — RE-SIZED 2026-08-17 to the render-cleared 10% band ------------------
+# WAS: target_vol_asset 0.15 / lev_cap 3.0 / max_gross 4.5, described as "the three vol levers
+# scaled 1.5x". TWO things were wrong with that and both are now measured, not argued:
+#
+#   1. THE SIZING WAS REJECTED. The 2026-07-31 forward-path render FAILED that configuration on
+#      three legs (needless-termination 12.1% > 5%, daily-breach 0.129 > 0.10, max gross
+#      6.00 > 4.70) and measured <=10% effective vol as the clearing band.
+#      docs/research/tailwind_v1_forward_path_render_2026-07-31.md
+#
+#   2. THE STATED MECHANISM WAS RIGHT BY ACCIDENT. "All three levers 1.5x => 1.5x vol" roughly
+#      held (9.83% -> 14.13%) but ONLY because max_gross_exposure is one of the three. Measured
+#      on the REAL 18-ETF bundle through TwoSleeveExecutor (5,176 steps, both sleeves live),
+#      the other two SATURATE and contribute almost nothing:
+#          target_vol_asset  0.05 -> 9.08%,  0.075 -> 9.66%,  0.10 -> 9.83%   (doubling = +8%)
+#          lev_cap           1.0  -> 24.55%, 2.0   -> 26.47%, 3.0   -> 26.57% (cap off)
+#          max_gross         1.0  -> 3.44%,  3.0   -> 9.83%,  4.5   -> 14.13% (LINEAR)
+#      Real ETF vols span ~5-25%, so target_vol/sigma saturates against lev_cap on most names.
+#      => executor realised vol ~= 0.0334 x max_gross_exposure; 10% needs max_gross ~= 2.99.
+#      docs/research/tailwind_sizing_reconciliation_2026-08-01.md
+#
+# So the levers below are the MEASURED 9.83% row (target_vol 0.10, lev_cap 2.0, gross 3.0) —
+# not an interpolation, and not a lever combination nobody has run. That row is numerically the
+# own-capital tailwind_v1.yaml sizing: at 10% effective vol the challenge book and the
+# own-capital book carry the SAME risk, and what still separates the two configs is the
+# OBJECTIVE (P(pass) vs DSR, see the .gates file) and the prop_firm binding below — not leverage.
+#
+# ⚠️ The RESEARCH BASIS remains pinned at 6.92% whatever these say — portfolio_frontier.risk_parity
+# discards scale by design (that is what makes its Sharpe/DSR leverage-invariant). That gap is NOT
+# closable, only KNOWN; the mapping above is what lets the executor be set deliberately.
 env:
   type: "multi_asset_allocator"
   initial_capital: 100000.0
   taker_fee: 0.0002                      # 2 bps (unchanged)
   slippage_base_bps: 1.0                 # (unchanged)
   slippage_impact_bps: 5.0               # (unchanged)
-  target_vol_asset: 0.15                 # 1.5x the own-capital 0.10 (the challenge leverage)
-  lev_cap: 3.0                           # 1.5x the own-capital 2.0 (so the 1.5x is not clipped)
-  max_gross_exposure: 4.5                # 1.5x the own-capital 3.0 (per-sleeve AND combined-book cap)
+  target_vol_asset: 0.10                 # saturates on real ETF vols — effectively free
+  lev_cap: 2.0                           # saturates — effectively free
+  max_gross_exposure: 3.0                # THE BINDING LEVER: 0.0334 x 3.0 => 9.83% executor vol
   allow_short: true
   reward_type: "dsr"                     # reward shaping unchanged; the CHALLENGE objective is P(pass), enforced in .gates
   dsr_eta: 0.01
@@ -241,20 +268,34 @@ gates:
     crit_repeat_count_before_lockout: 2
 
 ensemble:
-  gates_file: configs/tailwind_v1_challenge.gates.yaml
+  # RE-POINTED 2026-08-17 to the v2 (10% vol) gates. The v1 file
+  # `configs/tailwind_v1_challenge.gates.yaml` is the byte-stable record of what was wired at
+  # 1.5x AND what the forward-path render REJECTED — it is kept for provenance and must not be
+  # pointed at again. Between 2026-07-31 and 2026-08-17 v2 existed but nothing referenced it, so
+  # this config was certified by a render that had rejected its own sizing.
+  gates_file: configs/tailwind_v1_challenge_v2.gates.yaml
 
 # ---------- PROP-FIRM BINDING (the challenge is graded against these verified rule sets) ----
 prop_firm:
   rules_file: configs/prop_firm_rules.yaml     # ✅ verified 2026-07-02 (FTMO + Velotrade 2-step, static DD, no deadline)
   simulator_report: docs/research/tailwind_v1_challenge_simulator_2026-07-02.md
-  vol_multiplier: 1.5                          # this file's sizing = the simulator's 1.5x cell
+  vol_multiplier: 1.0                          # this file's sizing = the simulator's 1.0x cell
+                                               # (10% eff. vol). RE-SIZED from 1.5 on 2026-08-17.
+                                               # The gates file states the same sizing as 1.45x
+                                               # against the book's MEASURED 6.92% native vol —
+                                               # same target, two denominators: 1.0x is "the
+                                               # simulator's 10%-base grid cell", 1.45x is "the
+                                               # scalar the render applies to the real book".
   bank_and_derisk: false                       # simulator: do NOT bank at low vol
-  expected_p_pass:                             # model outputs (results/tailwind_v1/challenge_sim.json), NOT guarantees
-    ftmo_step1: 0.711
+  # Mirrored from challenge_pass_gate.p_pass_expected in the .gates file — that file is the
+  # source of truth. Re-derived 2026-08-17 by re-running run_challenge_simulator.py; model
+  # outputs (results/tailwind_v1/challenge_sim.json), NOT guarantees.
+  expected_p_pass:
+    ftmo_step1: 0.746                          # 1.0x is the simulator's ARGMAX, not a compromise
     ftmo_step2: 0.870
-    velotrade_step1: 0.711                     # == FTMO after the static-DD correction
+    velotrade_step1: 0.746                     # == FTMO after the static-DD correction
     velotrade_step2: 0.870
-    two_phase_per_attempt: 0.60                # ~0.65 at 1.0x vol; 1.5x trades a little P(pass) for speed
+    two_phase_per_attempt: 0.65                # 0.746 x 0.870 = 0.649
 
 wandb:
   project: "FinRL-Pro-DS"

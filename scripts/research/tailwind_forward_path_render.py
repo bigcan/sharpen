@@ -63,7 +63,31 @@ from finrl_pro_ds.prop.challenge_simulator import (  # noqa: E402
 
 ANN = mom.ANN
 CHALLENGE_CFG = ROOT / "configs" / "tailwind_v1_challenge.yaml"
-CHALLENGE_GATES = ROOT / "configs" / "tailwind_v1_challenge.gates.yaml"
+
+
+def resolve_gates_path(cfg_path: Path = CHALLENGE_CFG) -> Path:
+    """Read the gates path OUT OF THE CONFIG rather than hardcoding it.
+
+    This used to be a module constant pinned to `tailwind_v1_challenge.gates.yaml`. When the
+    2026-07-31 re-size produced a v2 gates file, nothing re-pointed either the config or this
+    constant, so v2 sat ORPHANED for 17 days while the render kept grading the config against
+    the very gates it had rejected. Resolving `ensemble.gates_file` makes that class of drift
+    impossible: the render and the executor now read one declaration.
+    """
+    cfg = _yaml.safe_load(cfg_path.read_text(encoding="utf-8"))
+    declared = (cfg.get("ensemble") or {}).get("gates_file")
+    if not declared:
+        raise ValueError(
+            f"{cfg_path.name} declares no `ensemble.gates_file` — the render refuses to guess "
+            f"which gates certify this config (that guess is what orphaned v2)."
+        )
+    path = ROOT / declared
+    if not path.exists():
+        raise FileNotFoundError(f"{cfg_path.name} points at a missing gates file: {declared}")
+    return path
+
+
+CHALLENGE_GATES = resolve_gates_path()
 
 # Fallback only. The real value comes from gates.forward_path_render.render_horizon_days —
 # no numeric gate is authored in this file (CLAUDE.md anti-pattern).
