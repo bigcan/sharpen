@@ -168,8 +168,78 @@ execution:
   rebalance_cadence: monthly             # MUST match gates.paper_soak.rebalance_cadence
   fill_reference: close
 
+# ---------- RISK (v2 §8.3 paper-deploy contract) ------------------------------------------
+# NUMERIC thresholds are NOT authored here — they live in the .gates file under
+# `paper_soak.risk` (max_drawdown_kill_pct / daily_loss_halt_pct / max_gross_exposure),
+# grounded in the ✅-verified FTMO/Velotrade hard limits. This block declares only the
+# structural contract the live engine + watchdog read. Duplicating the numbers here would
+# create a THIRD sizing mechanism alongside the research basis and the executor path — the
+# exact defect the 2026-07-31 sizing reconciliation was opened to close.
+risk:
+  enabled: true
+  # Both FTMO and Velotrade 2-step grade max-loss STATICALLY from the initial balance
+  # (challenge_pass_gate.firm_hard_limits.dd_mode: static). Trailing peak applies only to a
+  # funded account, which would declare `challenge.phase: funded` — this file is step-1/2.
+  static_peak: true
+
+# ---------- SAFETY (v2.2 §8.3 kill path) --------------------------------------------------
+# The engine reads `safety.kill_file`; the watchdog reads the same path inside the container
+# via exec_run. flatten_on_kill_file=true is mandatory for a prop-firm book: the §8.3 CRIT
+# path must close positions, not "halt without close" (the S491 bleed-window case). On a
+# challenge account an un-flattened book keeps accruing toward the daily-loss limit after
+# the kill, which can fail the challenge from a state the operator believes is stopped.
+safety:
+  kill_file: "/tmp/tailwind_challenge_kill"
+  flatten_on_kill_file: true
+  emergency_flatten_on_error: true
+
+# ---------- ACTION DRIFT (v2.2 §8.2) ------------------------------------------------------
+# ⚠️ DECLARED, NOT YET CONSUMED ON THIS PATH. `ActionDriftTracker` is instantiated only in
+# finrl_pro_ds/crypto/live/live_engine.py:140 (the RL live engine). The TAILWIND executor
+# (finrl_pro_ds/paper/two_sleeve.py, driven by scripts/run_cross_asset_paper_validation.py)
+# has NO tracker call site, so these keys satisfy the protocol contract but nothing enforces
+# them at runtime yet. Wiring the consumer is a pre-attempt item for the Tier-2 audit — do
+# not read a green validate_config as "drift monitoring is live".
+#
+# Window derivation (daily bars, monthly rebalance — NOT the 15-min RL defaults of 1000/500,
+# which would be ~4y/2y here and could never arm inside a 90-day soak):
+#   window_bars           252 = risk_parity.trailing_window (the horizon the book sizes off)
+#   min_bars_before_check  63 = risk_parity.min_periods = sleeve_combiner.perf_min_periods
+#                               (~3 months, matching paper_soak.min_soak_calendar_days: 90)
+drift:
+  enabled: true
+  baseline_path: "results/tailwind_v1/drift_baseline.json"
+  window_bars: 252
+  min_bars_before_check: 63
+
 # ---------- GATES (challenge-specific: P(pass) + firm-limit survival, NOT the own-capital
 # DSR>=0.95 bar). ----------
+# The decision/survival gates live in the .gates file below. The v2.2 §8.2/§8.3 drift +
+# safe_mode THRESHOLDS are declared INLINE here because `check_drift_safemode_gates`
+# (scripts/validate_config.py:884) reads `cfg["gates"]` directly and does NOT resolve
+# `ensemble.gates_file` — unlike `check_gates_block`, which does. Same inline placement as
+# configs/live_gmgp1_btc_bybit.yaml. `check_gates_block` merges both sources ("inline + file").
+gates:
+  drift:
+    window_bars: 252                    # mirrors drift.window_bars above
+    min_bars_before_check: 63           # mirrors drift.min_bars_before_check above
+    deadband_frac_warn: 0.15            # project-wide v2.2 defaults; the validator enforces
+    deadband_frac_crit: 0.30            # presence + warn<crit ordering, not the values
+    saturation_frac_warn: 0.15
+    saturation_frac_crit: 0.30
+    action_kl_warn: 0.5
+    action_kl_crit: 1.0
+    # v2.6 amendment (decision_drift_two_failure_modes_s551_cont_3). Declared explicitly
+    # rather than inherited so the two drift failure modes stay distinguishable.
+    feature_variance_veto:
+      enabled: true
+      scale: base
+      max_veto_frac: 0.50
+  safe_mode:
+    crit_triggers_flatten: true         # §8.3: CRIT flattens (consistent with safety above)
+    crit_repeat_window_hours: 24
+    crit_repeat_count_before_lockout: 2
+
 ensemble:
   gates_file: configs/tailwind_v1_challenge.gates.yaml
 
