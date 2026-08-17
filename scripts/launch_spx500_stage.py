@@ -32,7 +32,15 @@ from dotenv import load_dotenv
 
 ROOT = Path(__file__).resolve().parents[1]
 REMOTE = "/workspace/DeepScalper"
-SLOTS = [("gpuhub-1", "0"), ("gpuhub-1", "1"), ("gpuhub-2", "0")]
+# gpuhub-2 REMOVED FROM ROTATION 2026-08-17 18:57. It is reachable and its GPU is idle,
+# but every job placed there after ~14:00 died within minutes — including a SINGLE job
+# with no contention from us — while gpuhub-1 ran the identical WF configs to completion.
+# Its load average sits at ~11.4 with none of our processes running, so something else on
+# that box is consuming it. Errno 104 / BrokenPipe were the symptom, not the cause: shm is
+# 46G there and the `ulimit -n 65535` raise verifiably succeeds (soft 1024 -> 65535, hard
+# 65535), so neither shm nor fd exhaustion explains it. Re-add only after a single job
+# survives there for a full run.
+SLOTS = [("gpuhub-1", "0"), ("gpuhub-1", "1")]
 VARIANTS = ("ls", "lo")
 
 
