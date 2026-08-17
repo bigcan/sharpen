@@ -49,6 +49,29 @@ def run(ssh, cmd):
     return out.read().decode()
 
 
+# MEASURED CEILING, enforced rather than remembered, and scoped PER GPU rather than per
+# instance -- the first version of this cap got the scope wrong. What the evidence actually
+# shows:
+#   * gpuhub-2 (ONE gpu), 3 concurrent 20-env runs -> died twice: BrokenPipeError at 08:00
+#     (one L1 seed lost) and ConnectionResetError [Errno 104] at 14:16 (both new WF jobs AND
+#     the L1 seed already running there). That is 3 runs on 1 GPU.
+#   * gpuhub-1 (TWO gpus), 4 concurrent runs -> all completed cleanly. That is 2 per GPU.
+#   * the entire HPO stage ran 6 workers as 2-per-GPU across 3 GPUs with zero pipe failures.
+# So the binding resource scales with GPUs (Errno 104 is the /dev/shm exhaustion signature in
+# CLAUDE.md's gotchas), and a per-INSTANCE cap would both under-use gpuhub-1 and mis-state
+# the cause. Hard-coded here because the remembered version was broken once, costing 3 runs.
+MAX_PER_GPU = 2
+
+
+def live_by_instance(conns):
+    counts = {}
+    for inst, ssh in conns.items():
+        txt = run(ssh, "ps -eo args | grep 'python -u scripts/run_full_pipeline' | grep -v grep")
+        counts[inst] = len({m.group(1) for m in
+                            (re.search(r"--run_name (\S+)", ln) for ln in txt.splitlines()) if m})
+    return counts
+
+
 def live(conns):
     names = []
     for inst, ssh in conns.items():
@@ -104,21 +127,44 @@ def main() -> int:
         print("--stage required unless --verify-only", file=sys.stderr)
         return 2
 
-    running = live(conns)
-    if running:
-        print("REFUSING: runs already active:", file=sys.stderr)
-        for n in running:
-            print("  ", n, file=sys.stderr)
+    # Capacity-aware rather than all-or-nothing: top up free slots, never oversubscribe.
+    occupancy = live_by_instance(conns)
+    free_slots = []
+    for inst, gpu in SLOTS:
+        n_gpus_on_inst = sum(1 for i, _ in SLOTS if i == inst)
+        capacity = MAX_PER_GPU * n_gpus_on_inst
+        # Spread this instance's headroom across its GPUs, one slot per (inst, gpu) pass.
+        used = occupancy.get(inst, 0) + sum(1 for s in free_slots if s[0] == inst)
+        if used < capacity:
+            free_slots.append((inst, gpu))
+    # second pass so a 2-GPU instance can offer both of its per-GPU slots
+    for inst, gpu in SLOTS:
+        n_gpus_on_inst = sum(1 for i, _ in SLOTS if i == inst)
+        capacity = MAX_PER_GPU * n_gpus_on_inst
+        used = occupancy.get(inst, 0) + sum(1 for s in free_slots if s[0] == inst)
+        if used < capacity:
+            free_slots.append((inst, gpu))
+    if not free_slots:
+        print(f"REFUSING: no free slots (cap {MAX_PER_GPU}/gpu): {occupancy}", file=sys.stderr)
         return 1
+    print(f"occupancy={occupancy} free_slots={len(free_slots)} (cap {MAX_PER_GPU}/gpu)")
 
     seeds = [s for s in args.seeds.split(",") if s]
     folds = [f for f in args.folds.split(",") if f]
     jobs = build_jobs(args.stage, seeds, folds)
     stamp = datetime.now().strftime("%Y%m%d_%H%M%S")
 
+    # Jobs are matched A/B pairs, so truncate to an EVEN number of slots — launching an odd
+    # count would put one arm ahead of the other.
+    usable = (len(free_slots) // 2) * 2
+    if usable == 0:
+        print(f"REFUSING: only {len(free_slots)} free slot(s); need 2 for a matched A/B pair",
+              file=sys.stderr)
+        return 1
+
     launched = []
-    for i, (variant, cfg, extra, tag) in enumerate(jobs[: args.max_parallel]):
-        inst, gpu = SLOTS[i % len(SLOTS)]
+    for i, (variant, cfg, extra, tag) in enumerate(jobs[:usable]):
+        inst, gpu = free_slots[i]
         run_name = f"spx500-{variant}-{tag}_{stamp}"
         log = f"run_{stamp}_{variant}_{tag}.log"
         inner = (f"python -u scripts/run_full_pipeline.py --config {shlex.quote(cfg)}"
@@ -134,7 +180,7 @@ def main() -> int:
         print(f"launched {inst} gpu{gpu} {run_name}")
         time.sleep(2)
 
-    queued = jobs[args.max_parallel:]
+    queued = jobs[usable:]
     if queued:
         print(f"\n{len(queued)} job(s) QUEUED (exceeded --max-parallel); re-run this command "
               f"after the current batch drains:")
