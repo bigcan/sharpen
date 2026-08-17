@@ -138,6 +138,34 @@ def test_drift_windows_sized_for_a_daily_book(cfg):
     assert cfg["gates"]["drift"]["min_bars_before_check"] == d["min_bars_before_check"]
 
 
+def test_config_points_at_the_render_cleared_v2_gates(cfg):
+    """The v1 gates are the byte-stable record of the sizing the render REJECTED. Pointing at
+    them again re-creates the 17-day window where this config was certified by evidence that
+    had rejected its own sizing."""
+    assert cfg["ensemble"]["gates_file"].endswith("tailwind_v1_challenge_v2.gates.yaml")
+
+
+def test_env_levers_are_the_measured_row(cfg):
+    """max_gross_exposure is the ONLY lever that binds on real data (executor vol ~= 0.0334 x
+    it); target_vol_asset and lev_cap saturate. These three values are the measured 9.83% row
+    from the sizing reconciliation — not an interpolation, and not an unrun combination."""
+    env = cfg["env"]
+    assert env["max_gross_exposure"] == 3.0, "the binding lever; 0.0334 x 3.0 => 9.83%"
+    assert env["target_vol_asset"] == 0.10
+    assert env["lev_cap"] == 2.0
+    # The 15% sizing the render rejected on three legs must not come back.
+    assert env["max_gross_exposure"] < 4.5
+
+
+def test_render_resolves_gates_from_the_config_not_a_constant():
+    """Structural de-orphaning: the render must read `ensemble.gates_file`. A hardcoded path is
+    what let v2 sit unreferenced while the render graded against v1."""
+    src = (SCRIPTS / "tailwind_forward_path_render.py").read_text(encoding="utf-8")
+    assert "def resolve_gates_path" in src
+    assert "ensemble" in src and "gates_file" in src
+    assert 'CHALLENGE_GATES = ROOT / "configs" / "tailwind_v1_challenge.gates.yaml"' not in src
+
+
 def test_no_numeric_risk_thresholds_duplicated_into_the_config(cfg):
     """Sizing/risk numbers live in the .gates file. Duplicating them here would create a THIRD
     sizing mechanism beside the research basis and the executor path — the defect the
