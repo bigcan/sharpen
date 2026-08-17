@@ -105,14 +105,30 @@ challenge_pass_gate:
 # ended. The bootstrap P(pass) simulator cannot answer this: it destroys drawdown ORDERING, and
 # ordering is the whole question.
 forward_path_render:
-  # ⚠️ THE 10% CELL PASSES THIS BY EXACTLY ZERO MARGIN (0.0500 vs 0.0500, = 1/20 disjoint
-  # windows, Wilson CI95 [0.009, 0.236]). It is a knife-edge, not a clearance: a single
-  # window entering or leaving the denominator flips RENDER_CLEAR to RENDER_FLAGS, as
-  # `causal_vol_lev_cap` above demonstrates. The render's OWN frontier recommends 6.0%
-  # effective vol, where needless-termination is 0.0 with real margin and P(pass) 0.75 —
-  # statistically indistinguishable from 10%'s 0.79. RE-SIZING TO 6% IS THE OPEN
-  # RECOMMENDATION (needs max_gross_exposure ~= 0.06/0.0334 ~= 1.8); it is an operator
-  # sizing decision, not a wiring fix, so it has not been taken.
+  # ⚠️ THE 10% CELL PASSES THIS BY EXACTLY ZERO MARGIN (0.0500 vs 0.0500 = 1/20 disjoint
+  # windows, Wilson CI95 [0.009, 0.236]). A knife-edge, not a clearance: one window entering
+  # or leaving the denominator flips RENDER_CLEAR to RENDER_FLAGS, as `causal_vol_lev_cap`
+  # above demonstrates.
+  #
+  # ⚠️ THIS METRIC CANNOT RANK CELLS INSIDE THE CLEARING BAND — do not re-size on it.
+  # (An earlier revision of this comment recommended re-sizing to 6%. RETRACTED 2026-08-17;
+  # it was read off the frontier of a FLAGS run where 10% failed and 6% cleared by
+  # elimination. In the wired state the render's `recommended_cell` IS 10.0%.)
+  #     vol   needless        CI95              n_disjoint   P(pass)
+  #     6%    0.0   (0/12)    [0.000, 0.299]        12        0.750
+  #     8%    0.0625          [0.011, 0.283]        20        0.800   <- FAILS, between two passes
+  #    10%    0.05  (1/20)    [0.009, 0.236]        26        0.769
+  # Three reasons this grid cannot support a sizing decision:
+  #   1. NON-MONOTONE — 8% fails between two cells that pass. That is noise, not structure.
+  #   2. 6%'s "0.0" is the WEAKEST measurement here, not the strongest: 0/12 with an upper
+  #      bound of 0.299 vs 10%'s 1/20 bounded at 0.236.
+  #   3. STRUCTURAL: n_disjoint RISES with vol (12 @ 6%, 26 @ 10%, 65 @ 20%) because lower
+  #      vol resolves each challenge more slowly, so fewer disjoint windows fit the sample.
+  #      Lower vol is safer per challenge and PERMANENTLY less measurable. You cannot buy
+  #      margin on this gate by lowering vol; you buy it with more windows, i.e. more data.
+  # The grid's honest read is a BAND: {6%, 10%} clear, 15% genuinely fails (needless 0.121,
+  # daily-breach 0.129, gross 6.00 — three independent legs), and within the band it is mute.
+  # 10% stays wired: most windows behind it, best P(pass) point estimate, already rendered.
   max_needless_share: 0.05           # >5% of otherwise-winning challenges thrown away ⇒ buffer too tight
   render_horizon_days: 756           # 3y cap per challenge window (no-deadline firms need a finite render)
   # Effective annualised vol grid for the remedy sweep the derivation names ("else widen, or
