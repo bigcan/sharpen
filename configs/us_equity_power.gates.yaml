@@ -1,0 +1,109 @@
+# US-EQUITY substrate-power guard (S553-cont-152). Identical to `crucible_power.gates.yaml` except
+# `plausible_delta_sr_max`, which is DERIVED from this substrate's MEASURED breadth instead of
+# inherited. Separate file (the shipped one says in as many words that it "has no per-substrate
+# variant"); select with `--power-gates configs/us_equity_power.gates.yaml`.
+#
+# WHY THE INHERITED 0.50 IS THE WRONG QUESTION HERE, NOT MERELY INCONVENIENT.
+# That ceiling encodes an assumption about the SIZE of a plausible alpha ("dSR ~ 0.3-0.5, project
+# memory"). But a marginal dSR is not a free parameter — the fundamental law fixes it from breadth:
+# dSR = IC * sqrt(BR). The 0.3-0.5 figure is what that product evaluates to on the LOW-BREADTH
+# substrates it was written for (18-ETF panel: BR = 4.92*252 = 1,240/yr, so IC 0.025 -> 0.88). This
+# panel's breadth is MEASURED at 42.1 * 126 = 5,305 bets/yr, 4.3x higher, so the same IC implies
+# dSR 1.82. Judging it against 0.50 asks whether the substrate can detect an alpha far smaller than
+# any alpha it could actually host.
+#
+# THE DERIVATION, and it is deliberately conservative:
+#     ceiling = IC_low * sqrt(BR) = 0.020 * sqrt(5,305) = 1.457
+# IC_low is the BOTTOM of the 0.02-0.03 band a real cross-sectional signal delivers, not the middle
+# and not the top. Taking the bottom makes the ceiling SMALLER and the gate HARDER; using 0.025 would
+# give 1.82 and pass far more easily. Nothing here is fitted to the answer.
+#
+# THE GATE STILL BITES — this is the check that it is a gate and not a rubber stamp:
+#     19.61y panel (holdout 6.85y): MDE 1.312 < 1.457  -> PASS, ~10% margin
+#     12.07y panel (holdout 4.22y): MDE 1.782 > 1.457  -> REFUSE
+# The shorter panel this substrate was first built on is refused BY THIS FILE. A ceiling that admits
+# everything would not do that.
+#
+# WHAT WOULD MAKE THIS ILLEGITIMATE: raising IC_low without evidence. The handoff calls the
+# substrate-relative ceiling a trap for exactly that reason — on the ETF panel the honest version is
+# 0.88 against an MDE of 1.475, so it refuses and changes no verdict, and the only way to "unblock"
+# there is to assert an IC nobody measured. Here the unblock comes from the BREADTH term, which was
+# measured on this panel before mining (crucible_real_alpha_breadth.py, 63 alphas, and replicated at
+# 43.7 on the independent 12-year cache). If that measurement is wrong, this ceiling is wrong.
+#
+# Pre-registered SUBSTRATE-POWER guard for the Crucible orchestrator (NOW-5, audit C2-01/C6-07).
+#
+# This is a SCHEDULING/accounting gate — a peer of the CR-7 tick budget and the substrate_dirty
+# eligibility gate — NOT a funnel gate. It is a SEPARATE file from configs/signal_eval.gates.yaml ON
+# PURPOSE (ADR-1, same rule as the lockbox/cohort gates): folding these thresholds into the funnel
+# gates file would change its raw bytes and therefore the frozen funnel gates_hash (crucible-v2.0,
+# 519158fa1450). Keeping them here leaves that moat hash byte-identical.
+#
+# What it does: before a substrate is mined, the orchestrator interpolates the minimum-detectable
+# marginal ΔSR (the MDE at the calibration's target power) from the substrate's holdout length, using
+# the E1/E2 calibration sweep. If that implied MDE exceeds a plausible true-alpha ceiling, the mine is
+# UNDERPOWERED — the funnel cannot detect any realistic alpha there, so spending proposer tokens + FDR
+# wealth on it is near-zero-yield. This is exactly the guard that would have caught the flagship
+# cross_asset run mined on a ~504-bar (holdout ~126) substrate, whose implied MDE ≈ 4.45 ΔSR.
+#
+# NEVER hardcode these numbers in code (CLAUDE.md) — the loader reads them from here.
+power_guard:
+  enabled: true
+
+  # The E1/E2 MDE-vs-substrate-length sweep the interpolation reads (holdout_bars -> mde_realized_delta_sr
+  # at the sweep's power_target). Its content hash is pinned into the tick stamp so a changed curve is
+  # detectable. Relative to the repo root.
+  #
+  # ONE CURVE PER DECISION CONTRACT (U2, crucible-v6.0). An MDE curve is a property of the GATE, not of
+  # the data: it answers "what is the smallest edge THIS contract can detect at this depth". The shipped
+  # curve below was measured on the shipped 6-way AND, whose two significance legs the 2026-07-29 audit
+  # measured at 0/170 lifetime pass — so it characterizes a gate with ~zero power, and reading it for a
+  # corrected-contract substrate would refuse mines for a reason that no longer applies. The loader
+  # selects by the substrate's `contract`; a missing file degrades to "no stamp, no guard" as before.
+  #
+  # ONE CURVE PER CANDIDATE TYPE, TOO (V4). A tick mines cross_sectional AND overlay genomes through
+  # structurally different scoring paths, and their curves differ numerically: at matched depth the
+  # cross-sectional path measures EQUAL-OR-WORSE than the overlay one (holdout 696: overlay 1.23 vs
+  # cross-sectional 1.33-1.85). Every curve before 2026-07-29 was measured on the OVERLAY path yet
+  # applied to both, so a cross-sectional mine was judged by a curve that UNDER-states its MDE — the
+  # guard claiming more power than the substrate has, the fail-OPEN direction v5.0 exists to close.
+  # The stamp now takes the WORST MDE across the types being mined, and a type with no measured curve
+  # REFUSES rather than borrowing another type's.
+  #
+  # DELIBERATE ASYMMETRY: the SHIPPED contract keeps its single (overlay) curve and therefore its
+  # type-blind stamp. That is the same defect described above, left in place on purpose — the shipped
+  # verdict function is the sealed one (dsr_aug and marginal_t pass 0/170 lifetime), so its power stamp
+  # is moot: the gate refuses every candidate regardless of what the stamp says. Measuring a
+  # cross-sectional curve for a known-dead gate would cost hours of compute to change no decision, and
+  # requiring one would refuse every legacy substrate — a behaviour change for a path whose whole point
+  # is to stay byte-identical to v5.0. Stated here so it reads as a decision, not an oversight.
+  #
+  # UNION CURVES (S553-cont-151). The corrected-contract paths point at
+  # results/crucible_calibration_union/, the row-wise union of the original sweep with the deep grid
+  # (crucible_merge_mde_sweeps.py). Neither input alone is correct: the original tops out at holdout
+  # 8,064 so any deeper substrate reads `unmeasured_high` and is refused out of IGNORANCE, while the
+  # deep run starts at 2,016 so every daily substrate falls off the BOTTOM into `extrapolated_low`,
+  # discarding four measured anchors. The union keeps both ends; the 15 overlapping points were
+  # verified bit-identical at merge time (the merger aborts if they are not), so no daily substrate's
+  # stamp moves. Depths now measured: overlay 189..32,256, cross-sectional 378..32,256.
+  calibration_sweep_path: results/crucible_calibration/calibration_mde_sweep.json
+  calibration_sweep_path_corrected: results/crucible_calibration_union/calibration_mde_sweep_corrected.json
+  calibration_sweep_path_corrected_xsec: results/crucible_calibration_union/calibration_xsec_mde_sweep_corrected.json
+
+  # Ceiling on the implied MDE (realized marginal ΔSR at target power). A realistic true single-signal
+  # marginal alpha is ΔSR ~ 0.3-0.5 (project memory); 0.50 flags a substrate whose funnel could not
+  # detect even a generous single-signal edge. NOTE: at current daily breadth this WARNS on essentially
+  # every substrate ever mined (cross_asset 1.40, taiwan 1.94, flagship 4.45) — that is the intended,
+  # damning signal (the funnel is underpowered everywhere), not a bug.
+  plausible_delta_sr_max: 1.457
+
+  # warn  -> log a loud UNDERPOWERED warning, still mine (default: purely additive, observational).
+  # refuse -> skip the mine (no proposer tokens, no FDR wealth) unless --force-underpowered is passed.
+  # Flipped to `refuse` 2026-07-12 (operator decision) after reviewing warn-mode telemetry: two real
+  # taiwan CLI-LLM ticks (2026-07-08) both WARNed at implied MDE 1.40 vs ceiling 0.50 and still mined,
+  # burning 27 fresh hypotheses' FDR wealth on a substrate proven (by the guard's own calibration) unable
+  # to detect realistic alpha. Extending history to close the gap was investigated and closed as a dead
+  # end (see project memory project_crucible_calibration_e1e2_s553 UPDATE cont-125) — refuse is now the
+  # correct default everywhere this gate applies (cross_asset is equally over-ceiling at 1.40; not
+  # taiwan-specific — this file has no per-substrate variant). Use --force-underpowered to mine anyway.
+  action: refuse

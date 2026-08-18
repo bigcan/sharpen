@@ -1,0 +1,34 @@
+# Pre-registered gates for the Crucible ALT-DATA INGEST path (`crucible/data/altdata_bridge.py`).
+#
+# A SEPARATE file from configs/signal_eval.gates.yaml on purpose (ADR-1, the lockbox/cohort/power
+# precedent): these thresholds decide which non-OHLCV series become DSL terminals, so folding them
+# into the funnel gates file would change its raw bytes and break the frozen `crucible-v2.0`
+# gates_hash moat (519158fa1450). NEVER hardcode these numbers in code (CLAUDE.md gate rule).
+#
+# Scope note: this governs WHICH HYPOTHESES EXIST, not how any of them is judged. No verdict
+# function reads this file.
+
+altdata:
+  # Drop a feature slot whose |corr| to an already-kept slot exceeds this, measured ON FIRST
+  # DIFFERENCES. `null` = filter OFF (the pre-2026-08-10 behaviour, byte-identical).
+  #
+  # WHY (measured 2026-08-10 on the us_equity 2007-2026 daily clock, 24 accepted slots):
+  #   * The COT connector publishes THREE fields per market — comm_net / noncomm_net /
+  #     comm_pct_oi — and COT category positions sum to open interest, so within a market they are
+  #     near-mechanical transforms. Measured within-market |corr| on first differences:
+  #     gold comm~noncomm 0.979, corn 0.977, spx comm~pct_oi 0.965, eurofx 0.962, wti 0.948.
+  #   * Median |corr| ACROSS markets/sources on first differences: 0.020.
+  #   ⇒ a ~50x separation. 0.90 sits far above the cross-market population and just below every
+  #     measured within-market duplicate, so it removes duplicates without touching independence.
+  #     This is not a delicate choice; anything in ~0.5-0.93 partitions the same way.
+  #
+  # WHY IT MATTERS (the cost is not a redundant cohort member — admission already de-duplicates):
+  # each slot spawns one pre-registered spec per overlay template, so redundant slots consume the
+  # proposer's `max_proposals` budget and TRUNCATE AWAY genuinely independent series further down
+  # the discover order. On the 2026-08-10 us_equity run, 18 of 24 accepted slots carried only 6
+  # markets' worth of information, and only 2 of 6 COT markets survived truncation into the batch.
+  #
+  # FIRST DIFFERENCES, not levels, deliberately: macro LEVELS co-trend (level median |corr| 0.156
+  # vs 0.020 differenced), so a level-based rule would reject distinct-but-trending series — the
+  # over-rejection direction, which silently costs breadth.
+  max_slot_corr: 0.90

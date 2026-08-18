@@ -3,7 +3,7 @@
 The cohort analogue of :class:`~finrl_pro_ds.crucible.agentic.card.DiscoveryCard`: it bundles the
 verbatim cohort verdict (CR-1 — the Triage Analyst may add narrative but never edits a number) a
 human needs before spending a Tier-2 deep audit. A cohort is a *select-and-combine of m-of-N weak
-overlays*, so its fields differ from a single-survivor card (members, the analytic ``SR*_cohort``, the
+candidates* (overlays and, since crucible-v12.1, cross-sectional rank-L/S sleeves), so its fields differ from a single-survivor card (members, the analytic ``SR*_cohort``, the
 MC-null p-value, the embargoed-holdout ΔSR) — hence a separate schema rather than overloading
 DiscoveryCard.
 
@@ -38,6 +38,11 @@ class CohortCard:
     cohort_gates_hash: str           # the cohort gate file's own provenance hash
     proposal_ts: str | None = None
     data_snapshot_hash: str | None = None
+    # v13.0: how many members were EXCLUDED before selection (degenerate, unscoreable, or
+    # hard-infeasible on turnover). Without it `n_candidates_seen` is unreadable — 44-of-140 and
+    # 44-of-44 are very different cohorts, and on the 2026-08-11 us_equity pool 96 of 140 were
+    # culled. Same lesson as `n_holdout_tested`: a count is only evidence next to its denominator.
+    n_culled: int | None = None
 
     # verbatim scorer verdict (CR-1)
     verdict: str = "PROMISING"       # "PROMISING" | "LOGGED"
@@ -53,6 +58,11 @@ class CohortCard:
     holdout_delta_sr: float | None = None      # embargoed-holdout annualized ΔSR (Doc 2 §4)
     holdout_passes: bool | None = None
     mean_pairwise_corr: float | None = None    # realized diversification of the admitted set
+    # v12.1 pool composition — how many of the pool / of the admitted members were CROSS-SECTIONAL
+    # rank-L/S sleeves rather than base-book overlays. 0/0 == the pre-v12.1 overlay-only shape. A
+    # Tier-2 reader needs this to know WHAT the MC null adjudicated, not just that it ran.
+    n_pool_cross_sectional: int | None = None
+    n_members_cross_sectional: int | None = None
 
     # lockbox (CR-8) — NOT wired for cohorts in v1 (ADR-7): a cohort card is never yet human-eligible
     incubation_status: str = INCUBATION_PENDING
@@ -107,6 +117,7 @@ def card_from_verdict(
     return CohortCard(
         cohort_hash=verdict.pool_content_hash, members=tuple(verdict.members),
         n_members=verdict.n_members, n_candidates_seen=verdict.n_candidates_seen,
+        n_culled=verdict.n_culled,
         crucible_version=crucible_version, funnel_gates_hash=funnel_gates_hash,
         cohort_gates_hash=cohort_gates_hash, proposal_ts=proposal_ts,
         data_snapshot_hash=data_snapshot_hash, verdict=verdict.verdict,
@@ -116,4 +127,6 @@ def card_from_verdict(
         mc_n_valid_reps=verdict.mc_n_valid_reps, mc_block_length=verdict.mc_block_length,
         passes_mc=verdict.passes_mc, holdout_delta_sr=verdict.holdout_delta_sr,
         holdout_passes=verdict.holdout_passes, mean_pairwise_corr=verdict.mean_pairwise_corr,
+        n_pool_cross_sectional=verdict.n_pool_cross_sectional,
+        n_members_cross_sectional=verdict.n_members_cross_sectional,
         agent_narrative=agent_narrative)

@@ -1,0 +1,117 @@
+# US-EQUITY corrected-contract gates (S553-cont-152). Byte-identical to
+# `crucible_corrected_contract.gates.yaml` EXCEPT `guards.max_market_beta`, which is turned on at the
+# 0.30 the shipped file itself suggests. Kept as a SEPARATE FILE so the shipped gates keep their bytes
+# and their hash (ADR-1/CRU-1) — the same separation `cross_asset_h1_signal_eval.gates.yaml` uses.
+# Select it with `crucible_orchestrator.py --corrected-config configs/us_equity_corrected_contract.gates.yaml`.
+#
+# WHY IT IS ON HERE AND NOWHERE ELSE. This substrate is a 300-name US equity cross-section whose
+# dominant factor IS the market: the return correlation matrix's top eigenvalue carries the bulk of
+# total variance, so a candidate that quietly accumulates net long exposure is the single most likely
+# way a false PROMISING gets produced here. On the ETF/FX substrates the leg stays null.
+# `market_returns=` is wired by `evolve._panel_market_returns` (equal-weight active universe), so BOTH
+# halves the shipped file requires are present — the leg is live, not decorative.
+#
+# §5 CORRECTED single-hypothesis contract — decision thresholds (audit 2026-07-14 §5).
+#
+# A PARALLEL discovery pathway (design: .agent/artifacts/corrected_contract_architecture.md). It is NOT
+# part of the frozen funnel gates_hash (CRU-1 519158fa1450): the funnel's `configs/signal_eval.gates.yaml`
+# and `fitness.py`/`evolve.py` are untouched. Replacing the funnel gate would be a verdict-changing MAJOR;
+# this parallel file is MINOR.
+#
+# WHAT IT DECIDES (per audit §5): promote a single pre-registered candidate iff
+#   corrected_t >= t_min                                     one marginal-effect t on the ΔSR/CPCV dist
+#   AND p_value <= OnlineFDR.next_level()   (if binding)     the LORD++ account actually thresholds (F13 fix)
+#   AND delta_mean       >= uplift_min                       cheap guard (retained from the funnel)
+#   AND delta_median     >= delta_median_min                 cheap guard
+#   AND frac_positive    >= frac_positive_min                cheap guard
+#   AND max_base_corr    <= max_base_corr                    cheap guard
+# It DROPS the F1-sealed marginal_t (substitution residual) and the F2-sealed book-level dsr_aug.
+#
+# MECHANICS (how the ΔSR/CPCV distribution is BUILT — combiner window, CPCV n_groups/k_test/embargo/purge,
+# periods_per_year) are read from the shared FitnessConfig, NOT here. Only the DECISION layer lives here.
+# Never hardcode these thresholds in code (CLAUDE.md gate rule).
+
+harness_version: crucible-corrected-contract-v1
+
+contract:
+  t_min: 2.33            # one-sided Sharpe-diff z floor (~1% per-candidate FPR — VERIFY via E1, ADR-2)
+  p_value_model: normal  # normal | student_t  (student_t uses df = n_eff - 1)
+  # SIGNIFICANCE is the full-panel Jobson-Korkie-Memmel Sharpe-difference z (ADR-1, revised cont-139): a
+  # t-stat across the ~15 overlapping CPCV paths carries ~1.3 effective obs -> miscalibrated + powerless
+  # (E1 finding). n_eff_mode = sample size for that full-panel SE: ar1 (AR(1)-effective bar count; daily
+  # marks under a multi-day hold are autocorrelated) | raw (bar count). E1-calibrated.
+  n_eff_mode: ar1        # ar1 | raw
+
+guards:                  # the cheap guards retained from the funnel (NOT the F1/F2 seals)
+  # CALIBRATED 2026-07-30 (U7 / RC-9) — value CONFIRMED, not changed. Full report:
+  # docs/research/crucible_u7_uplift_null_calibration_2026-07-30.md; harness
+  # scripts/research/crucible_uplift_null.py; raw draws in results/crucible_uplift_null/.
+  #   * The guarded quantity is CorrectedResult.delta_sr = FULL-PANEL annualized ΔSR on the embargoed
+  #     holdout — NOT the "mean ΔSR over CPCV paths" this comment used to claim (read the code).
+  #   * Null q95 on the real cross_asset base book, cross_sectional path (n=1200 no-edge draws through
+  #     the production scorer): 0.0799, bootstrap CI95 [0.0521, 0.1177]. 0.10 lies INSIDE that CI, so
+  #     the calibrated floor and the shipped floor are not distinguishable — editing it would re-hash
+  #     this file and void verdict comparability for a change inside its own error bar.
+  #   * RC-9's "passes 170/170" was a TRAIN-split ledger statistic from a search that maximizes exactly
+  #     that delta. On the holdout this leg rejects ~97% of null draws; it is not inert.
+  #   * This leg is NOT the FPR control: under every null measured, t_pass = 0.000 and lord_pass <= 0.018,
+  #     and the JOINT null pass rate is 0/2600 (cross_asset) and 0/2100 (taiwan) at this floor.
+  #   * RC-11 was filed here as OPEN/HIGH ("the null is substrate-dependent by ~200x; the taiwan overlay
+  #     path is un-calibrated") and is **WITHDRAWN 2026-07-31**. It was an artifact of the null used to
+  #     measure it: both calibration generators build the timing slot as a fixed-period/fixed-phase
+  #     sinusoid, so four overlay seeds gave four tight clusters across 150 "independent" panels
+  #     (between/within variance 11.8, effective n ~4). Under randomized slot shapes taiwan's overlay null
+  #     goes from q95 +0.831 / 91.5% passing to q95 -0.007 / 2.33% passing, matching cross_asset. No path
+  #     is un-calibrated and this floor needs no change. Base-book Sharpe was falsified as the driver and
+  #     runs the OPPOSITE way (-0.21 dSR per unit SR when isolated).
+  #     See docs/research/crucible_rc11_resolved_degenerate_null_2026-07-31.md.
+  uplift_min: 0.10       # full-panel holdout ΔSR floor (economic size, not significance)
+  delta_median_min: 0.0  # central CPCV path is not a loss
+  frac_positive_min: 0.50  # majority of CPCV paths have ΔSR > 0
+  max_base_corr: 0.70    # collinearity to the base span (multiple corr sqrt(R^2))
+  # EXPOSURE guard (S553-cont-151). Cap on |beta| of the candidate stream to the panel's equal-weight
+  # market return. `null` (the shipped default) leaves the leg INERT and every existing verdict
+  # byte-identical — CRU-1 requires that of a capability bump, so turning it on is a deliberate
+  # operator act, not a silent re-gating.
+  #
+  # WHY IT EXISTS — demonstrated, not theorised. The best candidate the miner has ever surfaced
+  # (`rank(sum(volume,60))` on cross_asset H=1) decomposes to market beta +0.548, R^2 57.2% from
+  # exposures, and a RESIDUAL timing Sharpe of -0.0000: its entire apparent edge is the risk premium
+  # on a long position. It PASSED uplift, fragility AND collinearity — 3 of the 5 legs — because
+  # `max_base_corr` measures correlation to the BASE SLEEVES, not to the MARKET, so a directional
+  # tilt walks straight through. Only the significance leg refused it, and on an underpowered
+  # substrate that is luck rather than design. base_sleeves.py GP3-03 flagged the hazard in a comment;
+  # this is the gate.
+  #
+  # Suggested value when enabled: 0.30 (catches the +0.55 case with room for a genuinely
+  # market-neutral book to breathe). Requires the caller to pass `market_returns=`; without it the
+  # beta is NaN and the leg stays inert, so enabling this alone is not sufficient — wire both.
+  max_market_beta: 0.30
+
+online_fdr:              # binding LORD++ account (audit F13: make it actually threshold, currently gates nothing)
+  alpha: 0.10            # per-substrate target FDR
+  w0: null               # initial wealth; null -> alpha/2 (the LORD default)
+  binding: true          # promote iff p_value <= OnlineFDR.next_level()  — the correction
+
+# WHICH CANDIDATES MAY BE PROMOTED (search-multiplicity control, added 2026-07-29 after the U1e
+# measurement). Dropping `dsr_aug` also dropped the funnel's ONLY file-drawer deflation: the shipped
+# contract paid for search multiplicity by deflating the augmented-book Sharpe against `gen_n_eff`
+# (EVERY genome ever scored). The corrected contract has no such term, and its remaining control — the
+# LORD++ p-gate — charges ONE test per PRE-REGISTERED SPEC while a GP search evaluates hundreds of
+# evolved offspring that charge nothing. Measured consequence (E1 driven through the real `evolve`,
+# 240 null panels): per-tick FPR 0.025, CP-upper95 0.0487 against a 0.05 ceiling — it clears, with ~2%
+# headroom, and one more false positive would have flipped it.
+#
+#   prereg_only  (DEFAULT) — only PRE-REGISTERED seed formulas are eligible for the corrected holdout
+#                gate. Offspring are still generated, scored, ledgered and reported as search internals
+#                (that is what the file drawer is for) but can never be promoted. This makes the
+#                decision unit IDENTICAL to the LORD++ charging unit — one pre-registered hypothesis,
+#                one test, one charged level — so the multiplicity is accounted for by construction
+#                rather than bounded after the fact. It is also the audit §5 design: "pre-registered
+#                low-N single-hypothesis probes ... NOT more mass-mining ticks".
+#   all        — every train-survivor is eligible, including offspring. Retains the discovery upside of
+#                the search, but the search's multiplicity is then UNPAID: the E1 above is the only
+#                bound on it, and it is thin. Do not select this for a mass-mining substrate without
+#                re-measuring E1 at that substrate's search budget.
+eligibility:
+  offspring_policy: prereg_only   # prereg_only | all

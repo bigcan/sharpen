@@ -26,18 +26,17 @@ Usage:
 from __future__ import annotations
 
 import argparse
-import hashlib
 import logging
 import sys
 from pathlib import Path
 
 import numpy as np
-import pandas as pd
 
 ROOT = Path(__file__).resolve().parents[2]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
+from finrl_pro_ds.crucible.data import taiwan_smallcap_panel as tsp  # noqa: E402
 from finrl_pro_ds.signals import (  # noqa: E402
     Gates,
     Multiplicity,
@@ -48,6 +47,24 @@ from finrl_pro_ds.signals import (  # noqa: E402
     write_scorecard,
 )
 from finrl_pro_ds.signals.spec import SignalSpec  # noqa: E402
+
+# The panel builder and its causal-alignment helpers moved into the library
+# (crucible/data/taiwan_smallcap_panel.py) when `taiwan_smallcap` was wired as a Crucible substrate,
+# so the miner and these probes score the SAME panel. Re-exported under their original private names
+# because the Q1/Q2 and S1 probe scripts import them from this module as `base._asof_grid` etc.
+_asof_grid = tsp.asof_grid
+_month_revenue_yoy = tsp.month_revenue_yoy
+_causal_total_return_factor = tsp.causal_total_return_factor
+_daily_membership = tsp.daily_membership
+_sector_map = tsp.sector_map
+_FROZEN_POOL = tsp._FROZEN_POOL
+
+
+def _margin_util(margin, shareholding):
+    """``[stock_id, avail_date, margin_util]`` — see :func:`taiwan_smallcap_panel.balance_util`."""
+    return tsp.balance_util(margin, shareholding,
+                            balance_col="margin_balance", out_col="margin_util")
+
 
 log = logging.getLogger("taiwan_smallcap_altdata")
 
@@ -124,249 +141,18 @@ def build_signals() -> dict[str, object]:
 
 
 # --------------------------------------------------------------------------- #
-# Causal as-of alignment of an event stream to the trading-day × ticker grid
+# Panel construction — delegated to the library builder (one implementation)
 # --------------------------------------------------------------------------- #
-def _asof_grid(events: pd.DataFrame, dates: np.ndarray, tickers: tuple[str, ...],
-               value_col: str, avail_col: str = "avail_date", id_col: str = "stock_id") -> np.ndarray:
-    """``(T,N)`` where ``grid[t,n]`` = last ``value_col`` for ticker n with ``avail_date <= dates[t]``.
-
-    Per ticker: ``merge_asof`` the trading dates onto the event stream sorted by availability
-    (backward direction), so no value appears before it is public. NaN before the first event.
-    """
-    T, N = len(dates), len(tickers)
-    grid = np.full((T, N), np.nan, dtype=np.float64)
-    if events is None or events.empty or value_col not in events.columns:
-        return grid
-    d = pd.DataFrame({avail_col: pd.to_datetime(dates)}).sort_values(avail_col).reset_index(drop=True)
-    ev = events.dropna(subset=[avail_col, value_col]).copy()
-    ev[avail_col] = pd.to_datetime(ev[avail_col])
-    ev[id_col] = ev[id_col].astype(str)
-    col = {tk: j for j, tk in enumerate(tickers)}
-    for tk, g in ev.groupby(id_col):
-        j = col.get(str(tk))
-        if j is None:
-            continue
-        g = g[[avail_col, value_col]].sort_values(avail_col)
-        # collapse duplicate avail dates to the LAST print that day (keep it public-consistent)
-        g = g.groupby(avail_col, as_index=False).last()
-        merged = pd.merge_asof(d, g, on=avail_col, direction="backward")
-        grid[:, j] = merged[value_col].to_numpy(dtype=np.float64)
-    return grid
-
-
-def _month_revenue_yoy(mrev: pd.DataFrame) -> pd.DataFrame:
-    """``[stock_id, avail_date, yoy]`` — YoY revenue growth, availability from the 10th-of-next-month."""
-    if mrev.empty:
-        return pd.DataFrame(columns=["stock_id", "avail_date", "yoy"])
-    m = mrev.copy()
-    m["stock_id"] = m["stock_id"].astype(str)
-    m = m.sort_values(["stock_id", "revenue_year", "revenue_month"])
-    prev = m.groupby("stock_id")["revenue"].shift(12)               # same month, prior year
-    yoy = np.where((prev > 0) & prev.notna(), m["revenue"] / prev - 1.0, np.nan)
-    return pd.DataFrame({"stock_id": m["stock_id"], "avail_date": pd.to_datetime(m["avail_date"]),
-                         "yoy": yoy}).dropna(subset=["yoy"])
-
-
-def _margin_util(margin: pd.DataFrame, shareholding: pd.DataFrame) -> pd.DataFrame:
-    """``[stock_id, avail_date, margin_util]`` = margin balance / causal total shares (utilization)."""
-    if margin.empty:
-        return pd.DataFrame(columns=["stock_id", "avail_date", "margin_util"])
-    mg = margin.copy()
-    mg["stock_id"] = mg["stock_id"].astype(str)
-    mg["date"] = pd.to_datetime(mg["date"])
-    if shareholding.empty or "total_shares" not in shareholding.columns:
-        return pd.DataFrame(columns=["stock_id", "avail_date", "margin_util"])
-    sh = (shareholding.dropna(subset=["total_shares"]).copy())
-    sh["stock_id"] = sh["stock_id"].astype(str)
-    sh["avail_date"] = pd.to_datetime(sh["avail_date"])
-    frames = []
-    for tk, g in mg.groupby("stock_id"):
-        s = sh[sh["stock_id"] == tk][["avail_date", "total_shares"]].sort_values("avail_date")
-        if s.empty:
-            continue
-        g = g.sort_values("date")
-        # shares known as of the margin row's own trading date (causal): avail_date(shares) <= date
-        merged = pd.merge_asof(g[["date", "margin_balance"]].rename(columns={"date": "avail_date"}),
-                               s, on="avail_date", direction="backward")
-        util = np.where(merged["total_shares"] > 0, merged["margin_balance"] / merged["total_shares"], np.nan)
-        frames.append(pd.DataFrame({"stock_id": tk,
-                                    "avail_date": pd.to_datetime(g["date"].to_numpy())
-                                    + pd.tseries.offsets.BDay(1),      # margin known T+1
-                                    "margin_util": util}))
-    if not frames:
-        return pd.DataFrame(columns=["stock_id", "avail_date", "margin_util"])
-    return pd.concat(frames, ignore_index=True).dropna(subset=["margin_util"])
-
-
-def _causal_total_return_factor(close_w: pd.DataFrame, dividends: pd.DataFrame) -> pd.DataFrame:
-    """Cumulative forward div-add-back factor ``cf`` (T×N), applied to ALL FOUR OHLC fields.
-
-    Per ticker ``m[ex] = 1 + amount/close_raw[ex]`` on each ex-date, ``cf = m.cumprod()`` — starts at
-    1 and only ratchets UP at an ex-date, so bars BEFORE a dividend are byte-for-byte unchanged
-    (forward, not back-adjustment → LEAK-2 clean, matching ``taiwan_panel_loader``). All four OHLC
-    fields must share this one factor so intraday ratios (and OHLC sanity) are preserved.
-    """
-    idx = close_w.index
-    factors = pd.DataFrame(1.0, index=idx, columns=close_w.columns)
-    if dividends is None or dividends.empty:
-        return factors
-    dv = dividends.copy()
-    dv["stock_id"] = dv["stock_id"].astype(str)
-    dv["ex_date"] = pd.to_datetime(dv["ex_date"])
-    for tk, g in dv.groupby("stock_id"):
-        if tk not in close_w.columns:
-            continue
-        col = close_w[tk]
-        j = close_w.columns.get_loc(tk)
-        for ex_date, amount in zip(g["ex_date"], g["amount"]):
-            pos = int(idx.searchsorted(pd.Timestamp(ex_date), side="left"))
-            if pos >= len(idx):
-                continue
-            p = col.iloc[pos]
-            if not np.isfinite(p) or p <= 0:
-                continue
-            factors.iloc[pos, j] *= (1.0 + float(amount) / float(p))
-    return factors.cumprod(axis=0)
-
-
-# --------------------------------------------------------------------------- #
-# Panel construction
-# --------------------------------------------------------------------------- #
-def _daily_membership(members: pd.DataFrame, dates: np.ndarray,
-                      tickers: tuple[str, ...]) -> np.ndarray:
-    """Expand monthly constituents to a causal daily ``(T,N)`` mask (member since the last rebalance)."""
-    T, N = len(dates), len(tickers)
-    mask = np.zeros((T, N), dtype=bool)
-    if members.empty:
-        return mask
-    m = members.copy()
-    m["rebalance_date"] = pd.to_datetime(m["rebalance_date"])
-    m["stock_id"] = m["stock_id"].astype(str)
-    wide = (m.assign(v=True).pivot_table(index="rebalance_date", columns="stock_id", values="v",
-                                         aggfunc="first", fill_value=False)
-            .reindex(columns=list(tickers), fill_value=False).sort_index())
-    rebal = wide.index.to_numpy(dtype="datetime64[ns]")
-    M = wide.to_numpy(dtype=bool)
-    idx = np.searchsorted(rebal, dates, side="right") - 1        # last rebalance <= date
-    valid = idx >= 0
-    mask[valid] = M[idx[valid]]
-    return mask
-
-
-_FROZEN_POOL = "pool.frozen.parquet"
-
-
-def _sector_map(data: Path, tickers: tuple[str, ...]) -> tuple[np.ndarray, dict]:
-    """Sector partition for ``tickers`` + its provenance stamp.
-
-    The pool's ``sector`` column (FinMind ``industry_category``) is a MANDATORY neutralization
-    control — ``neutralize`` residualizes every score on sector dummies daily — so the partition is
-    load-bearing on every downstream number. It is also NOT point-in-time: FinMind re-classifies
-    names over time, so re-enumerating the pool silently restates results recorded earlier. That is
-    exactly what happened on 2026-07-31 11:41, when a fetcher run for an unrelated probe rewrote
-    ``pool.parquet`` and moved the sealed 2026-07-16 P1 frictionless Sharpe 1.0084 -> 1.0447 with
-    ``spec_hash``, ``liquid_days_ge25`` and ``n_names_pool`` all unchanged (they are blind to it).
-
-    Two defences, because freezing alone can be undone by hand:
-      * read ``pool.frozen.parquet`` in preference to ``pool.parquet`` — the fetcher only ever writes
-        the latter, so the evaluation input stops moving under unrelated data pulls;
-      * stamp ``sector_map_sha`` into ``panel_meta``. The digest covers only the ``(ticker, sector)``
-        pairs FOR THE PANEL'S OWN NAMES, sorted — so a pool that merely gains unrelated listings does
-        NOT trip it, while any genuine change to this panel's partition does.
-    """
-    frozen, live = data / _FROZEN_POOL, data / "pool.parquet"
-    path = frozen if frozen.exists() else live
-    if not path.exists():
-        log.warning("no pool file at %s — sector neutralization COLLAPSES to a single bucket", data)
-        return np.zeros(len(tickers), dtype=np.int64), {
-            "source": None, "frozen": False, "sector_map_sha": None,
-            "n_sectors": 1, "n_unknown": len(tickers),
-        }
-
-    pool = pd.read_parquet(path)
-    cat = dict(zip(pool["stock_id"].astype(str), pool["sector"].astype(str)))
-    labels = [cat.get(t, "__unk__") for t in tickers]
-    codes = {s: i for i, s in enumerate(sorted(set(labels)))}
-    sector_id = np.array([codes[s] for s in labels], dtype=np.int64)
-
-    payload = "\n".join(f"{t}\t{s}" for t, s in sorted(zip(tickers, labels)))
-    prov = {
-        "source": path.name,
-        "frozen": path == frozen,
-        "sector_map_sha": hashlib.sha256(payload.encode("utf-8")).hexdigest()[:12],
-        "n_sectors": len(codes),
-        "n_unknown": sum(1 for s in labels if s == "__unk__"),
-    }
-    if not prov["frozen"]:
-        log.warning("sector map read from UNFROZEN %s — results are not reproducible across fetcher "
-                    "runs; freeze it to %s to pin them", live.name, _FROZEN_POOL)
-    log.info("sector map: %s (frozen=%s) sha=%s | %d sectors, %d unknown",
-             prov["source"], prov["frozen"], prov["sector_map_sha"], prov["n_sectors"], prov["n_unknown"])
-    return sector_id, prov
-
-
 def build_panel(data: Path, *, adv_window: int = 20) -> Panel:
-    prices = pd.read_parquet(data / "prices.parquet")
-    members = pd.read_parquet(data / "universe" / "membership.parquet")
-    prices["date"] = pd.to_datetime(prices["date"])
-    prices["ticker"] = prices["ticker"].astype(str)
-    keep = set(members["stock_id"].astype(str)) if not members.empty else set(prices["ticker"])
-    prices = prices[prices["ticker"].isin(keep)].drop_duplicates(["date", "ticker"], keep="first")
+    """The locked cap-rank 51-250 panel with the three 2026-07-15 alt-data channels.
 
-    tickers = tuple(sorted(prices["ticker"].unique()))
-    dates = np.array(sorted(prices["date"].unique()), dtype="datetime64[ns]")
-
-    def wide(col: str) -> pd.DataFrame:
-        return prices.pivot(index="date", columns="ticker", values=col).reindex(
-            index=pd.DatetimeIndex(dates), columns=list(tickers))
-
-    open_w, high_w, low_w, close_w, vol_w = (wide(c) for c in ("open", "high", "low", "close", "volume"))
-    div_path = data / "dividends.parquet"
-    dividend_adjusted = div_path.exists()
-    if dividend_adjusted:                                        # causal total-return (all OHLC × cf)
-        cf = _causal_total_return_factor(close_w, pd.read_parquet(div_path))
-        open_w, high_w, low_w, close_w = (f * cf for f in (open_w, high_w, low_w, close_w))
-
-    o, h, lo, c, v = (df.to_numpy(dtype=np.float64) for df in (open_w, high_w, low_w, close_w, vol_w))
-    tradeable = (np.isfinite(o) & np.isfinite(h) & np.isfinite(lo) & np.isfinite(c) & (c > 0)
-                 & np.isfinite(v) & (v > 0))
-    dollar = np.where(tradeable, c * v, np.nan)
-    adv = pd.DataFrame(dollar).rolling(adv_window, min_periods=10).mean().to_numpy()
-    membership = _daily_membership(members, dates, tickers)
-    active = membership & tradeable & np.isfinite(adv)
-    for arr in (o, h, lo, c, v):
-        arr[~tradeable] = np.nan
-
-    # sectors from the enumerated pool (FinMind industry_category); unknown → own bucket
-    sector_id, sector_prov = _sector_map(data, tickers)
-
-    # --- the three causally-aligned alt-data channels → feature_slots ---
-    def _pq(name: str) -> pd.DataFrame:
-        p = data / name
-        return pd.read_parquet(p) if p.exists() else pd.DataFrame()
-
-    mrev, margin, shareholding = _pq("month_revenue.parquet"), _pq("margin_short.parquet"), _pq("shareholding.parquet")
-    slot_mrev = _asof_grid(_month_revenue_yoy(mrev), dates, tickers, "yoy")
-    slot_margin = _asof_grid(_margin_util(margin, shareholding), dates, tickers, "margin_util")
-    slot_holder = _asof_grid(shareholding.rename(columns={}), dates, tickers, "big_holder_pct") \
-        if not shareholding.empty else np.full((len(dates), len(tickers)), np.nan)
-
-    liq_days = int((active.sum(axis=1) >= 25).sum())
-    meta = {
-        "survivorship_free": False,
-        "source": "finmind_http+taiwan_smallcap_altdata",
-        "universe_def": _UNI,
-        "adjusted": dividend_adjusted,
-        "return_basis": "causal_total_return_forward" if dividend_adjusted else "raw_close_unadjusted",
-        "n_names_pool": len(tickers),
-        "liquid_days_ge25": liq_days,
-        "sector_map": sector_prov,
-        "note": ("cap-rank 51-250 monthly PIT membership; RAW unadjusted prices; current-listing pool "
-                 "⇒ survivorship UPPER BOUND"),
-    }
-    return Panel(dates, tickers, o, h, lo, c, v, active, adv, sector_id, meta,
-                 feature_slots={"mrev_yoy": slot_mrev, "margin_util": slot_margin,
-                                "holder_conc": slot_holder})
+    Thin delegation to :func:`taiwan_smallcap_panel.build_taiwan_smallcap_panel`, which owns the
+    universe, the causal total-return basis, the frozen sector map and the as-of channel alignment.
+    ``channels`` is left at the default (:data:`~taiwan_smallcap_panel.CORE_CHANNELS`) so this
+    campaign's scorecards are byte-identical to the sealed ones; the miner asks for every channel.
+    """
+    return tsp.build_taiwan_smallcap_panel(data, adv_window=adv_window,
+                                           channels=tsp.CORE_CHANNELS)
 
 
 def main() -> int:

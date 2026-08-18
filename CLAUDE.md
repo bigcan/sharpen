@@ -116,6 +116,7 @@ Configs vary by pipeline. **Do NOT invent keys — read a reference config first
 - Never guess config keys — read a reference YAML first
 - Never use `mid_price` without validating high/low against open/close
 - Never deploy without running `monitor_fleet.py` first (VRAM, active processes)
+- **Never create a git branch (or worktree) without the operator's explicit consent.** Work on the current branch by default; if a new branch seems warranted, propose the name and wait for a yes. Same for `git checkout -b`, `git switch -c`, and `git worktree add`.
 - Never skip Math skill verification on formula/equation changes
 - Never claim a file/function/class/config key/CLI flag exists without verifying via Grep/Glob/Read
 - **Never launch a fused HPO+train+eval pipeline.** All training work follows `docs/protocol_v2.md` (6 stages, manifest contract). AlphaSeek `k28l6ef8` is the cautionary tale.

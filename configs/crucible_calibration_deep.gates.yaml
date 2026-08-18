@@ -1,0 +1,197 @@
+# Pre-registered criteria for the Crucible funnel CALIBRATION harness
+# (scripts/research/crucible_calibration.py). Design note + Math verification:
+# S553-cont-120. These are GATES (PASS/FAIL thresholds) so — per CLAUDE.md
+# "never hardcode gate thresholds" — they live here, not in code.
+#
+# This file is NOT part of the frozen funnel gates_hash (CRU-1 519158fa1450): the
+# calibration harness VALIDATES the funnel, it does not change any funnel verdict.
+#
+# WHAT THIS CALIBRATES
+#   The binding PROMISING gate = combination_fitness(...).passes_gate re-scored on the
+#   embargoed holdout inside evolve() — a 5-condition AND:
+#     delta_mean >= min_combination_uplift (0.10)   marginal uplift over the base book
+#     dsr_aug    >= promising_dsr          (0.90)    deflated-Sharpe posterior (absolute aug book)
+#     marginal_t >= hlz_t_min             (3.0)      HLZ marginal-contribution t-stat
+#     max_base_corr <= max_base_corr      (0.70)     not collinear with base sleeves
+#     delta_median >= 0 AND frac_pos >= 0.50         CPCV path distribution not fragile
+#
+#   MATH NOTE (M1, S553-cont-120): dsr_aug deflates the ABSOLUTE augmented-book Sharpe, which
+#   inherits the base book's real ~0.60 SR, so under a NOISE candidate the DSR leg is NOT the
+#   binding protection — the MARGINAL legs (uplift + marginal_t>=3sigma) are. A one-sided 3-sigma
+#   t-gate implies a per-test null rate ~= 1 - Phi(3) ~= 0.00135, and the 5-way AND is stricter.
+#   So the true null FPR is << 0.01, NOT ~0.10. null_fpr_max is set an order of magnitude below the
+#   loose "1 - promising_dsr = 0.10" ceiling accordingly.
+
+harness_version: crucible-calibration-v1
+
+# ---- Shared synthetic-substrate knobs -------------------------------------------------
+substrate:
+  t: 756                 # bars per panel (~3y daily); holdout tail = 25% -> ~189 bars
+  n: 12                  # cross-sectional names
+  n_feature_slots: 4     # macro:regime + 3 independent macro:Xnn slots (overlay breadth)
+  hold_horizon: 21       # rebalance cadence (trading days) for proxy base sleeves
+
+# Modest, CONSERVATIVE search budget (see M1): a smaller file-drawer N means LESS DSR deflation,
+# i.e. an EASIER gate -> a conservative (upper) estimate of the null FPR. If E1 is GREEN here, the
+# production budget (pop 200 / gen 40, more deflation) is strictly safer. Realized gen_n_eff is
+# reported so the multiplicity is transparent.
+evolve_budget:
+  rng_seed: 7
+  pop_size: 24
+  n_generations: 2
+  ls_min_names: 6
+  elite_frac: 0.30
+  cost_bps: 0.0010
+  holdout_frac: 0.25
+  holdout_embargo_days: 21
+
+# ---- E1: null calibration (false-positive rate) ---------------------------------------
+e1_null:
+  n_panels: 60           # K independent pure-noise panels (K*B candidate-evals >= 300 for a
+                         #   useful Clopper-Pearson upper bound via the rule of three)
+  ci_alpha: 0.05         # 95% one-sided upper bound
+  # GREEN iff Clopper-Pearson upper-95% of the per-candidate null FPR <= null_fpr_max.
+  null_fpr_max: 0.01     # M1: order-of-magnitude below the loose 1-promising_dsr=0.10 ceiling.
+  # Per-tick FPR (P a null tick emits >=1 PROMISING) is also reported; its ceiling is looser
+  # because a tick aggregates B candidates.
+  null_tick_fpr_max: 0.05
+
+# ---- E2: planted-signal power ---------------------------------------------------------
+e2_power:
+  n_seeds: 40            # K independent planted panels per beta (binomial power estimate/point)
+  # beta = strength of the base book's dependence on the lagged, standardized planted regime slot.
+  # beta=0 is a null internal-consistency check (power must ~match E1 FPR); the grid climbs through
+  # the detection transition. Calibrated from the S553-cont-120 probe: at T=756 (~189-bar holdout)
+  # realized marginal ΔSR is ~0 at beta 0, ~0.3 at 0.002, ~1.9 at 0.008, ~3.2 at 0.015, ~4.6 at 0.03;
+  # detection (passes_gate) turns on around beta 0.015 (ΔSR ~3), so the grid spans 0 -> strong.
+  beta_grid: [0.0, 0.002, 0.004, 0.008, 0.015, 0.025, 0.040]
+  gate_probe_gen_n_eff: 50   # declared file-drawer N for the direct-gate DSR deflation (transparent,
+                             #   representative of a modest search; not hardcoded in code)
+  power_target: 0.80     # power level defining the MDE crossing
+  # GREEN iff power >= power_min is REACHED at a realized marginal ΔSR <= mde_delta_sr_max (the funnel
+  # detects a plausibly-small real edge, not only a huge one). NOTE: the realized ΔSR here is in
+  # annualized-Sharpe units on short CPCV test folds; MDE scales ~1/sqrt(T_holdout), so this cap is
+  # evaluated at the T in `substrate:` and must be read at that sample size.
+  power_min: 0.80
+  mde_delta_sr_max: 1.00 # max realized marginal ΔSR at which power_target must be met (a strong but
+                         #   plausible edge). At T=756 the probe suggests the funnel needs ΔSR ~3 ->
+                         #   likely RED here, i.e. LOW POWER against realistic edges at short holdouts
+                         #   (the informative finding, not a harness bug).
+
+# ---- MDE-vs-T sweep (the funnel's power characterization) ------------------------------
+# Runs the E2 power sweep at several substrate LENGTHS and reports the detection floor (MDE in
+# realized marginal ΔSR at power_target) at each. Because MDE ~ 1/sqrt(T_holdout), this shows how
+# small an edge the funnel can see on the ACTUAL real substrates vs short ones -- i.e. whether any
+# past "0 PROMISING" was a real absence or just low power at that substrate's length.
+mde_sweep:
+  # Substrate bar counts to probe. Real lengths: cross_asset ~4044, Taiwan ~2782; 756 (~3y) and
+  # 1512 (~6y) anchor the short end. holdout = T - int(T*(1-holdout_frac)) bars.
+  #
+  # DEEP ANCHORS (U2, 2026-07-29). The grid used to stop at 4044 (holdout 1011), which is exactly where
+  # every daily substrate sits — so `substrate.interp_mde` took its off-grid branch for ANY deeper or
+  # higher-frequency substrate. Until crucible-v5.0 that branch extrapolated by a falsified 1/√N law and
+  # FAILED OPEN; v5.0 made it fail CLOSED (`unmeasured_high` -> +inf -> refuse), which is honest but
+  # means no deep substrate can ever be mined. The real unblock, named in v5.0's own docstring, is to
+  # EXTEND the sweep so deep substrates INTERPOLATE between MEASURED anchors instead of extrapolating.
+  # These anchors carry measured coverage out to holdout 8064 (was 1011).
+  #
+  # TWO CAVEATS, both material:
+  #  * COVERAGE IS STILL FINITE. Anything past the top anchor remains `unmeasured_high` -> +inf ->
+  #    refuse. That is correct (fail-closed), not a bug — but it means "deep substrates interpolate"
+  #    holds only up to the deepest MEASURED holdout, and a deeper one still needs a longer grid.
+  #  * THE AXIS IS BARS, NOT TIME. The generator is a daily-scale DGP and `periods_per_year=252` is
+  #    baked into the FitnessConfig, so a row is "MDE at N bars of THIS per-bar signal-to-noise".
+  #    Reading a high-N row as an intraday substrate's MDE additionally assumes intraday per-bar SNR
+  #    resembles daily — which is a modelling assumption, not something this sweep measures.
+  # DEEP EXTENSION 2026-08-02: mde_sweep (OVERLAY) has its OWN t_grid, separate from
+  # xsec_mde_sweep's — extending only the xsec one leaves overlay topped out at holdout 8064,
+  # and since the guard takes the WORST across both mined types a normal tick still REFUSES.
+  t_grid: [8064, 16128, 32256, 64512, 129024]
+  n_seeds: 30
+  # The beta grid must BRACKET the detection transition across ALL T (it shifts to lower beta as T
+  # grows). Denser + spanning 0.002..0.030, from the S553-cont-121 probes.
+  #
+  # LOW-END DENSIFICATION (U2, 2026-07-29). MDE is read as "the FIRST grid point reaching power_target",
+  # so it is only as sharp as the grid is dense AT the transition — and the transition marches to lower
+  # beta as T grows. On the deep anchors the old grid had already run out: at holdout 4032/8064 the
+  # corrected contract sat at power 0.20/0.43 at beta=0.002 and 0.97/1.00 at beta=0.003, with NOTHING in
+  # between, so the reported MDE pinned to beta=0.003's realized ΔSR (~0.55) at both depths. That looked
+  # like the curve FLATTENING into a floor; it was the grid running out. (The tell: power at the fixed
+  # beta=0.002 point kept CLIMBING with depth — 0.03 -> 0.20 -> 0.43 — which a real floor forbids.)
+  # A grid-pinned MDE over-states the detection limit, and an over-stated MDE makes the power guard
+  # refuse substrates that are in fact adequately powered — fail-safe, but wrong, and wrong in exactly
+  # the direction that keeps the loop switched off.
+  beta_grid: [0.0, 0.0005, 0.001, 0.0015, 0.002, 0.0025, 0.003, 0.004, 0.006, 0.008, 0.012, 0.018, 0.030]
+
+# ---- CROSS-SECTIONAL MDE surface (bars x BREADTH) --------------------------------------
+# V3, 2026-07-29. Every mde_sweep row above is measured on the OVERLAY path, whose only power axis is
+# BARS — and the substrate-power guard applied that single curve to cross_sectional substrates too. A
+# per-name (T,N) panel carries ~N x the effective observations of a broadcast one at the SAME
+# holdout_bars, so the guard was structurally blind to the payoff of per-name data (audit U3). This
+# block measures the missing axis. Experimental design, not gates: no threshold lives here (the ceiling
+# stays in crucible_power.gates.yaml).
+xsec_mde_sweep:
+  # holdout 378 / 696 / 1011 / 2016 / 4032 / 8064. The deep anchors were added 2026-07-29 so this
+  # surface reaches the same depth as the overlay curve: until it did, a substrate mining BOTH types
+  # was refused past holdout 2016 as `unmeasured_high` even where the overlay curve said ALLOW, because
+  # the v7.0 stamp takes the WORST MDE across the types being mined and will not borrow a curve.
+  # DEEP EXTENSION 2026-08-01: the guard's binding cross-sectional curve topped out at
+  # holdout 8064 (MDE 0.644, still ABOVE the 0.50 ceiling), so every deeper substrate --
+  # including the new 110,856-bar gold and 140,991-bar FX cells -- lands unmeasured_high and
+  # is REFUSED fail-closed. These anchors are what would let the guard interpolate there.
+  # Written to a SEPARATE file: t_grid is experimental design, not a gate, but editing the
+  # sealed config would still move its provenance hash.
+  t_grid: [8064, 16128, 32256, 64512, 129024]
+  n_grid: [12, 25, 50, 100]            # cross-sectional breadth — THE axis this sweep adds
+  n_seeds: 24
+  ls_min_names: 6                      # min names/day for the rank-L/S book (matches evolve's default)
+  # beta = per-name characteristic loading on the NEXT return, against a 0.010 daily noise floor.
+  # Calibrated by probe (2026-07-29) to bracket the transition across the whole (T,N) grid. Breadth
+  # pushes the transition to lower BETA — at holdout 1011 power reaches 1.0 by beta 0.001 at N=12 but
+  # already by beta 0.0005 at N=100 — so the low end must stay dense or every wide-N row is grid-pinned.
+  #
+  # READ THE MDE COLUMN CAREFULLY. The probe also showed breadth does NOT lower the MDE expressed in
+  # realized ΔSR: at holdout 1011 the transition sits near ΔSR ~0.7-1.8 at N=12 and ~0.9-2.7 at N=100.
+  # That is not a defect, it is what the statistic measures — ΔSR is already risk-adjusted, and the SE
+  # of the Sharpe-DIFFERENCE is set by the number of TIME observations, not by the cross-section. What
+  # breadth buys is a HIGHER ΔSR for the same underlying per-name signal (5.9 vs 2.4 at beta=0.001), so
+  # it moves a real alpha ABOVE a fixed ceiling rather than moving the ceiling down.
+  beta_grid: [0.0, 0.0001, 0.00015, 0.0002, 0.0003, 0.0004, 0.0005, 0.0007, 0.001, 0.0015]
+
+# ---- E1 sensitivity sweep (F4 realistic-null robustness) -------------------------------
+# The F4 finding "E1 stays GREEN under a realistic null" is measured at ONE null-shape point
+# (df=5, factor_share=0.35). For the anatomy paper that single point is too thin an empirical base:
+# it must hold across the plausible null-SHAPE space. This sweep re-runs E1 (realistic null) at a
+# one-axis-at-a-time grid around the default -- tail fatness (Student-t df) and cross-sectional
+# common-factor share (factor_share) -- plus a fattest+most-correlated stress corner, and re-applies
+# the UNCHANGED e1_null ceilings (null_fpr_max / null_tick_fpr_max) at each point. It introduces NO
+# new threshold; `points` is experimental-design (like e2 beta_grid / mde t_grid), not a gate. GREEN
+# iff EVERY point clears the ceilings -- i.e. the funnel's false-positive protection does not depend
+# on the particular null shape. df must stay > 2 (finite variance) and factor_share in [0, 1).
+e1_sensitivity:
+  n_panels: 60           # per point; MATCHES e1_null so each shape is judged by the identical dual-ceiling
+                         #   bar. 60 is the floor for the per-TICK bound: CP-upper(k=0)=1-0.05^(1/n) is
+                         #   0.095 at n=30 (> 0.05 tick ceiling, forced RED) but 0.0487 at n=60. The
+                         #   per-candidate bound (many genomes/panel) clears 0.01 far sooner.
+  points:
+    - {label: default,        df: 5.0,  factor_share: 0.35}   # the F4 anchor (appears once)
+    # --- tail-fatness axis (factor_share held at default) ---
+    - {label: df3_fattail,    df: 3.0,  factor_share: 0.35}   # very heavy tails (finite var, df>2)
+    - {label: df4,            df: 4.0,  factor_share: 0.35}
+    - {label: df8,            df: 8.0,  factor_share: 0.35}
+    - {label: df15_neargauss, df: 15.0, factor_share: 0.35}   # near-Gaussian tails
+    # --- common-factor axis (df held at default) ---
+    - {label: fs0_nofactor,   df: 5.0,  factor_share: 0.0}    # idiosyncratic only (~no cross-corr)
+    - {label: fs0p2,          df: 5.0,  factor_share: 0.2}
+    - {label: fs0p5,          df: 5.0,  factor_share: 0.5}
+    - {label: fs0p7_highcorr, df: 5.0,  factor_share: 0.7}    # strongly correlated cross-section
+    # --- joint stress corner ---
+    - {label: stress_corner,  df: 3.0,  factor_share: 0.7}    # fattest + most correlated
+
+# ---- Joint verdict (M4) ---------------------------------------------------------------
+# The harness is GREEN only if BOTH hold. E1 alone is gamed by a reject-everything funnel
+# (FPR 0, useless); E2 alone by an accept-everything funnel (power 1, FPR 1). The trustworthy
+# statement is the joint operating point: "at null FPR <= null_fpr_max, power >= power_min at a
+# realized marginal ΔSR <= mde_delta_sr_max."
+joint:
+  require_both: true
