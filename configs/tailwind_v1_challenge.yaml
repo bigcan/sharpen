@@ -279,13 +279,19 @@ ensemble:
 prop_firm:
   rules_file: configs/prop_firm_rules.yaml     # ✅ verified 2026-07-02 (FTMO + Velotrade 2-step, static DD, no deadline)
   simulator_report: docs/research/tailwind_v1_challenge_simulator_2026-07-02.md
-  vol_multiplier: 1.0                          # this file's sizing = the simulator's 1.0x cell
-                                               # (10% eff. vol). RE-SIZED from 1.5 on 2026-08-17.
-                                               # The gates file states the same sizing as 1.45x
-                                               # against the book's MEASURED 6.92% native vol —
-                                               # same target, two denominators: 1.0x is "the
-                                               # simulator's 10%-base grid cell", 1.45x is "the
-                                               # scalar the render applies to the real book".
+  # ⚠️ THIS FIELD IS IN THE NATIVE-VOL FRAME. The render's A2 consistency check reads it as
+  # `book_native_ann_vol × vol_multiplier` and requires the result to land within 0.005 of
+  # `challenge_pass_gate.sizing.effective_vol_ann`. Native vol is 6.92%, so 10% needs 1.445.
+  # Set to 1.45, matching the gates file.
+  #
+  # REGRESSION FIXED 2026-08-18 (Tier-2 P10-01). On 2026-08-17 this was changed 1.5 -> 1.0 to
+  # match the SIMULATOR's frame, where the grid is swept on an already-normalised 10% base so
+  # "1.0x" also means 10% vol. Both statements are true of different denominators — and the
+  # comment here rationalised exactly that, which is precisely what A2 exists to forbid. The
+  # render was last run BEFORE that edit, so `RENDER_CLEAR` was asserted in this file's header,
+  # in MEMORY.md and in PR #8 while the wired config actually rendered RENDER_FLAGS on A2.
+  # Do not re-introduce the simulator frame here; cite it in prose if needed, never in the key.
+  vol_multiplier: 1.45                         # 0.0692 × 1.45 = 0.1003 ⇒ |Δ| 0.0003 < 0.005
   bank_and_derisk: false                       # simulator: do NOT bank at low vol
   # Mirrored from challenge_pass_gate.p_pass_expected in the .gates file — that file is the
   # source of truth. Re-derived 2026-08-17 by re-running run_challenge_simulator.py; model
