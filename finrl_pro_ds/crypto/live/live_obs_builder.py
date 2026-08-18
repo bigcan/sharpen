@@ -128,6 +128,14 @@ class LiveObsBuilder:
         "cfd_gold": 1.45,
         "cfd_forex": 1.45,
         "cme_futures": 1.45,
+        # US cash equity / ETF (gmgp1-spy). Far sparser than the CFD classes above:
+        # regular trading hours are 09:30-16:00 ET = 6.5h of each 24h calendar day, and
+        # only on ~252 of 365 days. Active-minute fraction is (6.5/24) x (252/365) = 0.187,
+        # so a calendar window must be ~5.35x the target bar count. Derived from the
+        # measured SPYUSUSD session (13:00-20:00 UTC, 390 bars/day), not tuned — this class
+        # is currently TRAINING-ONLY, and the constant exists so a future live wiring fails
+        # loudly on a wrong number rather than crashing on an unknown asset_class.
+        "cfd_equity": 5.35,
     }
 
     def __init__(
