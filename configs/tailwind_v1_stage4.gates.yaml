@@ -1,0 +1,110 @@
+# ============================================================================
+# TAILWIND-v1 — Stage-4 recent-OOS gates (audit roadmap item X4)
+# ============================================================================
+# Closes P8-10 from docs/research/tailwind_v1_deep_lifecycle_audit_2026-07-01.md:
+# "TAILWIND-v1 (the actual next-to-capital candidate) has NO Stage-4 OOS wiring ...
+#  the audited Stage-4 machinery covers only the RL prop-firm strategies."
+#
+# Consumed by scripts/research/tailwind_stage4_recent_oos.py. Declared here rather than in
+# the script because every numeric gate in this project lives in a gates file
+# (CLAUDE.md anti-pattern: "Never hardcode gate thresholds in code or scripts").
+#
+# ⚠️ THIS ARTIFACT IS NOT DEPLOY-GATING. CLAUDE.md forbids READING a deploy-gating WF/OOS
+# verdict without a Tier-2 deep lifecycle audit, and the TAILWIND Tier-2 has not been re-run
+# since 2026-07-01 (and never on the challenge config). X4 exists to CREATE the artifact a
+# Tier-2 can audit — it does not authorise anything. `deploy_gating: false` below is load-
+# bearing, not decoration.
+stage4_recent_oos:
+  status: pre_registered
+  deploy_gating: false
+  consumed_by: [tailwind_stage4_recent_oos]
+
+  # ---------------------------------------------------------------------------------
+  # WINDOW — cutoff-anchored, NOT the protocol's rolling `today - recent_oos_days`
+  # ---------------------------------------------------------------------------------
+  # DEVIATION FROM PROTOCOL v2 Stage 4, deliberate and reported. The protocol's rolling
+  # 60-day window is built for RL strategies, where "out of sample" means "after this
+  # checkpoint's train cutoff" and bars arrive by the thousand at 15-min resolution.
+  # TAILWIND is a FROZEN LINEAR rule on a DAILY clock with MONTHLY rebalancing:
+  #   * its parameters (features.lookbacks [63,126,252], skip 5, vol_window 63) were locked
+  #     at the cross-sectional Phase-1 build and have not been refit since, so the true
+  #     out-of-sample boundary is the RESEARCH cutoff below, not a rolling date;
+  #   * 60 calendar days is ~2 rebalances, which cannot support a profit factor.
+  # So the PRIMARY window is cutoff-anchored (a genuine holdout). The protocol's rolling
+  # window is ALSO computed and reported for conformance — never as the verdict source.
+  research_cutoff: "2026-06-01"      # = xsec_momentum_falsification.END, the frozen
+                                     # research sample end. Data after this date was not
+                                     # seen by any parameter choice in the book.
+  protocol_rolling_days: 60          # protocol v2 Stage-4 default; reported, not gating
+
+  # ---------------------------------------------------------------------------------
+  # VERDICT BUCKETS — protocol v2 Stage 4, unchanged
+  # ---------------------------------------------------------------------------------
+  # PF >= hold_ratio  x baseline PF -> HOLD
+  # PF >= watch_ratio x baseline PF -> WATCH
+  # else                            -> RETRAIN
+  oos_hold_ratio: 0.8
+  oos_watch_ratio: 0.6
+
+  # BASELINE = the WF-median analog. TAILWIND has no walk-forward folds (nothing is
+  # trained), so the stand-in is the median of the audit's four fixed SUBPERIODS, computed
+  # on the PRE-CUTOFF sample only. Computing it on the full sample would let the OOS window
+  # set its own baseline.
+  baseline: subperiod_median_pf
+  subperiods:
+    "2006-09": ["2006-01-01", "2009-12-31"]
+    "2010-15": ["2010-01-01", "2015-12-31"]
+    "2016-20": ["2016-01-01", "2020-12-31"]
+    "2021-26": ["2021-01-01", "2026-05-31"]     # truncated AT the cutoff (audit used 2026-12-31)
+
+  # ---------------------------------------------------------------------------------
+  # POWER — report whether the verdict can distinguish HOLD from RETRAIN at all
+  # ---------------------------------------------------------------------------------
+  # A 2-rebalance window produces a PF, and that PF is close to noise. The verdict is
+  # emitted either way, but `power_sufficient: false` means it must not be read as
+  # evidence of decay OR of health. Learned the hard way: quoting an underpowered number
+  # as a verdict is the Crucible `promising=0` vacuity in a different costume.
+  min_rebalances_for_power: 6        # ~6 monthly rebalances before a PF means anything
+  sharpe_ci_block_days: 21           # block-bootstrap block length (~1 rebalance month)
+  sharpe_ci_resamples: 10000
+
+  # ---------------------------------------------------------------------------------
+  # DECAY ARM — long trailing window, OVERLAPS the research sample (NOT clean OOS)
+  # ---------------------------------------------------------------------------------
+  # Diagnostic only: has the book's recent multi-year behaviour drifted from its own
+  # history? Reported alongside the OOS arm so a thin-but-clean number and a
+  # powerful-but-contaminated number are never confused for each other.
+  decay_window_days: 756             # 3y, mirrors forward_path_render.render_horizon_days
+
+  # ---------------------------------------------------------------------------------
+  # COST — honest, per the X4 wording ("honest cost")
+  # ---------------------------------------------------------------------------------
+  # Gate on the config's own cost model; harsh reported as the conservative bound. Matches
+  # xsec_momentum_falsification.COST_MODELS keys exactly.
+  cost_model_primary: standard_2bps
+  cost_model_conservative: harsh_10bps
+
+  # ---------------------------------------------------------------------------------
+  # COMPLIANCE SUB-REPORT — protocol v2 Stage 4
+  # ---------------------------------------------------------------------------------
+  # FTMO caps only. Velotrade has no daily-loss compliance filter (protocol v2 §Stage 4:
+  # "skipped for workstreams without prop-firm caps such as Velotrade").
+  compliance:
+    ftmo_min_active_days: 4          # min days with non-zero turnover in the window
+    ftmo_max_day_share: 0.50         # no single day may be > 50% of total profit
+
+provenance:
+  drafted_on: '2026-08-17'
+  drafted_by_session: S553-cont-162
+  closes: "audit roadmap X4 / finding P8-10"
+  audit_ref: docs/research/tailwind_v1_deep_lifecycle_audit_2026-07-01.md
+  basis: >-
+    Same three research modules as audit_tailwind_book.py (DSR/PBO) and
+    tailwind_forward_path_render.py (forward path) so all four artifacts describe ONE book
+    — the one-basis rule P7-01 ("gates grade the WRONG book") exists to enforce. The ONLY
+    deviation is the panel end date: the frozen research cache stops at 2026-05-29, and a
+    recent-OOS artifact by definition needs data past it.
+  capital_gate: >-
+    NOT AUTHORISING. This artifact is the EVIDENCE a Tier-2 audits, not a promotion. Reading
+    this verdict as deploy-gating requires the Tier-2 first (CLAUDE.md). The challenge gate
+    remains: (1) render OK (2) sizing OK (3) Tier-2 OPEN (4) wiring OK (5) operator OPEN.

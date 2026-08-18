@@ -11,19 +11,25 @@
       "full": 0.751,
       "in_sample": 0.879,
       "oos": 0.517,
-      "oos_maxdd_pct": -15.1
+      "oos_maxdd_pct": -9.4,
+      "oos_maxdd_vol_scaler": 0.3741,
+      "oos_maxdd_scaler_source": "in_sample_vol (causal; NOT the holdout's own vol)"
     },
     "sleeve_momentum": {
       "full": 0.434,
       "in_sample": 0.511,
       "oos": 0.345,
-      "oos_maxdd_pct": -20.3
+      "oos_maxdd_pct": -23.8,
+      "oos_maxdd_vol_scaler": 0.2071,
+      "oos_maxdd_scaler_source": "in_sample_vol (causal; NOT the holdout's own vol)"
     },
     "drawdown_control": {
       "full": 0.753,
       "in_sample": 0.953,
       "oos": 0.351,
-      "oos_maxdd_pct": -18.3
+      "oos_maxdd_pct": -11.5,
+      "oos_maxdd_vol_scaler": 0.376,
+      "oos_maxdd_scaler_source": "in_sample_vol (causal; NOT the holdout's own vol)"
     }
   },
   "baseline_static_rp_oos_sharpe": 0.517,
