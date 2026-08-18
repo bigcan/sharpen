@@ -166,6 +166,38 @@ def test_render_resolves_gates_from_the_config_not_a_constant():
     assert 'CHALLENGE_GATES = ROOT / "configs" / "tailwind_v1_challenge.gates.yaml"' not in src
 
 
+def test_vol_multiplier_agrees_between_config_and_gates(cfg):
+    """REGRESSION (Tier-2 P10-01, 2026-08-18). `prop_firm.vol_multiplier` and
+    `challenge_pass_gate.sizing.vol_multiplier` are two declarations of ONE quantity, and the
+    render's A2 check reads the CONFIG one against the book's NATIVE vol (6.92%), requiring
+    |native x mult - effective_vol_ann| < 0.005.
+
+    They were silently allowed to diverge: the config was set to 1.0 (the SIMULATOR's frame,
+    where the grid is swept on an already-normalised 10% base) while the gates said 1.45 (the
+    native-vol frame). Both are true of different denominators, so prose reconciled them and
+    A2 -- which exists to forbid exactly that -- flipped the render to RENDER_FLAGS. The render
+    had last been run before the edit, so RENDER_CLEAR was asserted in the config header, in
+    MEMORY.md and in PR #8 while the wired config actually failed.
+
+    This test is cheap (no price data) and catches the divergence at its source. It does NOT
+    replace executing A2 end-to-end, which remains open.
+    """
+    gates_path = ROOT / cfg["ensemble"]["gates_file"]
+    gates = _yaml.safe_load(gates_path.read_text(encoding="utf-8"))
+    cfg_mult = float(cfg["prop_firm"]["vol_multiplier"])
+    gates_mult = float(gates["challenge_pass_gate"]["sizing"]["vol_multiplier"])
+    assert cfg_mult == pytest.approx(gates_mult), (
+        f"prop_firm.vol_multiplier={cfg_mult} != gates sizing.vol_multiplier={gates_mult}. "
+        f"Both are the NATIVE-vol frame; do not set one from the simulator's 10%-base frame."
+    )
+    # And the value must actually satisfy A2 against the measured native vol.
+    native_vol, target = 0.0692, float(gates["challenge_pass_gate"]["sizing"]["effective_vol_ann"])
+    assert abs(native_vol * cfg_mult - target) < 0.005, (
+        f"{native_vol} x {cfg_mult} = {native_vol*cfg_mult:.4f} misses "
+        f"effective_vol_ann={target} by >= 0.005 -> the render will FAIL A2"
+    )
+
+
 def test_no_numeric_risk_thresholds_duplicated_into_the_config(cfg):
     """Sizing/risk numbers live in the .gates file. Duplicating them here would create a THIRD
     sizing mechanism beside the research basis and the executor path — the defect the
