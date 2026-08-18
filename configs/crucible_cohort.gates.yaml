@@ -14,11 +14,34 @@
 # threshold is loosened; the reused floors apply to the √N-larger cohort quantity). NEVER hardcode
 # these numbers in code (CLAUDE.md); the loader reads them via load_cohort_config().
 #
-# Disabled by default: with enabled=false the cohort path never runs and the orchestrator behaves
-# byte-identically to the pre-cohort loop. Everything still caps at PROMISING — a cleared cohort
-# requires a human-initiated Tier-2 deep lifecycle audit before any capital (CLAUDE.md).
+# ENABLED since 2026-08-10 (was: disabled by default). With enabled=false the cohort path never runs
+# and the orchestrator behaves byte-identically to the pre-cohort loop; that path is still honoured
+# and regression-tested, it is simply no longer the shipped value. Everything still caps at
+# PROMISING — a cleared cohort requires a human-initiated Tier-2 deep lifecycle audit before any
+# capital (CLAUDE.md).
 cohort:
-  enabled: false            # OPT-IN; false => the cohort path never runs (default)
+  # ENABLED 2026-08-10 by explicit operator authorisation, together with `analytic_floor_advisory`
+  # below. Rationale: the 2026-08-09 root-cause investigation measured the per-candidate path at
+  # ~0% power for any realistic alpha, while the selection-aware MC null reached 25% power at a
+  # per-signal IR of 0.30 and 50% at 0.50 on a realistic 15% hit rate. This is the only gate in the
+  # system with measured power against a plausible edge.
+  #
+  # WHAT TURNING THIS ON COSTS (read before reverting or re-tuning):
+  #   * `loop.py` runs the cohort path on every tick whose overlay pool can form >= min_cohort_size.
+  #   * ADR-4: a cohort EVALUATED is ONE additional LORD++ test per tick, charged deterministic-LAST
+  #     so the per-candidate charge order is untouched. It spends real FDR wealth.
+  #   * COMPUTE: with `analytic_floor_advisory: true` the cheap analytic reject no longer
+  #     short-circuits, so every such tick pays the full MC null, O(B · (admission + 2·combiner)) at
+  #     B = mc_n_replicates. At B=1000 that is minutes-to-tens-of-minutes per tick. If ticks need to
+  #     be cheap, lower `mc_n_replicates` for dev or set `analytic_floor_advisory: false` — do NOT
+  #     silently re-gate on the floor and call it a cost fix; that is the defect this pair removed.
+  #   * A cohort still caps at PROMISING. Capital (live/paper) continues to require a human-initiated
+  #     Tier-2 deep lifecycle audit (CLAUDE.md).
+  #
+  # Blast radius at the moment of the flip: 0 cohort cards and 0 cohort verdicts had ever been
+  # emitted, so no recorded verdict moves. The funnel gates_hash (519158fa1450) is in a different
+  # file and stays byte-identical (CRU-1).
+  enabled: true             # OPT-IN; false => the cohort path never runs
 
   # Admission (Doc 1 #2a — the binding return-correlation guard).
   min_cohort_size: 3        # below this many de-correlated admits, no cohort verdict is rendered
@@ -28,6 +51,100 @@ cohort:
   # Cohort combiner (Doc 1 Part 3): redundancy down-weight for the COHORT book ONLY; the live/funnel
   # combiner stays at 0.0 (this does not touch any existing verdict).
   combiner_redundancy_strength: 0.5
+
+  # Is the analytic SR*_cohort floor a GATE or a DIAGNOSTIC? (2026-08-09 root-cause investigation,
+  # docs/research/crucible_zero_alpha_root_cause_2026-08-09.md §5b Finding 5.)
+  #
+  # The floor's condition (cohort.py::evaluate_cohort_analytic) is
+  #     dsr_book >= promising_dsr (0.90)  AND  cohort_hlz_t >= cohort_hlz_t_min (3.0)
+  # i.e. the two REUSED funnel seals — the SAME two legs measured at 0/170 pass across the entire
+  # lifetime record. As a hard gate it made `cohort_eval` return LOGGED before ever calling
+  # `mc_null_pvalue`, so the BINDING selection-aware MC null was unreachable. That is the third
+  # occurrence of one architectural bug in this project: a "cheap pre-filter" strictly harder than
+  # the gate it is supposed to protect (cf. the pre-v6.0 train re-application of the 6-way gate, and
+  # the v12.0 train cull of 8/8 pre-registrations).
+  #
+  # true  (DEFAULT) — the floor is COMPUTED and RECORDED on the evidence card
+  #       (`passes_analytic_floor`, already documented "NOT the binding gate" in three places) but
+  #       does not stop evaluation. The MC null + the embargoed holdout decide. NOTHING is loosened:
+  #       both downstream gates are byte-identical, and the MC null's size is calibrated green
+  #       (tests/signals/test_generation_cohort_mc.py, incl. the BLOCKER-1 regression).
+  # false — legacy behaviour: a floor miss short-circuits to LOGGED and skips the MC null. Retained
+  #       so the pre-2026-08-09 path stays reproducible, and as the cheap-compute option (the MC null
+  #       costs O(B · (admission + 2·combiner))).
+  #
+  # Blast radius when this changed: ZERO. Across all 13 run manifests that carry cohort keys the
+  # lifetime totals are 0 cohort cards and 0 cohort verdicts, so no recorded verdict can move. The
+  # funnel gates_hash (crucible-v2.0, 519158fa1450) is in a DIFFERENT file and is untouched (CRU-1).
+  analytic_floor_advisory: true
+
+  # Does the cohort pool admit CROSS-SECTIONAL candidates, or overlays only? (crucible-v12.1;
+  # ADR-3 option (C), deferred in the 2026-07-03 integration design as "future extension, only if
+  # measured to help". It has now been measured.)
+  #
+  # Through v12.0 `loop.py` filtered the pool to `candidate_type == "overlay"`, which paired each
+  # half of the machine with the wrong gate:
+  #   * CROSS-SECTIONAL candidates carry the panel's breadth — n_eff 42.1 on us_equity — so they have
+  #     the large per-member IR (the δ in `IR_cohort = δ·√K·hit_rate`). They were adjudicated ONLY by
+  #     the per-candidate corrected contract, measured at ~0% power for any plausible alpha
+  #     (IR ~1.18 needed for a coin flip on the deepest substrate; max corrected_t ever observed on
+  #     any substrate = +1.644 against t_min 2.33).
+  #   * OVERLAYS are one scalar per day and are structurally correlated with the base book they tilt,
+  #     so their δ is small by construction. They were the ONLY thing the selection-aware MC null —
+  #     the one gate in the system with measured power — ever saw. Both cohort verdicts ever rendered
+  #     (2026-08-10, p=0.5385 / p=0.5934) sat on the null median.
+  # Both readings are in docs/research/crucible_zero_alpha_root_cause_2026-08-09.md.
+  #
+  # true (SHIPPED) — the pool is the tick's pre-registered overlay specs UNION its cross-sectional
+  #      specs, each scored through its own funnel path (`_candidate_returns` / `_overlay_returns`),
+  #      then adjudicated by the unchanged analytic → MC → embargoed-holdout sequence.
+  # false — the pre-v12.1 overlay-only pool, retained so those runs stay reproducible.
+  #
+  # WHAT THIS COSTS / DOES NOT COST:
+  #   * NO statistic changes. Admission, the MC null and the holdout guard consume (T,) return
+  #     streams and never inspect candidate_type; the MC null's calibration is a property of the
+  #     bootstrap, not of the pool's provenance. No threshold moved.
+  #   * NO extra LORD++ charge. ADR-4 charges ONE test per cohort EVALUATED, not per member.
+  #   * COMPUTE: the pool grows by the tick's cross-sectional prereg count, so the MC null's
+  #     O(B · (admission + 2·combiner)) grows with K.
+  #   * DEFLATION: `n_candidates_seen` (the cohort's N) grows with the pool, which makes the analytic
+  #     SR*_cohort benchmark STRICTER, not looser.
+  #   * Offspring are still NOT admitted — the pool stays the deterministic pre-registered set, or
+  #     `pool_content_hash` (hence the MC seed, hence reproduce) would stop being well-defined.
+  #
+  # BLAST RADIUS. Two cohort cards exist on disk (both LOGGED, both overlay-only). Their recorded
+  # verdicts do not move. `pool_content_hash` folds candidate_type ONLY for non-overlay members, so
+  # an all-overlay pool still hashes and seeds exactly as before; what a re-run of those two ticks
+  # WOULD see is this file's changed `cohort_gates_hash`, pinned in their manifests — i.e. the change
+  # is loud by construction, which is the point of the two-file gates split (ADR-1). The funnel
+  # gates_hash (crucible-v2.0, 519158fa1450) is in a different file and is byte-identical (CRU-1).
+  include_cross_sectional: true
+
+  # Does the cohort pool apply the FUNNEL's own hard-infeasibility rule? (crucible-v13.0.)
+  #
+  # MEASURED DEFECT, 2026-08-11, on the first real mixed-pool cohort (us_equity, card
+  # cohort_0a96a0da38b3): `evolve.score` hard-culls a candidate whose annualized turnover exceeds
+  # `turnover_soft_cap * 2` (24/yr on this substrate), and it culled 91 of the 92 cross-sectional
+  # pre-registrations for exactly that reason — so only 1 of 92 reached the per-candidate holdout.
+  # `assemble_candidate_pool` applied NO such rule, so all 92 entered the cohort pool anyway and
+  # 9 of the 12 ADMITTED members were drawn from it. The cohort was adjudicating a book the funnel
+  # refuses to trade.
+  #
+  # Netting turnover cost into each stream is NOT a substitute. It makes an infeasible candidate
+  # unattractive, not excluded — a cohort could still be certified PROMISING out of members nobody
+  # can implement. That is the v11.0 capturability defect in a new place: a feasibility fact that is
+  # computed and then consulted by nothing.
+  #
+  # true (SHIPPED) — the pool applies the identical `turnover_ann > turnover_soft_cap * 2` cull, and
+  #      culled members are recorded in `n_culled` (provenance) WITHOUT inflating
+  #      `n_candidates_seen` (the deflation N counts scored, feasible streams only).
+  # false — pre-v13.0 behaviour, retained so the three existing cohort cards stay reproducible.
+  #
+  # NOT monotone in either direction: a smaller pool means a smaller deflation N (looser) but also
+  # less selection for the MC null to price (can go either way). It is a CORRECTNESS change, not a
+  # tightening — do not reason about it as "stricter". Blast radius: the three cohort cards on disk
+  # (all LOGGED) do not move; a re-run under this file's changed hash is visible in the manifest.
+  enforce_funnel_feasibility: true
 
   # Selection-aware Monte-Carlo null (Doc 2 §3 — the BINDING statistical gate).
   alpha_cohort: 0.05        # new pre-registered gate: cohort passes iff MC p <= alpha_cohort

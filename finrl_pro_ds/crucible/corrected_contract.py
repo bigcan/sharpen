@@ -67,6 +67,18 @@ class CorrectedConfig:
     # the search's multiplicity unpaid. Defaulted rather than required so an older gates file still
     # loads, and it defaults to the SAFE value.
     offspring_policy: str = "prereg_only"
+    # EXPOSURE GUARD (S553-cont-151). Cap on |beta| of the candidate's return stream to the panel's
+    # equal-weight market return. None (default) => the leg is INERT and every pre-existing verdict is
+    # byte-identical, which is what CRU-1 requires of a capability bump.
+    #
+    # Why it exists, demonstrated not theorised: the top candidate the miner surfaced on cross_asset
+    # (`rank(sum(volume,60))`) decomposes to market beta +0.548, R^2 57.2% from exposures, and a
+    # RESIDUAL timing Sharpe of -0.0000 — its entire apparent edge is the risk premium on a long
+    # position. It PASSED uplift, fragility AND collinearity; only the significance leg refused it, and
+    # on an underpowered substrate that is luck rather than design. `max_base_corr` cannot catch this:
+    # it measures correlation to the BASE SLEEVES, not to the market, so a beta tilt walks straight
+    # through. base_sleeves.py GP3-03 noted the hazard in a comment; this makes it a gate.
+    max_market_beta: float | None = None
 
     @classmethod
     def from_yaml(cls, path: str | Path) -> "CorrectedConfig":
@@ -89,6 +101,8 @@ class CorrectedConfig:
             fdr_w0=(None if f.get("w0") is None else float(f["w0"])),
             fdr_binding=bool(f["binding"]),
             offspring_policy=policy,
+            max_market_beta=(None if g.get("max_market_beta") is None
+                             else float(g["max_market_beta"])),
         )
 
 
@@ -110,6 +124,10 @@ class CorrectedResult:
     fragility_pass: bool
     collinearity_pass: bool
     passes_corrected: bool
+    # EXPOSURE guard (cont-151). ``market_beta`` is NaN when no market series was supplied;
+    # ``exposure_pass`` is then True (inert leg), so every pre-cont-151 call is byte-identical.
+    market_beta: float = float("nan")
+    exposure_pass: bool = True
 
 
 # ---------------------------------------------------------------- LORD++ helper (read-only use)
@@ -154,6 +172,27 @@ def _sharpe_diff_z(b_base: np.ndarray, b_aug: np.ndarray, *, n_eff_mode: str
 
 
 # ---------------------------------------------------------------- the scorer
+def _market_beta(cand: np.ndarray, market: "np.ndarray | None") -> float:
+    """OLS beta of the candidate stream on the market series (NaN when no market is supplied).
+
+    A single univariate slope, not a full factor model: the question this leg answers is narrow —
+    "is this candidate mostly a directional position in the panel?" — and the full
+    exposure/beta profile still belongs in the pre-capital Tier-2 (base_sleeves.py GP3-03).
+    """
+    if market is None:
+        return float("nan")
+    m = np.isfinite(cand) & np.isfinite(market)
+    if int(m.sum()) < 32:
+        return float("nan")
+    x = np.asarray(market, dtype=np.float64)[m]
+    y = np.asarray(cand, dtype=np.float64)[m]
+    xc = x - x.mean()
+    var = float(xc @ xc)
+    if var <= 0.0:
+        return float("nan")
+    return float((xc @ (y - y.mean())) / var)
+
+
 def corrected_contract_fitness(
     cand_returns: np.ndarray,
     base_returns: Mapping[str, np.ndarray],
@@ -162,6 +201,7 @@ def corrected_contract_fitness(
     cc: CorrectedConfig,
     *,
     lord_level: float,
+    market_returns: "np.ndarray | None" = None,
 ) -> CorrectedResult:
     """Score a single candidate by the corrected contract. ``cand_returns`` must be net of cost.
     ``cfg`` supplies MECHANICS only (combiner + CPCV + periods_per_year); ``cc`` supplies every decision
@@ -211,11 +251,20 @@ def corrected_contract_fitness(
     fragility_pass = bool(np.isfinite(delta_median) and delta_median >= cc.delta_median_min
                           and np.isfinite(frac_pos) and frac_pos >= cc.frac_positive_min)
     collinearity_pass = bool(np.isfinite(max_base_corr) and max_base_corr <= cc.max_base_corr)
-    passes = bool(t_pass and lord_pass and uplift_pass and fragility_pass and collinearity_pass)
+
+    # EXPOSURE guard (cont-151) — |beta| of the CANDIDATE stream on the market series. Inert unless
+    # BOTH a threshold is configured and a market series is supplied, so the default path is
+    # byte-identical. See CorrectedConfig.max_market_beta for the demonstration that motivated it.
+    market_beta = _market_beta(cand, market_returns)
+    exposure_pass = bool(cc.max_market_beta is None or not np.isfinite(market_beta)
+                         or abs(market_beta) <= cc.max_market_beta)
+    passes = bool(t_pass and lord_pass and uplift_pass and fragility_pass and collinearity_pass
+                  and exposure_pass)
 
     return CorrectedResult(
         corrected_t=corrected_t, p_value=p_value, delta_sr=delta_sr, delta_median=delta_median,
         frac_positive=frac_pos, max_base_corr_obs=float(max_base_corr), rho=rho,
         n_bars=int(n_bars), n_eff=n_eff, n_paths=int(parr.size),
         t_pass=t_pass, lord_pass=lord_pass, uplift_pass=uplift_pass, fragility_pass=fragility_pass,
-        collinearity_pass=collinearity_pass, passes_corrected=passes)
+        collinearity_pass=collinearity_pass, passes_corrected=passes,
+        market_beta=market_beta, exposure_pass=exposure_pass)

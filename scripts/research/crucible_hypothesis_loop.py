@@ -144,7 +144,20 @@ def main() -> int:
             panel, hold_horizon=ek["hold_horizon"], cost_bps=ek["cost_bps"],
             start=args.start, end=args.end, return_components=True)   # F14 overlay-cost fix
         panel_key = "taiwan"
-    else:
+    elif meta["panel"] == "taiwan_smallcap":
+        from finrl_pro_ds.crucible.data.taiwan_smallcap_panel import (
+            ALL_CHANNELS,
+            build_taiwan_smallcap_panel,
+        )
+        from finrl_pro_ds.signals.generation.base_sleeves import taiwan_base_sleeves
+        panel = build_taiwan_smallcap_panel(channels=ALL_CHANNELS)
+        # start=None => the sleeve takes the PANEL's own first bar, so the comparator covers every
+        # bar the candidate marks (this panel starts 2005, args.start defaults to 2008).
+        base, base_components = taiwan_base_sleeves(
+            panel, hold_horizon=ek["hold_horizon"], cost_bps=ek["cost_bps"],
+            start=None, end=args.end, return_components=True)         # F14 overlay-cost fix
+        panel_key = "taiwan_smallcap"
+    elif meta["panel"] == "cross_asset":
         from finrl_pro_ds.data.cross_asset_panel_loader import load_cross_asset_panel
         from finrl_pro_ds.signals.generation.base_sleeves import production_base_sleeves
         panel = load_cross_asset_panel(args.start, args.end,
@@ -152,7 +165,20 @@ def main() -> int:
         base, base_components = production_base_sleeves(
             panel, hold_horizon=ek["hold_horizon"], cost_bps=ek["cost_bps"],
             start=args.start, end=args.end, return_components=True)   # F14 overlay-cost fix
-        panel_key = meta["panel"]
+        panel_key = "cross_asset"
+    else:
+        # This branch USED to be the cross_asset fallback, with `panel_key = meta["panel"]`. That is
+        # the GP8-02 failure mode the wired-substrate allow-list exists to prevent, reached from the
+        # other side: a config naming any substrate this manual loop does not build (`us_equity`,
+        # `intraday`, `intraday_fx`, and `taiwan_smallcap` before the branch above) passed validation,
+        # then mined the US ETF PANEL while writing its output under the OTHER substrate's name — a
+        # mislabelled ledger, not an error. Only the orchestrator builds those. Fail fast instead.
+        raise SystemExit(
+            f"generation.panel={meta['panel']!r} is a wired substrate but this manual single-cycle "
+            f"loop only builds {{cross_asset, taiwan, taiwan_smallcap}}. Run it through the "
+            f"orchestrator instead:\n"
+            f"    python scripts/research/crucible_orchestrator.py --mode real --nights 1 "
+            f"--config {args.config}")
     ts = _panel_ts(panel)
 
     out_dir = Path(args.out) / panel_key

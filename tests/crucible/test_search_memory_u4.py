@@ -334,6 +334,112 @@ def test_loop_classifies_a_real_holdout_rejection(tmp_path: Path, mde: float, ex
         assert bool(led.killed_families()) is expect_killed, led.killed_families()
 
 
+def test_every_holdout_adjudicated_rejection_carries_a_class(tmp_path: Path) -> None:
+    """G1 REGRESSION (``docs/research/crucible_mining_log.md``): ``rejection_class`` was NULL in every
+    row of every store that has the column — including us_equity ticks whose ``n_holdout_tested`` was
+    17/9/16/98/97, so candidates demonstrably DID reach the holdout gate.
+
+    The cause was a set mismatch, not a wiring gap. The class was computed while writing the SURFACED
+    rows (``hall_of_fame ∪ promising``), but under ``offspring_policy: prereg_only`` the holdout gate
+    adjudicates PRE-REGISTERED specs while ``hall_of_fame`` is ``ranked[:10]`` over every genome the
+    search scored — which offspring win on train fitness by construction. Measured on the us_equity
+    ledgers: 20/20 surfaced rows were offspring (``spec_json`` NULL) and 145/145 pre-registrations were
+    written by the *second* ledger loop, which recorded no class at all. The two sets never intersected,
+    so 98 adjudicated rejections produced 0 classifications.
+
+    The invariant, stated independently of which loop writes the row: **a candidate the holdout gate
+    rejected, on a substrate carrying a finite power stamp, must not land in the ledger with
+    ``rejection_class IS NULL``.** That is exactly the bit ``is_readmissible`` / ``killed_families``
+    need to tell "tested and killed" from "the substrate could not say"."""
+    import scripts.research.crucible_calibration as cal
+    from finrl_pro_ds.crucible.agentic.hypothesis import HypothesisAuthor, candidate_hash
+    from finrl_pro_ds.crucible.agentic.loop import run_hypothesis_loop
+    from finrl_pro_ds.crucible.agentic.proposer import LibrarySeedProposer
+    from finrl_pro_ds.crucible.corrected_contract import CorrectedConfig
+    from finrl_pro_ds.signals.generation.config import load_generation_config
+
+    cfg, ek = load_generation_config("configs/signal_eval.gates.yaml")
+    # Enough search pressure that offspring — which are NOT holdout-eligible under prereg_only —
+    # crowd the top of `ranked`, i.e. the production shape in which the two sets came apart.
+    ek = {**ek, "pop_size": 24, "n_generations": 3}
+    cc = CorrectedConfig.from_yaml("configs/crucible_corrected_contract.gates.yaml")
+    assert cc.offspring_policy == "prereg_only", "fixture must reproduce the production policy"
+    sm = SearchMemoryConfig.from_yaml("configs/crucible_search_memory.gates.yaml")
+    panel = cal._noise_panel(1000, 12, seed=5, n_feature_slots=4)
+    base = cal._proxy_base_sleeves(panel, hold=ek["hold_horizon"])
+    ts = cal._panel_ts(panel)
+
+    with TrialLedger(tmp_path / "l.db") as led:
+        author = HypothesisAuthor(LibrarySeedProposer(), led, max_proposals=10)
+        res = run_hypothesis_loop(
+            panel=panel, base_returns=base, timestamps=ts, cfg=cfg, evolve_kwargs=ek, author=author,
+            run_id="t1", crucible_version=_V, gates_hash="x", proposal_ts="2026-07-30T00:00:00",
+            contract="corrected", corrected_cfg=cc, search_memory_cfg=sm, substrate_mde=1.4)
+
+        rejected = {h["formula"] for r in res.reports.values() for h in r.holdout_validation
+                    if h.get("holdout_passes") is False}
+        assert rejected, "fixture drifted: nothing reached the holdout gate and failed"
+
+        rows = {r["candidate_hash"]: r for r in led._conn.execute(   # noqa: SLF001 — ledger probe
+            "SELECT candidate_hash, verdict, rejection_class, implied_mde_at_test, spec_json "
+            "FROM trial_ledger")}
+        unclassified = []
+        for f in rejected:
+            row = rows.get(candidate_hash(f))
+            assert row is not None, f"holdout-adjudicated candidate absent from the ledger: {f}"
+            if row["rejection_class"] is None:
+                unclassified.append((row["verdict"], f))
+            else:
+                assert row["implied_mde_at_test"] == pytest.approx(1.4), \
+                    "a classified rejection must record the MDE its test ran at (is_readmissible " \
+                    "compares against it)"
+        assert not unclassified, (
+            f"{len(unclassified)} of {len(rejected)} holdout-adjudicated rejections recorded "
+            f"rejection_class IS NULL: {unclassified[:5]}")
+
+        # ... and the regression is only exercised if at least one of them is a NON-surfaced
+        # pre-registration — the row class that produced the 145/145 production hole. If the fixture
+        # ever stops generating one, this test would go green without testing anything.
+        assert any(rows[candidate_hash(f)]["verdict"] == "SCORED_NOT_SELECTED" for f in rejected), \
+            "fixture drifted: every adjudicated rejection surfaced in the hall of fame, so the " \
+            "second ledger loop — where production wrote 145 of 145 pre-registrations — is untested"
+
+
+def test_a_candidate_that_never_reached_the_holdout_stays_unclassified(tmp_path: Path) -> None:
+    """The other half of the G1 invariant, and the one that keeps the fix honest: a pre-registered spec
+    culled BEFORE the holdout (no fitness result / hard-infeasible) was never tested out-of-sample, so
+    stamping it with a rejection class would manufacture a negative result no test produced — the
+    file-drawer error the funnel exists to avoid, run in reverse. It must stay NULL."""
+    import scripts.research.crucible_calibration as cal
+    from finrl_pro_ds.crucible.agentic.hypothesis import HypothesisAuthor, candidate_hash
+    from finrl_pro_ds.crucible.agentic.loop import run_hypothesis_loop
+    from finrl_pro_ds.crucible.agentic.proposer import LibrarySeedProposer
+    from finrl_pro_ds.crucible.corrected_contract import CorrectedConfig
+    from finrl_pro_ds.signals.generation.config import load_generation_config
+
+    cfg, ek = load_generation_config("configs/signal_eval.gates.yaml")
+    ek = {**ek, "pop_size": 24, "n_generations": 3}
+    cc = CorrectedConfig.from_yaml("configs/crucible_corrected_contract.gates.yaml")
+    sm = SearchMemoryConfig.from_yaml("configs/crucible_search_memory.gates.yaml")
+    panel = cal._noise_panel(1000, 12, seed=5, n_feature_slots=4)
+    base = cal._proxy_base_sleeves(panel, hold=ek["hold_horizon"])
+    ts = cal._panel_ts(panel)
+
+    with TrialLedger(tmp_path / "l.db") as led:
+        author = HypothesisAuthor(LibrarySeedProposer(), led, max_proposals=10)
+        res = run_hypothesis_loop(
+            panel=panel, base_returns=base, timestamps=ts, cfg=cfg, evolve_kwargs=ek, author=author,
+            run_id="t1", crucible_version=_V, gates_hash="x", proposal_ts="2026-07-30T00:00:00",
+            contract="corrected", corrected_cfg=cc, search_memory_cfg=sm, substrate_mde=1.4)
+
+        adjudicated = {candidate_hash(h["formula"]) for r in res.reports.values()
+                       for h in r.holdout_validation if "holdout_passes" in h}
+        stray = [r["candidate_hash"] for r in led._conn.execute(      # noqa: SLF001 — ledger probe
+            "SELECT candidate_hash FROM trial_ledger WHERE rejection_class IS NOT NULL")
+            if r["candidate_hash"] not in adjudicated]
+        assert not stray, f"classified a candidate the holdout gate never adjudicated: {stray[:5]}"
+
+
 def test_todays_substrates_produce_no_kills(tmp_path: Path) -> None:
     """DOCUMENTS THE MEASURED STATE, and is the tripwire if someone 'fixes' it by loosening the gate:
     at Crucible's real power (implied MDE ~1.4 at the deepest measured anchor) against the corrected

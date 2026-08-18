@@ -59,12 +59,19 @@ def _divisor(instr: str) -> float:
     """Scaled-int divisor. Getting this wrong is SILENT — it yields prices off by 10^3 with no
     error (S&P decoded as 2,114,349 instead of 2114.3 before this was corrected). Always sanity
     -check a decoded price against a known level for any NEW instrument family."""
+    # ORDER IS LOAD-BEARING. Metals must be tested BEFORE the generic 6-letter FX rule: "XAUUSD"
+    # is six alpha characters, so it used to fall into the 1e5 FX branch and the metals branch
+    # below was unreachable dead code. Gold then decoded to 6.89-10.27 for 2008 (true range
+    # ~$688-1027) — a silent 100x error that raised nothing, exactly the failure mode this
+    # docstring warns about. The dead branch's own value (1e2) was ALSO wrong; measured against
+    # known levels the correct metals divisor is 1e3: raw 688564 -> $688.56 (gold's Oct-2008 low)
+    # and raw 1026945 -> $1026.9 (its Mar-2008 high). Verified again at Jun-2015 -> ~$1180.
+    if instr.startswith(("XAU", "XAG")):
+        return 1e3                                  # metals (verified 2008 lows/highs + Jun-2015)
     if instr.endswith("JPY"):
         return 1e3
     if len(instr) == 6 and instr.isalpha():        # 5-decimal FX pair
         return 1e5
-    if instr.startswith(("XAU", "XAG")):
-        return 1e2                                  # metals (verified: XAUUSD -> ~1188 in Jun-2015)
     return 1e3                                      # index / energy CFD (verified S&P, DAX)
 
 
@@ -85,26 +92,26 @@ def fetch_hour(instr: str, when: dt.datetime, session: requests.Session,
     for attempt in range(retries):
         try:
             r = session.get(url, timeout=timeout, headers=UA)
-            # RETRY ON HTTP ERROR STATUS, NOT JUST ON RequestException. The feed throttles
-            # hard with 503 (a 2026-08-15 probe took 503 on 5/5 opening requests, then served
-            # every one of them on a backed-off retry). Breaking here sent 503 down to the
-            # `status_code != 200` branch below, which reads as "weekend / holiday" — the exact
-            # silent-gap failure this module's docstring warns about, one level up: connection
-            # errors were hardened, HTTP statuses were not. A throttled pull would have
-            # recorded absent history with no error surfaced.
-            if r.status_code in (429, 500, 502, 503, 504):
-                if attempt == retries - 1:
-                    return None                      # exhausted — caller COUNTS this
-                time.sleep(0.8 * (2 ** attempt))
-                continue
-            break
         except requests.RequestException:
-            if attempt == retries - 1:
-                return None                          # exhausted — caller COUNTS this, never silently drops
-            time.sleep(0.4 * (2 ** attempt))
-    if r is None:
-        return None
-    if r.status_code != 200 or not r.content:
+            r = None
+        # STATUS CODES ARE NOT INTERCHANGEABLE. 200 is usable (possibly a legitimately empty
+        # closed hour); 404 means this hour genuinely has no file. ANY OTHER status — 429 throttle,
+        # 5xx — is TRANSIENT and must be retried, never booked as "market closed".
+        #
+        # The previous line `if r.status_code != 200 or not r.content: return DataFrame()` made a
+        # throttled response indistinguishable from a weekend, silently and without incrementing
+        # the failure counter. It surfaced on 2026-08-01 when five fetch blocks were run in
+        # parallel (40 concurrent requests): the FIRST year of every block came back ~43% short
+        # (3,286-3,614 bars against 5,890-6,288 for every other year) with ZERO failures logged.
+        # One thin year per block, always the block's first — a pattern, not noise. Caught by the
+        # per-year uniformity check, which is the same check that caught the 2004-2026 FX pull
+        # losing half its history to an unimplemented retry.
+        if r is not None and r.status_code in (200, 404):
+            break
+        if attempt == retries - 1:
+            return None                          # exhausted — caller COUNTS this, never silently drops
+        time.sleep(0.4 * (2 ** attempt) + 0.1 * attempt)
+    if r is None or r.status_code == 404 or not r.content:
         return pd.DataFrame()                        # weekend / holiday — legitimately empty
     try:
         raw = lzma.LZMADecompressor().decompress(r.content)
@@ -161,6 +168,23 @@ def main() -> int:
     # weekends are empty by construction — skip them rather than paying a request each
     hours = hours[(hours.dayofweek < 5) | ((hours.dayofweek == 6) & (hours.hour >= 21))]
 
+    # RESUME PROVENANCE GUARD. The resume path merges new bars into an existing file, so if the
+    # decoding divisor changes between runs the two halves land on DIFFERENT PRICE SCALES and the
+    # merge is silent -- no exception, monotone timestamps, plausible bars. That happened on
+    # 2026-08-01: a XAUUSD pull begun under the buggy 1e5 divisor was resumed after the fix to
+    # 1e3, producing a file whose early years were 100x low. Record the divisor beside the data
+    # and refuse to resume across a change.
+    sidecar = dest.with_suffix(".manifest.json")
+    divisor_now = _divisor(args.instrument)
+    if dest.exists() and sidecar.exists():
+        import json as _json
+        prev_div = _json.loads(sidecar.read_text(encoding="utf-8")).get("divisor")
+        if prev_div is not None and float(prev_div) != float(divisor_now):
+            log.error("REFUSING TO RESUME: %s was written with divisor %s, this run uses %s. "
+                      "Delete %s and re-fetch -- merging would mix price scales silently.",
+                      dest.name, prev_div, divisor_now, dest.name)
+            return 2
+
     have: set[pd.Timestamp] = set()
     prior = None
     if dest.exists():
@@ -203,8 +227,15 @@ def main() -> int:
         bars = (pd.concat([prior, bars], ignore_index=True)
                 .drop_duplicates(subset=["timestamp"]).sort_values("timestamp"))
     bars.to_parquet(dest, index=False)
-    log.info("wrote %s: %d bars (%s..%s)", dest, len(bars),
-             bars["timestamp"].min(), bars["timestamp"].max())
+    import json as _json
+    sidecar.write_text(_json.dumps({"instrument": args.instrument, "bar": args.bar,
+                                    "divisor": divisor_now, "n_bars": int(len(bars)),
+                                    "px_min": float(bars["close"].min()),
+                                    "px_max": float(bars["close"].max())}, indent=1),
+                       encoding="utf-8")
+    log.info("wrote %s: %d bars (%s..%s) px %.4f-%.4f divisor %g", dest, len(bars),
+             bars["timestamp"].min(), bars["timestamp"].max(),
+             bars["close"].min(), bars["close"].max(), divisor_now)
     return 0
 
 

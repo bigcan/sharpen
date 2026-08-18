@@ -66,6 +66,22 @@ class CohortConfig:
     cohort_hlz_t_min: float           # book-level marginal-HLZ t floor (REUSE 3.0)
     min_book_uplift: float            # ΔSR of cohort book vs base book (REUSE 0.10)
     combiner_redundancy_strength: float = 0.0   # λ_r for the COHORT book only (Doc 1 Part 3)
+    # When True the analytic SR*_cohort floor is RECORDED but does not gate — the MC null decides.
+    # See configs/crucible_cohort.gates.yaml::analytic_floor_advisory for the full rationale (the
+    # floor reuses promising_dsr/cohort_hlz_t_min, which pass 0/170 lifetime, so as a hard gate it
+    # made the binding MC null unreachable — 2026-08-09 root-cause investigation, Finding 5).
+    analytic_floor_advisory: bool = True
+    # When True the cohort pool admits CROSS-SECTIONAL pre-registrations as well as overlays
+    # (crucible-v12.1). Read by the caller that ASSEMBLES the pool (``crucible.agentic.loop``), not by
+    # any statistic in this module — admission, the MC null and the holdout guard consume ``(T,)``
+    # return streams and are indifferent to how a stream was produced. See
+    # ``cohort_eval.assemble_candidate_pool`` for why the pairing was wrong before.
+    include_cross_sectional: bool = False
+    # When True the cohort pool applies the FUNNEL's own hard-infeasibility rule
+    # (turnover_ann > turnover_soft_cap * 2, the `evolve.score` cull) so the cohort cannot be
+    # certified out of members the funnel refuses to trade (crucible-v13.0). Default False keeps
+    # every pre-v13.0 cohort verdict reproducible; the shipped gates file turns it on.
+    enforce_funnel_feasibility: bool = False
 
 
 @dataclass(frozen=True, slots=True)

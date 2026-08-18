@@ -119,6 +119,7 @@ def bridge_altdata_feature_slots(
     connectors: list[DataConnector] | None = None,
     aliases: dict[tuple[str, str], str] | None = None,
     max_slots_per_source: int | None = None,
+    max_slot_corr: float | None = None,
 ) -> dict[str, np.ndarray]:
     """Survey ``connectors``, register accepted series into ``catalog``, and return the PIT-safe
     ``{terminal: (T,) array}`` feature slots for the ACCEPTED series only, joined onto ``bar_dates``.
@@ -132,6 +133,11 @@ def bridge_altdata_feature_slots(
     cannot dominate the pool and re-create the concentration problem breadth is meant to fix. Slots
     are kept in each connector's ``discover()`` order until the cap; the rest are logged and skipped.
     ``None`` (default) = no cap (back-compat).
+
+    ``max_slot_corr`` (2026-08-10) drops a slot whose |corr| ON FIRST DIFFERENCES to an already-kept
+    slot exceeds the threshold — see :func:`_drop_redundant_slots` for the measurement that motivates
+    it, and why differences rather than levels. ``None`` (default) = OFF, so every existing caller is
+    byte-identical and no recorded verdict can move.
     """
     connectors = default_connectors() if connectors is None else connectors
     aliases = ALTDATA_ALIASES if aliases is None else aliases
@@ -172,5 +178,59 @@ def bridge_altdata_feature_slots(
             slots.update(built)
             n_from_source += len(built)
 
+    if max_slot_corr is not None:
+        slots = _drop_redundant_slots(slots, max_slot_corr)
+
     log.info("altdata bridge: %d feature slots bridged -> %s", len(slots), sorted(slots))
     return slots
+
+
+def _drop_redundant_slots(slots: dict[str, np.ndarray], max_corr: float) -> dict[str, np.ndarray]:
+    """Greedily drop slots that duplicate an already-kept one, on FIRST DIFFERENCES.
+
+    Why this exists (2026-08-10). The COT connector publishes three fields per market —
+    ``comm_net`` / ``noncomm_net`` / ``comm_pct_oi`` — and COT category positions sum to open
+    interest, so within one market they are near-mechanical transforms of each other. MEASURED on the
+    us_equity clock: within-market pairs run |corr| **0.95-0.98 on first differences** (wti
+    comm~noncomm 0.948, gold 0.979, corn 0.977) while the median ACROSS markets/sources is **0.020**.
+    That is a ~50x separation, so the threshold is not a delicate choice.
+
+    The cost of leaving them in is not merely a redundant cohort member — the admission step already
+    de-duplicates. It is that redundant slots consume the proposer's ``max_proposals`` budget (each
+    slot spawns one spec per overlay template) and therefore TRUNCATE AWAY genuinely independent
+    series further down the discover order. Before this filter the 24 accepted slots spent 18 of
+    their number on 6 markets' worth of information.
+
+    FIRST DIFFERENCES, not levels, deliberately: macro levels co-trend (level median |corr| 0.156 vs
+    0.020 differenced), so a level-based rule would reject distinct-but-trending series — the
+    over-rejection direction. Deterministic: iteration follows ``slots`` insertion order (connector
+    order x ``discover()`` order), so a replay keeps the same survivors.
+    """
+    kept: dict[str, np.ndarray] = {}
+    diffs: dict[str, np.ndarray] = {}
+    dropped: list[tuple[str, str, float]] = []
+    for name, raw in slots.items():
+        v = np.asarray(raw, dtype=np.float64)
+        d = np.diff(v, prepend=np.nan)
+        redundant_with, worst = None, 0.0
+        for kname, kd in diffs.items():
+            m = np.isfinite(d) & np.isfinite(kd)
+            if int(m.sum()) < 50:
+                continue
+            a, b = d[m], kd[m]
+            if a.std() <= 0.0 or b.std() <= 0.0:
+                continue
+            c = abs(float(np.corrcoef(a, b)[0, 1]))
+            if np.isfinite(c) and c > max_corr and c > worst:
+                redundant_with, worst = kname, c
+        if redundant_with is None:
+            kept[name] = raw
+            diffs[name] = d
+        else:
+            dropped.append((name, redundant_with, worst))
+    for name, other, c in dropped:
+        log.info("altdata bridge: dropped %s — |corr|=%.3f to %s (> %.2f)", name, c, other, max_corr)
+    if dropped:
+        log.info("altdata bridge: redundancy filter kept %d of %d slots (max_slot_corr=%.2f)",
+                 len(kept), len(slots), max_corr)
+    return kept

@@ -1,0 +1,163 @@
+# ============================================================================
+# BALLAST v1 - long-only S&P 500 core: decision gates (ballast-v1)
+# ============================================================================
+# Design: docs/research/ballast_v1_design.md (§7). All numeric thresholds live
+# HERE, never in code or scripts. Frozen and hashed BEFORE the single-shot OOS
+# run (2015-2025); a change after that point invalidates the OOS verdict.
+#
+# STANDING CONSTRAINT - free-data build. The panel is survivorship-INCOMPLETE
+# (35.6% of ever-members unpriceable; coverage 57.2% over 1996-2014 vs 87.9%
+# over 2015-2025). Every verdict is therefore capped at PROMISING. No gate
+# combination in this file can produce a GO. Promotion to paper or capital
+# requires a re-validation on delisting-complete vendor data.
+verdict_cap: "PROMISING"
+
+gates:
+  # --------------------------------------------------------------------------
+  # G1 - survivorship. Runs FIRST. Not a certification on this data; a
+  # measurement of how much of any edge the missing cohort accounts for.
+  # --------------------------------------------------------------------------
+  g1_delisting_injection:
+    description: "Inject the measured-unpriceable cohort at realistic terminal losses"
+    cohort_source: "results/ballast_v1/p0_unpriceable_tickers.json"
+    terminal_loss_levels: [-0.50, -0.80, -1.00]
+    injection_fractions: [0.25, 0.50, 1.00]
+    # The edge must not be created by the omission: net Sharpe under FULL injection
+    # at the -0.80 level must stay above this floor, or the result is an artifact.
+    min_net_sharpe_under_full_injection: 0.30
+    on_fail: "NO-GO"
+
+  g1b_coverage_matched_inflation:
+    description: >
+      Coverage ladder inside the TRAINING window; regress core Sharpe on universe
+      coverage and extrapolate the inflation to full coverage.
+    target_coverage: 0.572          # measured 1996-2014 mean (p0_panel_report.json)
+    max_sharpe_inflation: 0.25      # AS PRE-REGISTERED - see mis-specification note below
+    on_fail: "DOWNGRADE"
+    # ------------------------------------------------------------------------
+    # RESULT 2026-08-14: implied inflation 0.237, slope -0.764/unit coverage,
+    # r = -0.936, monotone across all 5 rungs. Returns PASS against the 0.25
+    # threshold above - AND THAT PASS IS MEANINGLESS.
+    #
+    # MIS-SPECIFICATION (recorded, NOT retroactively patched). The 0.25 constant
+    # was fixed before P2 measured the core's actual margin over SPY at +0.104.
+    # An absolute inflation cap cannot answer the question; the question is
+    # whether the inflation exceeds the MARGIN it would have to explain. It does,
+    # by 2.3x. The historical threshold stands as written so the record is not
+    # rewritten after seeing the data.
+    #
+    # CORRECTED SPECIFICATION, binding on any future re-run (e.g. on vendor data):
+    corrected_criterion:
+      rule: "implied_inflation < measured_margin_over_benchmark * margin_safety"
+      margin_safety: 0.50           # inflation must explain < half the claimed edge
+      on_fail: "NO-GO"
+      applies_from: "2026-08-14"
+      note: >
+        Evaluated 2026-08-14 on free data: inflation 0.237 vs margin 0.104
+        (needed < 0.052) => FAIL => free-data BALLAST is NO-GO.
+      # The ladder is built from index DELETIONS, which are milder than the
+      # bankruptcies making up the 428 fully-missing names, so any inflation
+      # figure it produces is a LOWER BOUND.
+
+  # --------------------------------------------------------------------------
+  # G2 - the stated objective. BOTH legs required: "outperform with lower risk"
+  # is a conjunction, and a return-only pass is not the thing that was asked for.
+  # --------------------------------------------------------------------------
+  g2_beats_benchmark:
+    benchmark: "SPY"                # total return, same calendar, net of costs
+    require_higher_sharpe: true
+    require_shallower_max_drawdown: true
+    min_sharpe_uplift: 0.10
+    on_fail: "NO-GO"
+
+  # --------------------------------------------------------------------------
+  # G3 - the doctrine gate. RL must earn its place over the frozen linear core.
+  # --------------------------------------------------------------------------
+  g3_rl_beats_linear:
+    metric: "oos_information_ratio"
+    baseline: "frozen_linear_core"
+    min_uplift_vs_baseline: 0.10
+    else: "ship_linear_core"        # a PASS for the project, not a failure
+
+  # --------------------------------------------------------------------------
+  # G4 - deflation. n_trials must be the HONEST full search count: sleeves tried
+  # x HPO trials x ensemble cells, not the size of the final batch.
+  # --------------------------------------------------------------------------
+  g4_deflation:
+    statistic: "deflated_sharpe_ratio"
+    series: "active_returns"        # port - benchmark, the objective's own series
+    min_dsr: 0.95
+    n_trials: "declared"            # HypothesisLedger count; never len(batch)
+    on_fail: "NO-GO"
+
+  # --------------------------------------------------------------------------
+  # G5 - capacity. A book that only works at $10M is not a strategy.
+  # --------------------------------------------------------------------------
+  g5_capacity:
+    book_sizes_usd: [1.0e7, 1.0e8, 1.0e9]
+    min_sharpe_retention_at_100m: 0.80   # vs the $10M book
+    max_adv_participation: 0.10
+    on_fail: "DOWNGRADE"
+
+  # --------------------------------------------------------------------------
+  # G6 - factor attribution. DISCLOSED, not gated: if the outperformance is all
+  # low-vol + quality loadings, that is an honest finding about a cheap factor
+  # portfolio and must be reported as such, benchmarked against USMV/QUAL rather
+  # than against SPY alone.
+  # --------------------------------------------------------------------------
+  g6_factor_attribution:
+    model: "FF5+UMD"
+    report_only: true
+    alt_benchmarks: ["RSP", "USMV", "QUAL"]
+
+  # --------------------------------------------------------------------------
+  # G7 - turnover realism.
+  # --------------------------------------------------------------------------
+  g7_turnover:
+    max_turnover_per_year: 2.50
+    report_realized_holding_period: true
+
+# ============================================================================
+# Pre-registered kill criteria - no re-spins, no reframing
+# ============================================================================
+kill_criteria:
+  - "G1 fails => NO-GO, project closed, logged as a DATA verdict"
+  - "OOS information ratio < 0.20 => NO-GO"
+  - "OOS max drawdown >= SPY max drawdown => NO-GO on the stated objective"
+  - "P2 linear core fails to beat SPY on validation => stop before any GPU work"
+
+# ============================================================================
+# OUTCOME 2026-08-14 - free-data build CLOSED
+# ============================================================================
+# P2 PASSED (core Sharpe 0.519 vs SPY 0.415, +0.104) but G1b showed the margin
+# is over-explained 2.3x by survivorship inflation (+0.237, lower bound), with
+# core Sharpe extrapolating to 0.282 at full coverage vs SPY 0.415 - i.e. an
+# UNDERPERFORMER once the universe is complete. NO GPU work was done. OOS
+# 2015-2025 was never touched and remains a clean single-shot budget for any
+# vendor-data re-run.
+outcome:
+  status: "NO-GO (free data)"
+  date: "2026-08-14"
+  reason: "survivorship inflation over-explains the entire measured margin"
+  oos_budget_intact: true
+  code_reusable_on_vendor_data: true
+
+# ============================================================================
+# Cost model (applied from step 0 - steady-state fees, no ramp)
+# ============================================================================
+costs:
+  commission_bps_one_way: 5.0
+  spread_model: "liquidity_bucket_half_spread"
+  impact_model: "sqrt_adv_participation"
+
+# ============================================================================
+# Windows. The OOS block is SINGLE-SHOT and must be read exactly once (P6).
+# ============================================================================
+windows:
+  train: {start: "2007-01-01", end: "2010-12-31"}
+  validation: {start: "2011-01-01", end: "2014-12-31"}
+  oos: {start: "2015-01-01", end: "2025-12-31", single_shot: true}
+  # 1996-2006 is retained in the panel for feature warmup and for the G1b
+  # coverage measurement ONLY. Coverage there is 38.8-57.9%, which is not a
+  # usable approximation of the index (design §2.2).
+  warmup_only: {start: "1996-01-02", end: "2006-12-31"}
