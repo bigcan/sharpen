@@ -209,11 +209,35 @@ class WandbFinRLEvaluator:
         long_trades = 0
         short_trades = 0
 
+        # Exposure fractions default to NaN, NOT 0.0: "no position column" and "never held a
+        # position" must not look identical downstream.
+        exposure_frac = float("nan")
+        long_frac = float("nan")
+        short_frac = float("nan")
+
         if 'actions' in df.columns:
             actions = df['actions'].fillna(0)
             total_trades = int((actions != 0).sum())
             long_trades = int((actions > 0).sum())
             short_trades = int((actions < 0).sum())
+
+        # EXPOSURE IS A FIRST-CLASS METRIC, not a diagnostic. A book that mostly sits FLAT
+        # posts a flattering Sharpe and a tiny drawdown while capturing almost nothing — it
+        # "cannot trade" rather than "manages risk", and every ratio above is blind to the
+        # difference. That mistake was nearly recorded as a real result once already
+        # (project_ballast_v1_sp500_long_only_rl: "a strategy that CANNOT TRADE looks
+        # LOW-RISK — report exposure_frac"). It matters most for exactly the comparison this
+        # is used for: a long-only agent can beat a two-sided one on risk-adjusted return
+        # purely by standing aside, and only exposure reveals it.
+        pos_col = next((c for c in ('position', 'positions', 'target_position') if c in df.columns),
+                       None)
+        if pos_col is not None:
+            pos = df[pos_col].fillna(0.0)
+            n = len(pos)
+            if n > 0:
+                exposure_frac = float((pos.abs() > 1e-9).mean())   # fraction of BARS in market
+                long_frac = float((pos > 1e-9).mean())
+                short_frac = float((pos < -1e-9).mean())
 
         # Win Rate & Profit Factor (based on daily returns, always calculated)
         winning_days = returns[returns > 0]
@@ -240,6 +264,11 @@ class WandbFinRLEvaluator:
             "Total_Action_Count": total_trades,
             "Long_Action_Count": long_trades,
             "Short_Action_Count": short_trades,
+            # Fraction of BARS holding a position (see rationale above). NaN when the
+            # backtest frame carries no position column.
+            "Exposure_Frac": exposure_frac,
+            "Long_Exposure_Frac": long_frac,
+            "Short_Exposure_Frac": short_frac,
         }
 
         return metrics

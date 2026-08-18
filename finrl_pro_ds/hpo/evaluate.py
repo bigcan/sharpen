@@ -11,6 +11,79 @@ import wandb
 logger = logging.getLogger("FinRL.HPO")
 
 
+def _extract_portfolio_value(info, env_idx=0, default=100000.0):
+    """Extract portfolio_value handling both single env and VectorEnv info structures.
+
+    Hoisted to module level (was nested in ``evaluate_for_hpo``) so the buy-and-hold
+    benchmark below reads portfolio value through the EXACT same accessor as the agent
+    path. A second copy would be free to drift, and the whole point of the benchmark is
+    that agent and baseline are measured identically.
+    """
+    if info is None:
+        return default
+
+    # Handle VectorEnv info structure (Gymnasium >= 0.26)
+    pv = info.get("portfolio_value")
+
+    if pv is not None:
+        if hasattr(pv, "__len__") and not isinstance(pv, str):
+            return float(pv[env_idx])
+        return float(pv)
+
+    if "_all_info" in info:
+        per_env_info = info["_all_info"]
+        if per_env_info and len(per_env_info) > env_idx:
+            env_info = per_env_info[env_idx]
+            if env_info and "portfolio_value" in env_info:
+                return float(env_info["portfolio_value"])
+
+    if "final_info" in info:
+        final = info["final_info"]
+        if final and len(final) > env_idx and final[env_idx]:
+            if "portfolio_value" in final[env_idx]:
+                return float(final[env_idx]["portfolio_value"])
+
+    return default
+
+
+def buy_and_hold_total_return(env, max_steps=50000, seeds=(42, 123, 7)):
+    """Median TOTAL RETURN of a always-full-long book on `env`, over the same seeds.
+
+    WHY TOTAL RETURN AND NOT PROFIT FACTOR. PF is not comparable between a switching and a
+    non-switching policy: `evaluate_for_hpo` computes it from trade-level PnL when the book
+    ever switches, and falls back to per-bar returns when it never does. A buy-and-hold book
+    never switches, so a PF-vs-PF comparison would silently pit a trade-level number against
+    a bar-level one. Total return has one definition for both and needs no reconciliation.
+
+    Deliberately steps the env directly rather than routing a stub agent through
+    `evaluate_for_hpo`: that function is coupled to a real agent (device placement, obs
+    tensorization, hidden state), so a fake agent would be fragile without making the
+    measurement any more faithful. Same env, same seeds, same portfolio accessor is what
+    makes this an apples-to-apples hurdle.
+    """
+    n_envs = getattr(env, "num_envs", None)
+    totals = []
+    for seed in seeds:
+        obs, info = env.reset(seed=seed)
+        prev_val = _extract_portfolio_value(info, env_idx=0, default=100000.0)
+        first_val = prev_val
+        rets = []
+        done = False
+        step = 0
+        while not done and step < max_steps:
+            action = (np.ones((n_envs, 1), dtype=np.float32) if n_envs
+                      else np.ones((1,), dtype=np.float32))
+            obs, reward, term, trunc, info = env.step(action)
+            done = bool(np.any(term)) or bool(np.any(trunc))
+            curr_val = _extract_portfolio_value(info, env_idx=0, default=prev_val)
+            if prev_val > 0:
+                rets.append((curr_val - prev_val) / prev_val)
+            prev_val = curr_val
+            step += 1
+        totals.append((prev_val / first_val - 1.0) if first_val > 0 else 0.0)
+    return float(np.median(totals)) if totals else 0.0
+
+
 def evaluate_for_hpo(env, agent, max_steps=5000, bar_minutes=1, return_diag=False):
     """Evaluate agent for HPO — returns (profit_factor, trade_count) or
     (profit_factor, trade_count, diag_dict) when ``return_diag=True``.
@@ -32,33 +105,7 @@ def evaluate_for_hpo(env, agent, max_steps=5000, bar_minutes=1, return_diag=Fals
     action_counts = {0: 0, 1: 0, 2: 0}  # Track action distribution
     trade_pnls = []  # FIX GMO1-06: Track PnL per completed swing
 
-    def extract_portfolio_value(info, env_idx=0, default=100000.0):
-        """Extract portfolio_value handling both single env and VectorEnv info structures."""
-        if info is None:
-            return default
-
-        # Handle VectorEnv info structure (Gymnasium >= 0.26)
-        pv = info.get("portfolio_value")
-
-        if pv is not None:
-            if hasattr(pv, "__len__") and not isinstance(pv, str):
-                return float(pv[env_idx])
-            return float(pv)
-
-        if "_all_info" in info:
-            per_env_info = info["_all_info"]
-            if per_env_info and len(per_env_info) > env_idx:
-                env_info = per_env_info[env_idx]
-                if env_info and "portfolio_value" in env_info:
-                    return float(env_info["portfolio_value"])
-
-        if "final_info" in info:
-            final = info["final_info"]
-            if final and len(final) > env_idx and final[env_idx]:
-                if "portfolio_value" in final[env_idx]:
-                    return float(final[env_idx]["portfolio_value"])
-
-        return default
+    extract_portfolio_value = _extract_portfolio_value
 
     info_logged = False
 
@@ -291,6 +338,11 @@ def evaluate_for_hpo(env, agent, max_steps=5000, bar_minutes=1, return_diag=Fals
         "_debug/eval_final_pv": prev_val,
         "_debug/eval_trade_count": trade_count,
         "_debug/eval_profit_factor": profit_factor,
+        # Compounded portfolio return over the eval rollout. Same definition regardless of
+        # whether the book switched, which is what makes it comparable to
+        # buy_and_hold_total_return() above.
+        "_debug/eval_total_return": (float(np.prod(1.0 + returns) - 1.0)
+                                     if len(returns) > 0 else 0.0),
     }
     for idx, label in action_labels.items():
         diag[f"_debug/eval_action_{idx}_{label}"] = action_counts.get(idx, 0)
