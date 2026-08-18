@@ -20,7 +20,16 @@ import yaml as _yaml
 
 ROOT = Path(__file__).resolve().parents[2]
 SCRIPTS = ROOT / "scripts" / "research"
-GATES = ROOT / "configs" / "tailwind_v1_challenge.gates.yaml"
+
+def _gates_path() -> Path:
+    """Resolve gates the way the render does — out of `ensemble.gates_file`. Pinning a literal
+    path here is what let this module keep testing v1 after the config moved to v2."""
+    cfg = _yaml.safe_load(
+        (ROOT / "configs" / "tailwind_v1_challenge.yaml").read_text(encoding="utf-8"))
+    return ROOT / cfg["ensemble"]["gates_file"]
+
+
+GATES = _gates_path()
 
 
 @pytest.fixture(scope="module")
@@ -63,12 +72,38 @@ def test_script_does_not_hardcode_the_needless_threshold():
 
 
 def test_causal_vol_params_mirror_the_challenge_config(gates):
+    """The trailing-vol WINDOW params are genuine mirrors — same quantity, book-level.
+
+    `causal_vol_lev_cap` is NOT, and this test asserted that it was until 2026-08-17. It caps
+    the leverage the causal arm's trailing-vol targeting applies to the COMBINED BOOK SERIES
+    (`scale_causal(d, target, window, min_periods, lev_cap)` takes a Series); `env.lev_cap`
+    caps a PER-ASSET weight inside MultiAssetAllocatorEnv. Different objects.
+
+    The old assertion was not merely imprecise, it was DANGEROUS: `env.lev_cap` is documented
+    as "effectively free" (it saturates against real ETF vols — sizing reconciliation
+    2026-08-01), so forcing the mirror let a free parameter drive a capital gate. Measured:
+    causal_vol_lev_cap 3.0 -> needless 0.0500 RENDER_CLEAR, 2.0 -> 0.0526 RENDER_FLAGS. A
+    parameter nobody must think about should not flip the verdict.
+    """
     cfg = _yaml.safe_load(
         (ROOT / "configs" / "tailwind_v1_challenge.yaml").read_text(encoding="utf-8"))
     fpr = gates["forward_path_render"]
     assert int(fpr["causal_vol_window_days"]) == int(cfg["risk_parity"]["trailing_window"])
     assert int(fpr["causal_vol_min_periods"]) == int(cfg["risk_parity"]["min_periods"])
-    assert float(fpr["causal_vol_lev_cap"]) == float(cfg["env"]["lev_cap"])
+    # Book-level cap: pinned to its own value, decoupled from the per-asset env lever.
+    assert float(fpr["causal_vol_lev_cap"]) == 3.0, (
+        "held at the value the 2026-07-31 render evidence was produced with; changing it to "
+        "whichever number yields RENDER_CLEAR would be choosing the verdict"
+    )
+
+
+def test_gates_under_test_are_the_ones_the_config_points_at():
+    """This module used to pin `tailwind_v1_challenge.gates.yaml` directly, so between
+    2026-07-31 and 2026-08-17 it was testing a file the config no longer used. Resolve the
+    same way the render does."""
+    cfg = _yaml.safe_load(
+        (ROOT / "configs" / "tailwind_v1_challenge.yaml").read_text(encoding="utf-8"))
+    assert str(GATES).replace("\\", "/").endswith(cfg["ensemble"]["gates_file"])
 
 
 # ---------------------------------------------------------------------------- LEAK-2 causality

@@ -99,11 +99,42 @@ def main():
     series = {name: meta_backtest(sleeves, fn) for name, fn in strategies.items()}
 
     def split_sharpe(s):
+        """Sharpe is leverage-invariant so the split is trivial for it. The OOS DRAWDOWN is
+        NOT — it is scale-dependent, so the 10%-vol normaliser must be fitted on IN-SAMPLE
+        data only.
+
+        FIXED 2026-08-18 (S553-cont-162). This previously read
+        ``pf.scale_to_vol(s.loc[OOS_SPLIT:], 0.10)``, which normalises the holdout using the
+        HOLDOUT'S OWN realised vol — information a live book could not have had at the split.
+        Same LEAK-2 class as ``portfolio_frontier.risk_parity``'s full-sample constant.
+        Measured on this script's own three strategies (leaky -> causal):
+
+            static_rp         -15.1% -> -9.4%   (5.7 pp, leak was CONSERVATIVE)
+            sleeve_momentum   -20.3% -> -23.8%  (3.5 pp, leak was FLATTERING)
+            drawdown_control  -18.3% -> -11.5%  (6.8 pp, leak was CONSERVATIVE)
+
+        ⚠️ The SIGN OF THE ERROR DIFFERS BY STRATEGY WITHIN ONE RUN — it depends on whether
+        each series' OOS vol ran above or below its own in-sample vol. So "the leak erred
+        safe" is never a reason to leave it in.
+
+        ⚠️ It also DISTORTED THE COMPARISON, which is the part that matters here: under the
+        leaky numbers sleeve_momentum (-20.3%) and drawdown_control (-18.3%) looked like
+        comparable risk. Causally they are -23.8% vs -11.5% — drawdown_control is roughly
+        half the drawdown, not a near-tie. The Sharpe-gated verdict never moved, but the
+        risk READING of these challengers did.
+
+        The verdict is unaffected either way — ``rl_justified`` gates on OOS Sharpe.
+        """
         s = s.dropna()
+        ins, oos = s.loc[:OOS_SPLIT], s.loc[OOS_SPLIT:]
+        vol_ins = pf.ann_vol(ins)
+        k_ins = (0.10 / vol_ins) if vol_ins > 0 else 1.0
         return {"full": round(mom.sharpe(s), 3),
-                "in_sample": round(mom.sharpe(s.loc[:OOS_SPLIT]), 3),
-                "oos": round(mom.sharpe(s.loc[OOS_SPLIT:]), 3),
-                "oos_maxdd_pct": round(mom.max_dd(pf.scale_to_vol(s.loc[OOS_SPLIT:], 0.10)) * 100, 1)}
+                "in_sample": round(mom.sharpe(ins), 3),
+                "oos": round(mom.sharpe(oos), 3),
+                "oos_maxdd_pct": round(mom.max_dd(oos * k_ins) * 100, 1),
+                "oos_maxdd_vol_scaler": round(float(k_ins), 4),
+                "oos_maxdd_scaler_source": "in_sample_vol (causal; NOT the holdout's own vol)"}
 
     rep = {name: split_sharpe(s) for name, s in series.items()}
     base_oos = rep["static_rp"]["oos"]

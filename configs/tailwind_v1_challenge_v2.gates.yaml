@@ -70,16 +70,27 @@ challenge_pass_gate:
     min_trading_days: 5              # max(FTMO 4, Velotrade 5) — non-binding at E[days]~150-196
     time_limit: none                 # ✅ no deadline (the load-bearing assumption)
 
-  # Simulator-derived P(pass) at 1.5x sizing (mom+BAB, no bank). Model outputs, not
-  # guarantees. min_p_pass is the go/no-go floor a real attempt must clear.
+  # Simulator-derived P(pass) at THIS FILE'S 1.0x / 10% sizing (mom+BAB, no bank).
+  # RE-DERIVED 2026-08-17 by re-running scripts/research/run_challenge_simulator.py — the
+  # values here were previously carried over from the 1.5x file unchanged, which is what made
+  # v2 a shallow copy: it edited the two sizing declarations and left the evidence behind.
+  # Model outputs, not guarantees. min_p_pass is the go/no-go floor a real attempt must clear.
+  # ⭐ 1.0x is the simulator's ARGMAX for every firm AND both steps — this sizing is not a
+  # concession to the render, it is also the P(pass) maximiser. E[days] 196 step1 / 110 step2,
+  # binding constraint = max_dd in all four cells.
   p_pass_expected:
-    ftmo_step1: 0.711
-    ftmo_step2: 0.870
-    velotrade_step1: 0.711           # == FTMO after the static-DD correction
+    ftmo_step1: 0.746                # was 0.711 (1.5x); re-derived at 1.0x
+    ftmo_step2: 0.870                # unchanged — step2's optimum was already 1.0x
+    velotrade_step1: 0.746           # == FTMO after the static-DD correction
     velotrade_step2: 0.870
-    two_phase_per_attempt: 0.60
-  min_p_pass_step1: 0.65             # go/no-go floor for a real attempt (below the 1.0x 0.746 optimum)
-  daily_breach_budget: 0.10          # frontier daily-breach at 1.5x is 0.090; alarm if a render exceeds this
+    two_phase_per_attempt: 0.65      # 0.746 x 0.870 = 0.649 (was 0.60 at 1.5x)
+  min_p_pass_step1: 0.65             # go/no-go floor. NOTE: 0.746 now clears it by 0.096
+                                     # where the 1.5x 0.711 cleared by 0.061.
+  daily_breach_budget: 0.10          # frontier daily-breach at 1.0x is 0.03 (was 0.090 at
+                                     # 1.5x); alarm if a render exceeds this budget
+  # Provenance note: the simulator's velotrade_step2 cell peaks with bank=0.05 rather than
+  # bank=None. NOT adopted — `sizing.bank_and_derisk: false` above stands, because banking
+  # only helps when running hot and the uplift is within noise of the no-bank cell.
 
 # ============================================================================
 # FORWARD-PATH RENDER — thresholds for the render this file's capital_gate demands
@@ -94,6 +105,30 @@ challenge_pass_gate:
 # ended. The bootstrap P(pass) simulator cannot answer this: it destroys drawdown ORDERING, and
 # ordering is the whole question.
 forward_path_render:
+  # ⚠️ THE 10% CELL PASSES THIS BY EXACTLY ZERO MARGIN (0.0500 vs 0.0500 = 1/20 disjoint
+  # windows, Wilson CI95 [0.009, 0.236]). A knife-edge, not a clearance: one window entering
+  # or leaving the denominator flips RENDER_CLEAR to RENDER_FLAGS, as `causal_vol_lev_cap`
+  # above demonstrates.
+  #
+  # ⚠️ THIS METRIC CANNOT RANK CELLS INSIDE THE CLEARING BAND — do not re-size on it.
+  # (An earlier revision of this comment recommended re-sizing to 6%. RETRACTED 2026-08-17;
+  # it was read off the frontier of a FLAGS run where 10% failed and 6% cleared by
+  # elimination. In the wired state the render's `recommended_cell` IS 10.0%.)
+  #     vol   needless        CI95              n_disjoint   P(pass)
+  #     6%    0.0   (0/12)    [0.000, 0.299]        12        0.750
+  #     8%    0.0625          [0.011, 0.283]        20        0.800   <- FAILS, between two passes
+  #    10%    0.05  (1/20)    [0.009, 0.236]        26        0.769
+  # Three reasons this grid cannot support a sizing decision:
+  #   1. NON-MONOTONE — 8% fails between two cells that pass. That is noise, not structure.
+  #   2. 6%'s "0.0" is the WEAKEST measurement here, not the strongest: 0/12 with an upper
+  #      bound of 0.299 vs 10%'s 1/20 bounded at 0.236.
+  #   3. STRUCTURAL: n_disjoint RISES with vol (12 @ 6%, 26 @ 10%, 65 @ 20%) because lower
+  #      vol resolves each challenge more slowly, so fewer disjoint windows fit the sample.
+  #      Lower vol is safer per challenge and PERMANENTLY less measurable. You cannot buy
+  #      margin on this gate by lowering vol; you buy it with more windows, i.e. more data.
+  # The grid's honest read is a BAND: {6%, 10%} clear, 15% genuinely fails (needless 0.121,
+  # daily-breach 0.129, gross 6.00 — three independent legs), and within the band it is mute.
+  # 10% stays wired: most windows behind it, best P(pass) point estimate, already rendered.
   max_needless_share: 0.05           # >5% of otherwise-winning challenges thrown away ⇒ buffer too tight
   render_horizon_days: 756           # 3y cap per challenge window (no-deadline firms need a finite render)
   # Effective annualised vol grid for the remedy sweep the derivation names ("else widen, or
@@ -103,15 +138,31 @@ forward_path_render:
   # risk_parity.{trailing_window,min_periods} in configs/tailwind_v1_challenge.yaml.
   causal_vol_window_days: 252
   causal_vol_min_periods: 63
-  causal_vol_lev_cap: 3.0            # mirrors env.lev_cap in the challenge config
+  # ⚠️ NOT a mirror of env.lev_cap, despite what this comment said until 2026-08-17. They are
+  # DIFFERENT OBJECTS: this caps the leverage the CAUSAL arm's trailing-vol targeting applies to
+  # the COMBINED BOOK series; `env.lev_cap` caps a PER-ASSET weight inside MultiAssetAllocatorEnv.
+  # Same category error as the two `max_gross_exposure` keys documented below.
+  #
+  # ⚠️⚠️ THIS VALUE IS LOAD-BEARING AND ITS JUSTIFICATION IS UNRESOLVED. Acting on the false
+  # "mirror" I re-sized it 3.0 -> 2.0 alongside env.lev_cap, and the render verdict FLIPPED:
+  #     3.0 -> disjoint n=26, needless 0.0500 -> RENDER_CLEAR   (0.050 gate, passes by ZERO)
+  #     2.0 -> disjoint n=24, needless 0.0526 -> RENDER_FLAGS
+  # That is 1/20 versus 1/19 — ONE window in the denominator, Wilson CI95 [0.009, 0.236].
+  # Held at 3.0 because that is the value the 2026-07-31 evidence was produced with; changing
+  # it to whichever number yields CLEAR would be choosing the verdict. See the resize doc's own
+  # warning: "exactly AT the bar, not comfortably under."
+  causal_vol_lev_cap: 3.0
 
 # ============================================================================
 # SURVIVAL RISK KILLS — internal halts BELOW the firm hard limits
 # ============================================================================
 # HARD CEILINGS are the verified firm limits above. The internal kills fire FIRST so the
 # book de-risks before a firm breach ends the challenge. Buffers (2pp under max-loss, 1pp
-# under daily) are prudent defaults; confirm against a forward-path render that the book's
-# normal 15%-vol drawdown stays comfortably inside them (else widen, or lower vol to 1.0x).
+# under daily) were prudent defaults; the 2026-07-31 forward-path render CONFIRMED them at
+# this file's 10% sizing — max DD −16.7%, daily-breach 0.0018, needless-termination 5.0%
+# (vs −24.4% / 0.129 / 12.1% at the rejected 15%). The "else lower vol to 1.0x" remedy the
+# old wording anticipated is exactly what this file now IS; that sentence is no longer a
+# pending question.
 paper_soak:
   status: pre_registered
   consumed_by: [paper_executor, live_monitor]
@@ -132,7 +183,15 @@ paper_soak:
   risk:
     max_drawdown_kill_pct: 8.0        # internal kill 2pp UNDER the 10% static firm max-loss
     daily_loss_halt_pct: 4.0          # internal halt 1pp UNDER the 5% firm daily limit
-    max_gross_exposure: 4.7           # env caps combined gross at 4.5 (this file); ~5% margin
+    # ⚠️ TWO DIFFERENT QUANTITIES SHARE THIS NAME — do not reconcile them by editing either.
+    #   * THIS key is the ceiling the forward-path RENDER scores against, on the RESEARCH
+    #     basis (`gross_exposure(vol_scalar)` = 0.5·k_mom·w_mom + 0.5·k_bab·w_bab, scaled).
+    #     Render at 10%: max gross 4.00 <= 4.70 PASS. At the rejected 15% it was 6.00, FAIL.
+    #   * `env.max_gross_exposure` (3.0 after the 2026-08-17 re-size) is the EXECUTOR lever,
+    #     a per-sleeve and combined-book cap inside MultiAssetAllocatorEnv, and the only lever
+    #     that binds on real data (executor vol ~= 0.0334 x it).
+    # The old comment here ("env caps combined gross at 4.5; ~5% margin") conflated the two.
+    max_gross_exposure: 4.7           # render-basis ceiling; measured 4.00 at 10% vol
     calibrated_for_sleeves: [momentum, defensive]
     derivation: >-
       Ceilings = ✅-verified FTMO/Velotrade 2-step hard limits (max-loss 10% static,
