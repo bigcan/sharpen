@@ -76,6 +76,83 @@ from finrl_pro_ds.hpo.sampler import create_sampler  # noqa: E402
 
 
 
+def _resolve_hpo_storage(storage):
+    """Turn a Postgres URL into an RDBStorage that survives a long, DB-idle trial.
+
+    THIS EXISTS BECAUSE IT KILLED A FULL OVERNIGHT RUN. The shared backend is Neon
+    (serverless Postgres), which suspends compute and terminates idle connections. Optuna
+    only touches the DB at trial start and trial end, so a 104-minute trial leaves the
+    connection idle for the whole of it; the commit at the end then died with
+
+        psycopg.errors.AdminShutdown: terminating connection due to administrator command
+
+    which Optuna surfaces as StorageInternalError and `_run_trial` converts into
+    `assert False, "Should not reach."` — taking the worker process down. All 6 workers of
+    the gmgp1-spx500 A/B died this way at 2026-08-15 ~23:20, each having completed its full
+    400K training steps first, so ~10 GPU-hours produced zero recorded trials.
+
+    Two independent defences, because either alone leaves a hole:
+      * `pool_pre_ping` + short `pool_recycle` — SQLAlchemy validates (and transparently
+        reopens) a connection before use, so a connection killed while idle is replaced
+        instead of raising.
+      * `heartbeat_interval` — Optuna writes periodically DURING a trial, which both keeps
+        the serverless instance from idling out and lets a genuinely dead worker's trial be
+        reclaimed rather than sitting RUNNING forever (exactly the 6 orphaned RUNNING trials
+        this failure left behind).
+
+    Non-Postgres storages (the sqlite default, or an already-constructed storage object)
+    pass through untouched, so no existing workstream changes behaviour.
+    """
+    if not isinstance(storage, str) or not storage.startswith("postgresql"):
+        return storage
+    return optuna.storages.RDBStorage(
+        url=storage,
+        engine_kwargs={
+            "pool_pre_ping": True,   # revalidate before use — the core fix
+            "pool_recycle": 280,     # under Neon's idle cutoff
+            "connect_args": {"connect_timeout": 30},
+        },
+        heartbeat_interval=60,
+        grace_period=600,
+        failed_trial_callback=optuna.storages.RetryFailedTrialCallback(max_retry=1),
+    )
+
+
+def _select_best_trial(study):
+    """Best COMPLETE trial, preferring those that cleared the buy-and-hold hurdle.
+
+    The hurdle is enforced HERE rather than by collapsing failed trials to a sentinel value
+    in the objective, because a sentinel flattens the search landscape and reduces TPE to
+    random sampling (see the note in hpo/objective.py). Keeping the objective informative
+    and gating at selection gets both properties: a real search, and a winner that actually
+    beat the benchmark.
+
+    If NOTHING cleared the hurdle, that is itself the finding — it is surfaced loudly and
+    the unfiltered best is returned so the pipeline still produces an artifact, rather than
+    silently promoting a sub-benchmark model as though it had passed.
+    """
+    completed = [t for t in study.trials
+                 if t.state == optuna.trial.TrialState.COMPLETE and t.value is not None]
+    if not completed:
+        return study.best_trial
+
+    qualified = [t for t in completed if t.user_attrs.get("beat_buy_hold") is True]
+    if qualified:
+        best = max(qualified, key=lambda t: t.value)
+        logger.info("Best trial %d selected from %d/%d that beat buy-and-hold (PF=%.4f)",
+                    best.number, len(qualified), len(completed), best.value)
+        return best
+
+    # Only meaningful when the hurdle was actually in force for this study.
+    if any("beat_buy_hold" in t.user_attrs for t in completed):
+        logger.warning(
+            "NO TRIAL BEAT BUY-AND-HOLD (0/%d). Falling back to the unfiltered best trial "
+            "so downstream stages still receive hyperparameters, but this result must be "
+            "read as a NEGATIVE: the search found nothing that clears the passive benchmark.",
+            len(completed))
+    return study.best_trial
+
+
 def run_hpo(base_config, n_trials, steps_per_trial, device, agent_type="bdq"):
     """Phase 1: Hyperparameter Optimization with Optuna. Supports BDQ and PPO agents."""
     logger.info(f"Starting HPO: {n_trials} trials, {steps_per_trial} steps each")
@@ -89,10 +166,22 @@ def run_hpo(base_config, n_trials, steps_per_trial, device, agent_type="bdq"):
 
     # Run optimization
     logger.info(f"Creating Optuna study (storage={base_config.get('hpo', {}).get('storage')})...")
+    # STUDY NAME MUST BE CONFIGURABLE, and this was a latent data-corruption bug on shared
+    # storage. It was hardcoded to f"hpo_{agent_type}" with load_if_exists=True, which is
+    # harmless against the default per-run sqlite but silently WRONG against the shared
+    # Postgres in DISTRIBUTED_HPO_DB_URL: every SAC workstream would converge on one study
+    # named "hpo_sac", so two configs run against that storage would pool their trials and
+    # best-trial selection would range over BOTH. That is fatal for a paired A/B such as
+    # gmgp1-spx500 long-short vs long-only, where the whole design rests on the two searches
+    # being independent. Falls back to the old name when unset, so every existing caller and
+    # every sqlite-backed run is byte-identical.
+    _hpo_cfg = base_config.get("hpo", {}) or {}
+    _study_name = _hpo_cfg.get("study_name") or f"hpo_{agent_type}"
+    logger.info("Optuna study_name=%s", _study_name)
     study = optuna.create_study(
         direction="maximize",
-        storage=base_config.get("hpo", {}).get("storage"),
-        study_name=f"hpo_{agent_type}",
+        storage=_resolve_hpo_storage(_hpo_cfg.get("storage")),
+        study_name=_study_name,
         load_if_exists=True,
         sampler=create_sampler(base_config.get("hpo", {})),
         # FIX HPO-1: Disable inter-trial pruning for swing MDP.
@@ -132,7 +221,7 @@ def run_hpo(base_config, n_trials, steps_per_trial, device, agent_type="bdq"):
     _analyze_hpo_correlation(trial_records, agent_type)
 
     # Log best results
-    best = study.best_trial
+    best = _select_best_trial(study)
     agent_key = agent_type if agent_type in ("ppo", "iqn", "sac") else "bdq"
     best_params = {
         "env": {"reward": {}},
@@ -877,6 +966,15 @@ def main():
         print("="*60 + "\n")
 
         hpo_config = base_config.get("hpo", {})
+        # --hpo_storage was DECLARED but never applied — a dead flag, so the only way to
+        # reach shared storage was to commit a credentialed URL into a tracked YAML. Wire it
+        # here so the Postgres URL is supplied at launch time from .env instead. Config value
+        # still wins when the flag is absent.
+        if args.hpo_storage:
+            hpo_config = dict(hpo_config)
+            hpo_config["storage"] = args.hpo_storage
+            base_config["hpo"] = hpo_config
+            logger.info("HPO storage overridden from --hpo_storage (shared study backend)")
         final_config = copy.deepcopy(base_config)
 
         if args.backtest_only:
