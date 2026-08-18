@@ -1,0 +1,158 @@
+# US-EQUITY at hold_horizon 21 with an EXTENDED HOLDOUT (0.35 -> 0.60) — variant of
+# us_equity_h21_signal_eval.gates.yaml (crucible-v13.0).
+#
+# ⚠ THIS CONFIGURATION CANNOT REACH ITS OWN POWER CEILING, AND THE ARITHMETIC IS CLOSED.
+# MDE falls as 1/sqrt(holdout years). Powering H=21 (ceiling 0.626, from MEASURED breadth 81.7)
+# requires 30.1 holdout-years; the whole panel is 19.56. Even 100% of the panel as holdout — zero
+# training span — gives MDE 0.776, still 1.24x above the ceiling. Extending the holdout is therefore
+# NOT a route to a powered H=21 run on this panel; only MORE DATA or higher-IC signals are.
+#
+# ⚠ AND IT POINTS THE WRONG WAY FOR THE COHORT. The binding cohort gate is the selection-aware MC
+# null, which runs on the TRAIN/SELECTION span (cohort_eval: analytic + MC on [0, n_train), holdout
+# guard on the embargoed tail). Growing the holdout SHRINKS that span — 12.7y -> 7.8y here — so this
+# variant makes the per-candidate MDE better and the cohort's decisive test WORSE. Two gates, opposite
+# gradients, and the project has never written that down before.
+#
+# What it is good for: measuring how far the per-candidate gap actually narrows, and what the cohort
+# says on a fully tradeable pool with a materially different split. Run with --no-power-guard; do NOT
+# raise plausible_delta_sr_max to make it pass.
+#
+# 0.60 is chosen to leave ~7.8y of train — enough for the combiner warmup and the CPCV groups — not
+# because it reaches any threshold. It does not.
+#
+# WHY THIS FILE EXISTS, and what it is NOT. The 2026-08-11 mine measured that 97 of 100 published
+# WQ101 cross-sectional alphas are hard-infeasible on turnover at H=2 (68-135/yr against the funnel's
+# own 24/yr ceiling), so the cohort had 3 tradeable cross-sectional candidates to admit from. H=21
+# fixes exactly that: measured median turnover 16.0/yr, comfortably inside the ceiling.
+#
+# ⚠ IT DOES NOT FIX POWER, AND THIS SUBSTRATE IS UNDERPOWERED AT H=21. The power ceiling is
+# IC_low * sqrt(n_eff * 252/H). Breadth per rebalance rises with H but only sublinearly — MEASURED
+# 21.5 -> 43.7 -> 81.7 for H = 1 -> 2 -> 21, about H^0.27 — so BR falls 5.6x from H=2 to H=21 and the
+# implied ceiling drops 1.484 -> 0.626 against an MDE of 1.312. The two constraints have DISJOINT
+# windows: power needs H <= 2, tradeability needs H >= ~9.
+#
+# So a verdict produced with this config is a verdict on a TRADEABLE pool that the substrate's own
+# arithmetic says it cannot detect an alpha in. Read a null from it as uninformative, never as
+# evidence against cross-sectional alpha in US equities. Running it requires --no-power-guard by
+# construction; do NOT "fix" that by raising plausible_delta_sr_max, which is the one move the power
+# gates file names as illegitimate (asserting an IC nobody measured).
+#
+# Kept as a SEPARATE file so the H=2 record — every existing us_equity verdict — stays byte-identical
+# and reproducible.
+# Substrate = `finrl_pro_ds/crucible/data/us_equity_panel.py`, wired as `panel: us_equity`. Separate
+# FILE per ADR-1/CRU-1 so `configs/signal_eval.gates.yaml` keeps its bytes and the frozen gates_hash.
+#
+# ---------------------------------------------------------------------------------------------
+# WHY THIS RUN EXISTS — the first substrate whose achievable effect EXCEEDS its detection floor.
+#
+# Every previous Crucible substrate was refused by its own power arithmetic. This one is not, and the
+# difference was MEASURED rather than assumed (scripts/research/crucible_real_alpha_breadth.py):
+# running the shipped WorldQuant-101 library over this exact panel and inverting IR = IC*sqrt(BR)
+# gives a REALIZED breadth of
+#
+#     n_eff = 42.1 at H=2 on this 19.61-year panel (63 usable alphas, zero sign mismatches)
+#
+# and it REPLICATES: the same measurement on the shorter 12.07-year cache gave 43.7 at H=2 / 21.5 at
+# H=1 across a different name set and a different survivorship profile. Note n_eff x rebalances is
+# INVARIANT across H (~5,300 observations per calendar year either way), which independently
+# reproduces this project's own measured law that just-detectable gross IR is constant across holds
+# — so the holdout's calendar SPAN, not the hold or the bar frequency, is what buys detection.
+#
+# DO NOT re-derive this breadth from the return correlation matrix. That statistic — the one behind
+# the 5.01 quoted for the FX panel — reads only 9.41 here and SATURATES (K=400/500 give 8.8), which
+# would refuse this substrate outright. It predicts BR only when the signal's cross-sectional bets
+# inherit the returns' factor structure, and the real DSL's bets do not: it beats that proxy by 2.3x.
+# Breadth is a joint property of the substrate AND the signal.
+#
+# HONEST STATEMENT OF ODDS. Adequately powered is not the same as containing alpha. Against the
+# project's MEASURED calibration curve (not the textbook 3.17/sqrt(years) law, which is ~15%
+# optimistic here) the holdout below implies MDE 1.312 dSR, so the detectable IC is
+# 1.312/sqrt(42.1*126) = 0.0180 — inside the 0.02-0.03 band a real cross-sectional signal delivers,
+# and now across the WHOLE band rather than its upper half:
+#     IC 0.020 -> achievable dSR 1.46 > 1.31    IC 0.025 -> 1.82    IC 0.030 -> 2.18
+# On the 12.07-year cache the same arithmetic gives IC-needed 0.0242 and IC 0.020 FAILS (1.47 < 1.78),
+# which is why the longer panel is the default. Prior probability of a legitimate PROMISING remains
+# ~30-40%. A survivor is a hypothesis to incubate, never a result.
+#
+# SURVIVORSHIP. PIT membership (free fja05680 history) + yfinance pricing; 144 fully-delisted union
+# names are unpriceable and dropped. That residual is recorded in panel.meta and is the one thing a
+# paid PIT feed (Sharadar/Norgate) would fix. It is not a reason to withhold the run: the same
+# universe construction was measured against a survivor-biased baseline and came in HIGHER, not
+# lower (OOS net10 0.689 vs 0.524), so survivorship is not what would manufacture a survivor here.
+# ⚠ The 2007 start makes this WORSE, not better, and the trade was taken deliberately: reaching back
+# across the GFC raises UNPRICEABLE from 144 (18.5% of the union) to 270 (28.2%). Power and
+# survivorship pull in opposite directions on this substrate; the extra 7.5 calendar years buy the
+# margin quoted above at the price of a ~10pp larger delisting hole. Any survivor must be read with
+# that caveat attached, and closing it is exactly what a paid PIT feed would buy.
+# ---------------------------------------------------------------------------------------------
+generation:
+  enabled: false                     # opt-in (GP8-01); the real run passes --force explicitly
+  panel: us_equity
+  base_sleeves: [tsmom, rates_carry] # the validated linear core, on the ETF panel — see below
+
+  periods_per_year: 252.0            # daily bars
+
+  # PRE-REGISTERED, not discovered. At the ~2 bp effective cost derived below, the break-even
+  # rebalance ceiling is ~230/yr against 252 available, so H=1 sits just past the cost edge while
+  # H=2 sits comfortably inside it. Detection is indifferent to this choice (n_obs is invariant
+  # across H, measured above); only COST varies, so H is picked on cost alone.
+  hold_horizon: 21                   # VARIANT (was 2): the turnover-feasible end of the tradeoff
+
+  # The base book is the VALIDATED ETF linear core held at its OWN monthly cadence, computed on the
+  # ETF panel and joined onto the equity clock by `base_sleeves.us_equity_base_sleeves` (100% of
+  # equity bars matched an ETF bar; measured book SR +0.519 over this window).
+  #
+  # THE COMPARATOR MUST NOT BLEED. A base book losing to friction lets a ZERO-ALPHA candidate clear
+  # the uplift gate purely by diluting the bleed — measured at a 15.3% null pass rate against a
+  # nominal ~1% on the intraday substrate. The obvious equity-native comparator (cross-sectional
+  # momentum on liquid large caps) is a RECORDED NO-GO, i.e. exactly such a losing book, which is
+  # why the base here is deliberately NOT computed on the equity panel.
+  base_hold_horizon: 21
+
+  pop_size: 60
+  n_generations: 12
+  rng_seed: 7
+  elite_frac: 0.30
+
+  # 2 bp one-way, DERIVED for this venue and cadence, not carried across
+  # (scripts/research/crucible_us_equity_cost_derivation.py):
+  #     half effective spread 1.20 + commission 0.30 + impact allowance 0.50 = 2.00 bp
+  # The frozen funnel's 10 bps is a MONTHLY-rebalance figure and would charge 5x this per turn.
+  #
+  # This is an ASSUMPTION with a stated basis, NOT a measurement: the Corwin-Schultz high-low
+  # estimator was run on this panel and is NON-IDENTIFYING here — clipping each daily estimate gives
+  # a 17.5 bp median round-trip (~10x the known effective spread of S&P 500 names, because negatives
+  # are floored while positives are kept), while aggregating first as CS actually prescribe collapses
+  # it to 0.00 bp with 73.6% of name-months negative. An estimator that lands on 8.76 or 0.00
+  # depending on aggregation order has identified nothing, and no quote/intraday equity data is on
+  # disk. Hence the pre-registered sensitivity: the verdict must be reported at 1 / 2 / 5 bp, and a
+  # candidate that survives only at the low end is fragile, not capturable (crucible-v11.0).
+  cost_bps: 0.0002
+  ls_min_names: 30                   # ~298 active names/day
+
+  max_ast_nodes: 24
+  turnover_soft_cap: 12.0
+  lambda_turnover: 0.05
+  lambda_complexity: 0.10
+
+  # Decision thresholds IDENTICAL to the frozen funnel's. Not re-tuned for this substrate.
+  min_combination_uplift: 0.10
+  hlz_t_min: 3.0
+  promising_dsr: 0.90
+  max_base_corr: 0.70
+  delta_median_min: 0.0
+  frac_positive_min: 0.50
+
+  # 0.35, not the 0.25 the other substrates use — a DELIBERATE deviation, stated because it is one.
+  # The holdout's calendar span is the only term that sets the detection floor
+  # (SE(annualized Sharpe) = 1/sqrt(calendar years); neither bar frequency nor hold moves it), and
+  # this substrate exists to be powered. 0.35 = 1,725 bars = 6.85 calendar years, putting the
+  # detectable IC at 0.0180 against 0.0203 at 0.25. It still leaves 12.7 years to train on, and under
+  # `offspring_policy: prereg_only` the train split only filters pre-registered specs; it cannot
+  # promote anything.
+  holdout_frac: 0.60                 # EXTENDED (was 0.35): 11.7y holdout, ~7.8y train
+  holdout_embargo_days: 42           # 2x the 21-bar hold (was ~10x a 2-bar hold)
+  cpcv_n_groups: 6
+  cpcv_k_test: 2
+  cpcv_embargo_days: 21
+  cpcv_purge_horizon: 21             # = hold_horizon (MUST track it — purge covers the hold)

@@ -37,7 +37,7 @@ import numpy as np
 from ..agentic.card import DiscoveryCard
 from ..agentic.cohort_card import CohortCard
 from ..agentic.hypothesis import HypothesisAuthor, PreRegisteredSpec
-from ..agentic.loop import HypothesisLoopResult, run_hypothesis_loop
+from ..agentic.loop import HypothesisLoopResult, run_cohort_only, run_hypothesis_loop
 from ..lockbox.incubation import forward_evidence
 from ..lockbox.lockbox import (
     STATUS_CLEARED,
@@ -86,6 +86,9 @@ class SubstrateTickOutcome:
     snapshot_hash: str
     n_preregistered: int = 0
     n_scored: int = 0                 # candidates scored (mine hall-of-fame) — the budget spend axis
+    # v12.0: candidates the BINDING holdout gate adjudicated — the denominator of `n_promising`.
+    # None on a tick that did not mine. See TickRecord.n_holdout_tested.
+    n_holdout_tested: int | None = None
     n_promising: int = 0
     fdr_charged_total: float = 0.0
     fdr_num_tests: int = 0            # cumulative online-FDR tests on this substrate (post-tick)
@@ -128,6 +131,85 @@ class OrchestratorTickResult:
     @property
     def n_promising_total(self) -> int:
         return sum(o.n_promising for o in self.outcomes)
+
+
+
+def _cohort_config_key(sub: Substrate) -> str | None:
+    """The cohort CONFIGURATION identity for this substrate — ``None`` when the cohort gate is not
+    enabled (so `cohort_pending` can never fire and every pre-v12.2 tick is byte-identical).
+
+    Keyed on the cohort gates hash AND the pool-type policy, because both change WHAT the gate would
+    adjudicate: flipping `include_cross_sectional` turns an overlay-only pool into a mixed one, which
+    is a different test on the same substrate and must re-fire (that flip is exactly the v12.1
+    change this key exists to notice)."""
+    if not (sub.cohort_cfg is not None and sub.cohort_mc_kwargs
+            and sub.cohort_mc_kwargs.get("enabled")):
+        return None
+    return f"{sub.cohort_gates_hash or ''}:xsec={int(bool(sub.cohort_cfg.include_cross_sectional))}"
+
+
+def _cohort_only_tick(
+    *, sub: Substrate, store: OrchestratorStore, prepared: PreparedSubstrate, tick_ts: str,
+    snap: str, reason: str, crucible_version: str, ghash: str, cohort_key: str,
+    incubation: "_IncubationPass", out_dir: "str | Path | None",
+) -> tuple[TickRecord, SubstrateTickOutcome, str]:
+    """One tick that runs the COHORT gate ONLY, over the substrate's ledger-sourced pre-registered
+    pool — no mine, no proposer batch, no per-candidate verdicts (crucible-v12.2).
+
+    Charges exactly ONE online-FDR test (ADR-4: one per cohort EVALUATED, independent of pool size),
+    and records `mined=False` because no per-candidate hypothesis was scored — a reader must not
+    mistake this for a mining night. Writes the cohort key only after a verdict is rendered, so an
+    empty pool or a cohort that cannot form leaves the tick pending for the next night."""
+    run_id = f"tick-{sub.substrate_id}-{tick_ts}"
+    pool = sub.ledger.pre_registered_pool(f"tick-{sub.substrate_id}-")
+    cohort_cards, _prov = run_cohort_only(
+        panel=prepared.panel, base_returns=prepared.base_returns, timestamps=prepared.timestamps,
+        cfg=sub.cfg, evolve_kwargs=sub.evolve_kwargs, cohort_pool=pool, run_id=run_id,
+        crucible_version=crucible_version, gates_hash=ghash, proposal_ts=tick_ts,
+        data_snapshot_hash=snap, cohort_cfg=sub.cohort_cfg,
+        cohort_mc_kwargs=sub.cohort_mc_kwargs, cohort_gates_hash=sub.cohort_gates_hash,
+        base_components=prepared.base_components)
+
+    fdr_total = 0.0
+    n_cohort_promising = sum(1 for c in cohort_cards if c.verdict == "PROMISING")
+    if cohort_cards:
+        fdr = store.load_fdr(sub.substrate_id, alpha=sub.fdr_alpha, w0=sub.fdr_w0,
+                             alpha_floor=sub.fdr_alpha_floor)
+        fdr_total += fdr.observe(is_discovery=(n_cohort_promising > 0))
+        store.save_fdr(sub.substrate_id, fdr)
+        store.set_cohort_key(sub.substrate_id, cohort_key)
+        if out_dir is not None:
+            sub_dir = Path(out_dir) / _safe(sub.substrate_id) / _safe(tick_ts)
+            for card in cohort_cards:
+                # A rendered verdict must survive a card-write failure. The mined path lets an I/O
+                # error abort the tick, which on 2026-08-10 threw away a completed cohort verdict
+                # over a 269-char Windows MAX_PATH; the statistic cost minutes of MC replicates and
+                # is already accounted for in LORD++, so losing it to a filesystem error is the
+                # worst possible trade. The verdict stays in the outcome either way.
+                try:
+                    card.write(sub_dir / "cards")
+                except OSError as exc:                    # noqa: BLE001 - never lose the verdict
+                    log.error("substrate %s: cohort card %s could not be written (%r) — the VERDICT "
+                              "stands and is in the tick outcome; only the artifact is missing",
+                              sub.substrate_id, card.cohort_hash, exc)
+        log.info("substrate %s: COHORT-ONLY tick — %d card(s) from a ledger pool of %d "
+                 "pre-registrations (%d cross_sectional)", sub.substrate_id, len(cohort_cards),
+                 len(pool), sum(1 for _, _, ct in pool if ct == "cross_sectional"))
+    else:
+        log.info("substrate %s: COHORT-ONLY tick rendered NO verdict (pool=%d) — still pending",
+                 sub.substrate_id, len(pool))
+
+    record = TickRecord(
+        tick_ts=tick_ts, substrate_id=sub.substrate_id, dirty=True, mined=False, reason=reason,
+        snapshot_hash=snap, n_preregistered=0, n_scored=0, n_holdout_tested=0, n_promising=0,
+        fdr_charged_total=fdr_total, budget_breached=False, **_power_kwargs(prepared))
+    outcome = SubstrateTickOutcome(
+        substrate_id=sub.substrate_id, dirty=True, mined=False, reason=reason, snapshot_hash=snap,
+        fdr_num_tests=_fdr_tests(store, sub), fdr_charged_total=fdr_total,
+        n_cohort_promising=n_cohort_promising, cohort_cards=list(cohort_cards),
+        n_incubation_stalled=incubation.n_stalled, n_incubation_errors=incubation.n_errors,
+        **_lockbox_fields(sub, incubation.touched, n_enrolled=0))
+    return record, outcome, snap
 
 
 def run_orchestrator_tick(
@@ -250,9 +332,28 @@ def _process_substrate(
     readmitted = _readmit_parked(sub, prepared, author, tick_ts)
     fresh_specs = fresh_specs + readmitted
     n_fresh = len(fresh_specs)
-    dirty, reason = substrate_dirty(data_changed=data_changed, n_fresh_hypotheses=n_fresh)
+    # v12.2: is a COHORT adjudication outstanding? The gate keyed only on per-candidate novelty, so a
+    # substrate whose hypotheses were all individually scored read as "clean" even when the cohort —
+    # a different test, over a SET, with a materially higher measured power profile — had never run
+    # on them. Edge-triggered on the cohort's CONFIGURATION key, so it fires once per configuration
+    # and the §10.1 FDR-conservation intent survives (a cohort costs exactly ONE test, ADR-4).
+    cohort_key = _cohort_config_key(sub)
+    cohort_pending = bool(cohort_key is not None
+                          and store.last_cohort_key(sub.substrate_id) != cohort_key)
+    dirty, reason = substrate_dirty(data_changed=data_changed, n_fresh_hypotheses=n_fresh,
+                                    cohort_pending=cohort_pending)
     if readmitted:
         reason = f"{reason}; {len(readmitted)} re-admitted (U4 power-aware)"
+
+    # v12.2 COHORT-ONLY tick: dirty because a cohort adjudication is outstanding, but there is
+    # nothing fresh to mine. Mining would be the wrong instrument (it would re-score and re-charge
+    # hypotheses whose per-candidate answer is already in the ledger); the cohort is a distinct test
+    # over the substrate's whole pre-registered set, so it is run directly on the ledger-sourced pool.
+    if dirty and not fresh_specs and cohort_pending:
+        return _cohort_only_tick(
+            sub=sub, store=store, prepared=prepared, tick_ts=tick_ts, snap=snap, reason=reason,
+            crucible_version=crucible_version, ghash=ghash, cohort_key=cohort_key,
+            incubation=incubation, out_dir=out_dir)
 
     # A substrate is only MINED if it has fresh specs to score; a data-only change with no new
     # candidate is dirty-but-nothing-to-test (conserves FDR wealth — the §10.1 intent).
@@ -328,6 +429,10 @@ def _process_substrate(
     if result.cohort_cards:
         fdr_total += fdr.observe(is_discovery=(n_cohort_promising > 0))
     store.save_fdr(sub.substrate_id, fdr)
+    # v12.2: record WHICH cohort configuration adjudicated this substrate, only on a rendered
+    # verdict, so `cohort_pending` is edge-triggered and a crashed tick re-runs the cohort.
+    if result.cohort_cards and cohort_key is not None:
+        store.set_cohort_key(sub.substrate_id, cohort_key)
 
     # --- CR-8 lockbox: enroll every PROMISING survivor (idempotent). A fresh entry is INCUBATING with
     # an empty forward window; its card reflects that state (not the P2 PENDING_P4 stub). -----------
@@ -336,15 +441,25 @@ def _process_substrate(
                   if enrolled else list(result.cards))
 
     n_scored = sum(len(r.hall_of_fame) for r in result.reports.values())
+    # v12.0: how many candidates the BINDING holdout gate actually adjudicated, summed over candidate
+    # types. This is the denominator of `n_promising` — see TickRecord.n_holdout_tested for why a
+    # zero-with-unknown-denominator has now cost two sessions.
+    n_holdout_tested = sum(r.n_holdout_tested for r in result.reports.values())
+    if result.reports and n_holdout_tested == 0:
+        log.warning("substrate %s: the holdout gate adjudicated ZERO candidates — n_promising=%d is "
+                    "VACUOUS (no test ran), not a negative result", sub.substrate_id,
+                    result.n_promising)
     record = TickRecord(
         tick_ts=tick_ts, substrate_id=sub.substrate_id, dirty=True, mined=True, reason=reason,
         snapshot_hash=snap, n_preregistered=n_fresh, n_scored=n_scored,
+        n_holdout_tested=n_holdout_tested,
         n_promising=result.n_promising, fdr_charged_total=fdr_total,
         budget_breached=False, burst_target=burst.target,
         manifest_hash=result.manifest.content_hash(), **_power_kwargs(prepared))
     outcome = SubstrateTickOutcome(
         substrate_id=sub.substrate_id, dirty=True, mined=True, reason=reason, snapshot_hash=snap,
-        n_preregistered=n_fresh, n_scored=n_scored, n_promising=result.n_promising,
+        n_preregistered=n_fresh, n_scored=n_scored, n_holdout_tested=n_holdout_tested,
+        n_promising=result.n_promising,
         fdr_charged_total=fdr_total, fdr_num_tests=fdr.num_tests, burst_target=burst.target,
         result=result, cards=tick_cards,
         n_cohort_promising=n_cohort_promising, cohort_cards=list(result.cohort_cards),

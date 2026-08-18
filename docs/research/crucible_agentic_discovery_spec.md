@@ -1,7 +1,7 @@
 # Crucible — Continuous Agentic Alpha-Mining Discovery System
 
-**Status:** DRAFT SPEC v1 (planning only — no code yet). **Revised per independent Fable-5 review** (`.agent/artifacts/crucible_spec_fable_review.md`, 2026-07-01) — two critical design fixes folded in; see §11.
-**Author:** research session 553-cont-97 (2026-07-01)
+**Status:** **BUILT AND SHIPPED — system is at `crucible-v13.1`** (P0–P5 roadmap complete). §§0–11 are the original design spec (written 2026-07-01, last revised 2026-07-14 at `crucible-v2.6`) and remain accurate for the **loop shape**; the **decision layer** has moved twelve times since and is assembled in **§12**, which supersedes any verdict-semantics statement above it. **Revised per independent Fable-5 review** (`.agent/artifacts/crucible_spec_fable_review.md`, 2026-07-01) — two critical design fixes folded in; see §11.
+**Author:** research session 553-cont-97 (2026-07-01); §12 assembled S553-cont-158 (2026-08-11)
 **Supersedes naming:** the alpha-mining research system (`finrl_pro_ds/signals/*` + generation + combiner) is now officially named **Crucible**.
 **Related memory:** `project_alpha_mining_kb_method_s553`, `project_alpha_generation_c3_built_s553`, `project_dynamic_sleeve_combiner_c1_built_s553`, `project_signal_eval_system_s553`, `project_small_operator_strategy_reframe_s553`, `project_alpha_mining_expert_review_findings_s553`.
 
@@ -331,3 +331,90 @@ Review: `.agent/artifacts/crucible_spec_fable_review.md`. Verdict: governance so
 | 6 | HIGH — spec freezes an already-broken gate (`delta_p05_min`, Test B) into the hashed moat. | Repair before v2.0 freeze (§5, P0). |
 | — | **Highest-leverage change (adopted):** make **time the arbiter** — growing lockbox + forward incubation. | New CR-8 + §6.2; new roadmap phase P4. |
 | — | **Credited as sound:** fitness-side honesty (cost-in-metric, marginal-HLZ, dispersion pool, holdout-at-full-N, PBO); `substrate_dirty` (right diagnosis). | Kept; `substrate_dirty` rationale corrected to FDR-wealth conservation (§10.1). |
+
+---
+
+## 12. Decision contract as of `crucible-v13.1` (assembled 2026-08-11, updated 2026-08-12)
+
+§§0–11 above were frozen 2026-07-14, when the system was at `crucible-v2.6`, and they describe the **loop shape** — which is still accurate: no bump since has changed the stage graph. What they do not describe is the **decision layer**, which has changed twelve times since (v3.0 → v13.1). Until now that record lived only in the `finrl_pro_ds/crucible/version.py` module docstring plus the audit reports, so no single artifact showed a screen and the gate it feeds side by side. That is not a documentation nicety: the same defect — *a cheap upstream screen silently blocking the gate that is the actual test* — has now shipped four separate times (§12.5), and each instance was found by measurement long after the fact.
+
+**Authority order.** `version.py` is the per-bump *rationale* record (why, what class, whether CRU-1 is claimed) and remains canonical for that. The gates YAMLs are the *numeric* contract and remain canonical for thresholds — never restate a threshold in prose, here or anywhere. This section is the *assembled* view: what decides a verdict today, in order.
+
+### 12.1 What decides a verdict today
+
+The live path, in execution order. "Owner" is the file that holds the thresholds; nothing below is hardcoded.
+
+| # | Stage | What it decides | Owner | Status |
+|---|-------|-----------------|-------|--------|
+| 1 | **Propose** (`agentic/proposer.py`, `llm_proposer.py`) | Which hypotheses exist. Author reads ONLY `ledger_agent_view` (CR-1/CR-2). Seed bank is 8 curated cross-sectional formulas, or the full published WQ101 bank (100) behind `--extended-seed-bank`; proposal types interleaved so `--max-proposals` cannot become a type filter. | — | v13.0 |
+| 2 | **Eligibility** — `substrate_dirty` | Whether the tick spends anything at all. New data on the substrate **OR** a fresh unscored hypothesis batch **OR** (v13.0) a *pending cohort configuration* — edge-triggered on the cohort's gates hash + `include_cross_sectional`, written only on a rendered verdict. | §10.1 | v13.0 |
+| 3 | **Eligibility** — power guard | Whether the substrate can resolve a plausible edge. Reports the **WORST** MDE across the candidate types the substrate will actually mine; an unmeasured type or an off-grid depth returns `+inf` ⇒ **refuse**. Fails closed on a missing curve. Overrides: `--force-underpowered`, `--no-power-guard`. | `crucible_power.gates.yaml` | v5.0/v7.0/v8.0 |
+| 4 | **Train** — cheap pre-filter | Under `eligibility.offspring_policy: prereg_only` (the default) **pre-registered specs skip this entirely** — the eligible set IS the pre-registration. Only unbounded offspring search is pre-filtered, where it is a compute bound rather than a screen. | `crucible_corrected_contract.gates.yaml` | v12.0 |
+| 5 | **Holdout** — corrected contract | The binding per-candidate test: ONE Jobson-Korkie-Memmel Sharpe-difference *z* on the full embargoed holdout, thresholded at `contract.t_min` **AND** against a binding LORD++ level, plus uplift / fragility / collinearity re-applied **on the holdout**. The v6.0-dropped legs (`marginal_t`, `dsr_aug`) do **not** run here. | `crucible_corrected_contract.gates.yaml` | default since v8.0 |
+| 6 | **Scorecard T0–T5** (the other live path — `scripts/research/eval_signals.py` and siblings) | `promising` = DSR ∧ IC-IR ∧ IC-t ∧ FDR-q ∧ (HLZ, opt-in) ∧ `min_subperiod_ic_ir` ∧ **capturability**. DSR deflates against `max(batch_pool, declared_hypotheses)`, with `n_eff` applied as a correlation *ratio*, never as a substitute. Frictionless Sharpe is a **gate** (strict `>`); net@standard stays a caveat because a cost model is venue-specific. An unmeasured leg fails CLOSED. | `configs/<substrate>_signal_eval.gates.yaml` + `crucible_multiplicity.gates.yaml` | v4.0/v9.0/v11.0 |
+| 7 | **Cohort** (opt-in, downstream) | A *separate* verdict over a pool of weak candidates: assemble pool → analytic `SR*_cohort` benchmark (advisory) → **selection-aware MC null** (stationary bootstrap) → embargoed holdout guard. Pool now dispatches per member on `candidate_type`, so cross-sectional and overlay members are each scored through their OWN funnel path. `run_cohort_only` can adjudicate a substrate's whole pre-registered pool without mining. **ADR-4: exactly ONE LORD++ test per cohort evaluated, independent of pool size.** | `crucible_cohort.gates.yaml` | v12.1/v13.0 |
+| 8 | **Lockbox** (§6.2) | Whether a PROMISING survivor becomes *eligible* for the human gate — forward evidence on bars strictly after `proposal_ts`. | `crucible_lockbox.gates.yaml` | v2.5 |
+| 9 | **Governance** (§7, CLAUDE.md) | Nothing promotes to capital without an operator-initiated Tier-2 deep lifecycle audit. Unchanged since v2.6, and not negotiable by any bump above. | — | v2.6 |
+
+**Rejections feed back** (v10.0): a holdout rejection is classified `DECISIVE` (the test could resolve the smallest edge the active contract accepts ⇒ terminal, the family dies) or `UNDERPOWERED` (parked with the MDE it was tested at, re-admitted when the substrate's MDE materially improves). Writing `NO_GO` on every rejection would be the file-drawer error running backwards. Dedup is semantic (AST-canonical), which leaks nothing score-derived and so does not widen the CRU-2 moat.
+
+### 12.2 Version ledger, v3.0 → v13.0
+
+Class per §5's bump rules. **CRU-1** = "every recorded verdict is preserved" — claimed only where it was *verified*, and deliberately **not** claimed at v6.0.
+
+| Version | Change | Class | CRU-1 |
+|---------|--------|-------|-------|
+| v3.0 | Four anti-conservative scoring fixes (independent audit F14): overlay turnover charged at the base book's TRUE gross; a short tilt charged, not rebated, the embedded cost; `dsr_aug` deflated against AR(1)-effective `n`; degenerate-vol candidates culled. | MAJOR | ✅ monotone-stricter |
+| v4.0 | `robustness.min_subperiod_ic_ir` **wired** (declared since v2.0, read by nothing), after repairing the subperiod estimator's raw-row-index coverage hole. | MAJOR | ✅ verified on the record |
+| v5.0 | Off-grid MDE extrapolation fails CLOSED. The 1/√N law the guard used was directly falsified by the project's own intraday sweep, and it under-stated MDE ⇒ the guard claimed more power than exists. | MAJOR | ✅ property-tested |
+| v6.0 | The **corrected contract** becomes selectable: one JKM Sharpe-difference *z* + a binding LORD++ level + three cheap guards; `marginal_t` (F1, a mean-dominance test in disguise) and `dsr_aug` (F2, deflates the base book's own Sharpe) are DROPPED. Measured: 0/170 lifetime pass on each dropped leg vs 170/170 on the uplift leg ⇒ `P(PROMISING)=0` by construction. Power 0.00 → 0.81 at ΔSR 0.5. | MAJOR | ❌ **not claimed** — the 0-PROMISING record must be RE-SCORED, not inherited; the two records must never be pooled |
+| v7.0 | Power stamp becomes candidate-type aware (worst-of across mined types); an unmeasured type refuses instead of borrowing another type's curve. The cross-sectional surface is equal-or-worse at matched depth. | MAJOR | ✅ monotone-stricter |
+| v7.1 | Cross-sectional search draws `(T,N)` slots by SHAPE, so per-name alt-data stops being confined to a per-day timing overlay. | MINOR | ✅ byte-identical without a `(T,N)` slot |
+| v8.0 | Corrected contract becomes the **default**; a configured power guard that cannot measure REFUSES instead of evaporating. | MAJOR | ✅ on the fail-closed half |
+| v8.1 | TWSE T86 assembled into per-name `(T,N)` matrices (was 40 broadcast terminals). | MINOR | ✅ |
+| v9.0 | Multiplicity stops being a function of SUBMISSION SHAPE: DSR's trial count becomes `max(batch_pool, declared)`. The `use_effective_n` "fix" was rejected as monotone-LOOSER. | MAJOR | ✅ property-tested |
+| v10.0 | Search **memory** (rejection classification + semantic dedup) — `killed_families()` had been structurally empty for the system's whole lifetime — and Tier-0 causality **enforced** on generated genomes (previously asserted in a docstring only). Ships U7: `uplift_min` calibrated, value CONFIRMED. | MAJOR | ✅ verified |
+| v11.0 | PROMISING requires a traded book that makes money (F3): frictionless Sharpe becomes a gate. Motivated by a candidate that scored PROMISING at frictionless **−0.627** — rank-IC living in cells the book does not weight. | MAJOR | ✅ demotes exactly the candidate that motivated it |
+| v12.0 | A pre-registered spec is **TESTED, not screened**: `us_equity` had culled 8 of 8 pre-registrations on the train uplift leg, so the binding gate never executed while the tick reported `promising=0` and charged 8 LORD++ tests. Ships `n_holdout_tested` — the DENOMINATOR of `n_promising`. | MAJOR | ✅ all 8 re-scored, 0/8 pass |
+| v12.1 | The cohort gate admits **cross-sectional** candidates. High-information hypotheses had been going to the ~0%-power per-candidate gate; low-information overlays to the one gate with measured power. | MINOR | ✅ all-overlay pools hash identically |
+| v13.0 | The cohort is a test the scheduler can SEE (`cohort_pending`), and the hypothesis bank is no longer 8 (`--extended-seed-bank`, 8 → 100 WQ101). Adds `run_cohort_only` over a substrate's whole pre-registered pool. | MAJOR | ✅ all paths opt-in, default OFF |
+| v13.1 | `taiwan_smallcap` wired as a **minable** substrate. The panel builder lived inside a probe script reached by `sys.path` injection, so the one substrate carrying six causally-aligned per-name alt-data channels — and the only PROMISING ever recorded — had a full *evaluation* path and **no mining path**. Promotes the builder into `crucible/data/`, adds the substrate + a fourth gates file. | MINOR | ✅ probe scorecards re-run byte-identical |
+
+**Gate bytes.** Every bump above moved **zero** bytes in the three sealed moats. Verified 2026-08-11: `signal_eval.gates.yaml` = `519158fa1450`, `taiwan_signal_eval.gates.yaml` = `22a18172be1a` (the small-cap probe file's `0ccf6dd584f0` is likewise unchanged). v13.1's `taiwan_smallcap_signal_eval.gates.yaml` is a **new fourth file**, not an append: the probe gates file is a sealed pre-registration, and appending to it would break that seal. New gates live in their own files per **ADR-1** — `crucible_{corrected_contract,cohort,power,lockbox,multiplicity,search_memory}.gates.yaml` — precisely so contract work cannot perturb the funnel moat, and so any edit surfaces as a moved hash in provenance. v11.0's `capturability` keys are absent from the sealed files by design: they inherit the key by deep-merge from `Gates._DEFAULTS`, and a test asserts their bytes still do not contain it.
+
+### 12.3 Honest status: what is measured-closed
+
+The decision layer is now sound and the gates are calibrated. **The system has produced zero alphas, and the reason is no longer the machinery.**
+
+- **The per-candidate gate has ~0% power at any plausible effect size.** Across 559 ledger rows on 6 substrates, the maximum `corrected_t` ever recorded is **+1.644** against `t_min` 2.33. On the deepest substrate a coin-flip's chance of passing needs IR ≈ 1.18.
+- **The cohort MC null does have measured power** (≈25% at IR 0.30, ≈50% at IR 0.50, at a 15% hit rate) — and `IR_cohort = δ·√K·hit_rate` is **linear in hit rate**, so the binding constraint is the **hypothesis bank**, not tuning.
+- **`us_equity` is closed on both axes** (2026-08-11, 19.56y × 688 names). Powered requires H ≤ 2, where 97 of 100 published WQ101 alphas are hard-infeasible on turnover (68–135 turns/yr vs a 24/yr cap). Tradeable requires H ≈ 21, where all 100 pass turnover but the power ceiling `IC_low·√(n_eff·252/H)` is **0.626 against an MDE of 1.312**. The two windows are **disjoint**, and no holdout split bridges them: powering H=21 needs ~30.1 holdout-years against a 19.56y panel. `holdout_frac` moves the two gates in OPPOSITE directions. Four cohort verdicts, all null (p = 0.83/0.58/0.55/0.27), with 98 hypotheses reaching the binding gate — so these zeros are results, not vacuities.
+- **Do not propose another (H, holdout_frac) sweep on this substrate.** The only things that reopen it are SUPPLY: a materially longer panel (MDE falls as ~3.17/√years) or higher-IC low-turnover cross-sectional signals than the published bank.
+- **`taiwan_smallcap` became minable at v13.1** — the substrate carrying six per-name alt-data channels and the only PROMISING ever recorded. That is reach, **not** power: whether the miner can detect anything there is a separate measurement the power guard makes on its own. It is also survivorship-biased by construction (the free feed enumerates currently-listed names, in the cap band where delisting is most common), so every number it produces is an **upper bound** — carried into every scorecard as `panel.meta.survivorship_free = False`.
+
+### 12.4 Reading a `promising=0`
+
+A zero is uninterpretable without its denominator. Before citing any run as evidence about the market:
+
+1. Check **`n_holdout_tested`** on the `TickRecord`. `0` means nothing was tested; `NULL` (pre-v12.0 rows) means UNKNOWN, never zero.
+2. Check **`mined=`** and **`fdr_tests=`**. A cohort-only tick records `mined=False` by design — do not read it as a mining night.
+3. Check which **contract** produced it. Shipped and corrected verdicts are not comparable and must never be pooled; the manifest pins `contract` + `corrected_gates_hash` so this is always answerable.
+4. Check the **power stamp**. A refusal is not a verdict about alpha.
+
+### 12.5 The recurring defect, and the standing rule
+
+Four independent instances of one shape — **a cheap upstream screen silently blocking the gate that is the actual test**, each producing a `promising=0` indistinguishable from a real negative:
+
+1. **Pre-v6.0** — the train step re-applied the SAME 6-way AND on more bars than the holdout, so the certified holdout stage was unreachable. It had never executed in production.
+2. **v12.0** — the train uplift pre-filter culled 8 of 8 pre-registrations on `us_equity`, so `corrected_contract_fitness` never ran on one pre-registered hypothesis.
+3. **v12.1-era** — the analytic `SR*_cohort` floor hard-returned before the MC null, the only gate with measured power. (Also: the cohort pool's hard `candidate_type == "overlay"` filter, which sent every high-information candidate to the powerless gate.)
+4. **v13.0** — `substrate_dirty` keyed only on per-candidate novelty, so a cohort test that had never run once read as "nothing to do", and the project's only adequately-powered substrate could not be mined at all.
+
+**Standing rule.** Any screen upstream of a binding gate must report how many candidates reached that gate, and a run whose binding gate executed zero times must be recorded as *untested*, never as a negative. Cheapness is not a licence to decide — a pre-filter that can empty the eligible set is a verdict function, and must be reviewed as one.
+
+**A second, adjacent family — the MISPAIRING.** Not a screen blocking a gate, but a path that was never built, so the candidate and the gate that could test it never meet. Twice now:
+
+- **v12.1** — cross-sectional candidates carried the breadth and the large per-member δ, but the cohort pool admitted overlays only, so they could only ever be adjudicated by the ~0%-power per-candidate gate.
+- **v13.1** — `taiwan_smallcap` had a complete evaluation path and no mining path, because its panel builder lived inside a probe script that the orchestrator could not import.
+
+Both were invisible for the same reason as the screen family: the system reported a well-formed nothing. The diagnostic is the same too — for any substrate or candidate type, ask *which* gate adjudicates it and whether that gate has **measured** power against it. A capability that exists on one half of the system and not the other is a defect even when every test passes.

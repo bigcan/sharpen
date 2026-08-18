@@ -56,6 +56,24 @@ guards:                  # the cheap guards retained from the funnel (NOT the F1
   delta_median_min: 0.0  # central CPCV path is not a loss
   frac_positive_min: 0.50  # majority of CPCV paths have ΔSR > 0
   max_base_corr: 0.70    # collinearity to the base span (multiple corr sqrt(R^2))
+  # EXPOSURE guard (S553-cont-151). Cap on |beta| of the candidate stream to the panel's equal-weight
+  # market return. `null` (the shipped default) leaves the leg INERT and every existing verdict
+  # byte-identical — CRU-1 requires that of a capability bump, so turning it on is a deliberate
+  # operator act, not a silent re-gating.
+  #
+  # WHY IT EXISTS — demonstrated, not theorised. The best candidate the miner has ever surfaced
+  # (`rank(sum(volume,60))` on cross_asset H=1) decomposes to market beta +0.548, R^2 57.2% from
+  # exposures, and a RESIDUAL timing Sharpe of -0.0000: its entire apparent edge is the risk premium
+  # on a long position. It PASSED uplift, fragility AND collinearity — 3 of the 5 legs — because
+  # `max_base_corr` measures correlation to the BASE SLEEVES, not to the MARKET, so a directional
+  # tilt walks straight through. Only the significance leg refused it, and on an underpowered
+  # substrate that is luck rather than design. base_sleeves.py GP3-03 flagged the hazard in a comment;
+  # this is the gate.
+  #
+  # Suggested value when enabled: 0.30 (catches the +0.55 case with room for a genuinely
+  # market-neutral book to breathe). Requires the caller to pass `market_returns=`; without it the
+  # beta is NaN and the leg stays inert, so enabling this alone is not sufficient — wire both.
+  max_market_beta: null
 
 online_fdr:              # binding LORD++ account (audit F13: make it actually threshold, currently gates nothing)
   alpha: 0.10            # per-substrate target FDR

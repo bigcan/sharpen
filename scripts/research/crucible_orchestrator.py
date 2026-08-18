@@ -78,6 +78,22 @@ DEFAULT_GATES = ROOT / "configs" / "signal_eval.gates.yaml"
 DEFAULT_LOCKBOX_GATES = ROOT / "configs" / "crucible_lockbox.gates.yaml"
 DEFAULT_COHORT_GATES = ROOT / "configs" / "crucible_cohort.gates.yaml"
 DEFAULT_POWER_GATES = ROOT / "configs" / "crucible_power.gates.yaml"
+DEFAULT_ALTDATA_GATES = ROOT / "configs" / "crucible_altdata.gates.yaml"
+
+
+def _altdata_max_slot_corr(path: "str | Path | None") -> float | None:
+    """Read ``altdata.max_slot_corr`` from the alt-data ingest gates (never hardcode a gate —
+    CLAUDE.md). Missing file or missing key ⇒ ``None`` ⇒ the redundancy filter is OFF and the
+    bridge behaves exactly as it did pre-2026-08-10."""
+    import yaml
+
+    p = Path(path) if path else DEFAULT_ALTDATA_GATES
+    if not p.exists():
+        return None
+    with open(p, encoding="utf-8") as fh:            # utf-8 explicit: Windows default is cp950 here
+        cfg = yaml.safe_load(fh) or {}
+    v = (cfg.get("altdata") or {}).get("max_slot_corr")
+    return None if v is None else float(v)
 DEFAULT_CORRECTED_GATES = ROOT / "configs" / "crucible_corrected_contract.gates.yaml"
 DEFAULT_SEARCH_MEMORY_GATES = ROOT / "configs" / "crucible_search_memory.gates.yaml"
 
@@ -215,6 +231,118 @@ def _build_substrate(args, cfg, ek, meta, sweep, sweep_hash) -> tuple[Substrate,
             # F14: proxy sleeves are unit-gross cost-free return streams → the overlay-cost
             # correction is an exact no-op (byte-identical synthetic/reproduce path).
             base_components = {k: unit_components(v) for k, v in base.items()}
+        elif meta["panel"] == "us_equity":
+            # S553-cont-152: top-300 PIT S&P 500 names, daily — the first substrate whose MEASURED
+            # realized breadth (n_eff 21.5 at H=1 / 43.7 at H=2, crucible_real_alpha_breadth.py)
+            # clears its own detection floor. The base book is deliberately the ETF linear core, not
+            # an equity-native one: see us_equity_base_sleeves for why a losing comparator is the
+            # failure mode this substrate is most exposed to.
+            import dataclasses
+
+            from finrl_pro_ds.crucible.data.altdata_bridge import bridge_altdata_feature_slots
+            from finrl_pro_ds.crucible.data.us_equity_panel import build_us_equity_panel
+            from finrl_pro_ds.signals.generation.base_sleeves import us_equity_base_sleeves
+            panel = build_us_equity_panel()
+            # 2026-08-10: bridge the macro/positioning series into feature slots, exactly as the
+            # cross_asset branch does. WITHOUT this the panel carries ZERO feature slots, so the
+            # proposer emits no `candidate_type="overlay"` specs, and `loop.py`'s cohort hook returns
+            # ([], {}) before `evaluate_cohort` is ever called — i.e. the selection-aware cohort MC
+            # null (the only gate in the system with measured power against a plausible edge) could
+            # not run on the ONLY adequately-powered substrate. Measured: the scout accepts 24 of 28
+            # discoverable series on this 2007-2026 daily clock (6 FRED macro + 18 COT positioning);
+            # the 4 rejects are EDGAR, which fails closed without a descriptive SEC User-Agent.
+            # `start` is taken from the PANEL's own first bar, not args.start, so the survey's
+            # coverage check is run against the calendar the slots will actually be joined onto.
+            if not args.no_altdata_slots:
+                bar_start = np.datetime_as_string(panel.dates.min(), unit="D")
+                bar_end = args.end or np.datetime_as_string(panel.dates.max(), unit="D")
+                slots = bridge_altdata_feature_slots(
+                    bar_dates=panel.dates, start=bar_start, end=bar_end, catalog=catalog,
+                    max_slot_corr=_altdata_max_slot_corr(args.altdata_config))
+                if slots:
+                    panel = dataclasses.replace(
+                        panel, feature_slots={**panel.feature_slots, **slots})
+                log.info("us_equity: bridged %d alt-data feature slots (overlay/cohort surface)",
+                         len(slots))
+            base_hold = meta.get("base_hold_horizon") or ek["hold_horizon"]
+            base, base_components = us_equity_base_sleeves(
+                panel, hold_horizon=int(base_hold), cost_bps=ek["cost_bps"],
+                return_components=True)
+        elif meta["panel"] == "intraday_fx":
+            # cont-151 derived-optimal substrate. Same shape as the `intraday` branch below (no
+            # alt-data bridge — every connector publishes daily-or-slower, which on an hourly clock
+            # is a step function, not a signal), on the FX-majors union-grid panel.
+            from finrl_pro_ds.crucible.data.intraday_panel import build_fx_majors_panel
+            from finrl_pro_ds.signals.generation.base_sleeves import intraday_base_sleeves
+            panel = build_fx_majors_panel()
+            base_hold = meta.get("base_hold_horizon") or ek["hold_horizon"]
+            base, base_components = intraday_base_sleeves(
+                panel, hold_horizon=int(base_hold), cost_bps=ek["cost_bps"],
+                periods_per_year=float(cfg.periods_per_year), return_components=True)
+        elif meta["panel"] == "intraday":
+            # S553-cont-151: the 12-instrument Dukascopy 1h panel. No alt-data bridge — every
+            # connector in the catalog publishes on a DAILY-or-slower calendar (COT weekly, FRED
+            # monthly), so bridging one onto an hourly clock would hold a single value flat across
+            # ~5,694 bars a year and hand the overlay proposer a step function, not a signal. The
+            # cross-sectional path over the 12 instruments is the whole mining surface here.
+            from finrl_pro_ds.crucible.data.intraday_panel import build_intraday_panel
+            from finrl_pro_ds.signals.generation.base_sleeves import intraday_base_sleeves
+            panel = build_intraday_panel()
+            # The base book rebalances on its OWN cadence (generation.base_hold_horizon). At the
+            # candidate's 21-bar hold this book bleeds 30.6%/yr in friction to a calendar SR of
+            # -0.78, and a losing comparator lets a zero-alpha candidate clear the marginal-uplift
+            # gate purely by diluting the bleed (measured null pass rate 15.3% vs ~1% nominal —
+            # crucible_intraday_null_calibration.py). See config.py's base_hold_horizon note.
+            base_hold = meta.get("base_hold_horizon") or ek["hold_horizon"]
+            base, base_components = intraday_base_sleeves(
+                panel, hold_horizon=int(base_hold), cost_bps=ek["cost_bps"],
+                periods_per_year=float(cfg.periods_per_year), return_components=True)
+        elif meta["panel"] == "taiwan_smallcap":
+            # The cap-rank 51-250 TWSE/TPEx small/mid-cap panel. Unlike every other real substrate
+            # this one carries its alt-data NATIVELY: six per-name (T,N) channels (month-revenue YoY,
+            # margin + short utilization, big-holder concentration, foreign + trust net flow) are
+            # built into the panel by its own builder from local parquets, each already causality-
+            # tripwired by the probe campaign that introduced it. So there is no per-name bridge call
+            # here — `ALL_CHANNELS` IS the per-name surface, and it reaches the cross-sectional
+            # search directly (crucible-v7.1 shape filter).
+            #
+            # The BROADCAST bridge still runs: TWSE/TAIFEX positioning series are per-DAY terminals
+            # the overlay proposer needs, and without any feature slot of that shape a tick emits no
+            # `candidate_type="overlay"` specs and the cohort hook returns before `evaluate_cohort`
+            # is ever called — the failure that kept the selection-aware MC null off the us_equity
+            # substrate until 2026-08-10.
+            import dataclasses
+
+            from finrl_pro_ds.crucible.data.altdata_bridge import bridge_altdata_feature_slots
+            from finrl_pro_ds.crucible.data.taiwan_altdata import (
+                TAIWAN_ALTDATA_ALIASES,
+                taiwan_connectors,
+            )
+            from finrl_pro_ds.crucible.data.taiwan_smallcap_panel import (
+                ALL_CHANNELS,
+                build_taiwan_smallcap_panel,
+            )
+            from finrl_pro_ds.signals.generation.base_sleeves import taiwan_base_sleeves
+            panel = build_taiwan_smallcap_panel(channels=ALL_CHANNELS)
+            if not args.no_altdata_slots:
+                bar_start = np.datetime_as_string(panel.dates.min(), unit="D")
+                bar_end = args.end or np.datetime_as_string(panel.dates.max(), unit="D")
+                slots = bridge_altdata_feature_slots(
+                    bar_dates=panel.dates, start=bar_start, end=bar_end, catalog=catalog,
+                    connectors=taiwan_connectors(), aliases=TAIWAN_ALTDATA_ALIASES)
+                if slots:
+                    panel = dataclasses.replace(
+                        panel, feature_slots={**panel.feature_slots, **slots})
+                log.info("taiwan_smallcap: %d native per-name channels + %d bridged broadcast slots",
+                         len(ALL_CHANNELS), len(slots))
+            # Same TX/TE/TF futures book as the `taiwan` substrate — see config.py's
+            # _WIRED_SUBSTRATES note for the measurement that chose it over the US ETF core.
+            # `start=None` lets the sleeve take the PANEL's own first bar (2005) rather than
+            # args.start (2008 by default), so the comparator covers every bar the candidate marks.
+            base_hold = meta.get("base_hold_horizon") or ek["hold_horizon"]
+            base, base_components = taiwan_base_sleeves(
+                panel, hold_horizon=int(base_hold), cost_bps=ek["cost_bps"],
+                start=None, end=args.end, return_components=True)
         elif meta["panel"] == "taiwan":
             import dataclasses
 
@@ -298,8 +426,12 @@ def _build_substrate(args, cfg, ek, meta, sweep, sweep_hash) -> tuple[Substrate,
         # V4: a tick mines BOTH candidate types, whose curves differ, so the stamp is taken across both
         # and reports the WORST. `sweep` is now {candidate_type: sweep}; a type with no measured curve
         # yields +inf -> refuse rather than borrowing the other's.
+        # cont-151: the curve is in ΔSR per 252-bar year, so the stamp is rescaled onto the
+        # substrate's own bar clock (cfg.periods_per_year) before it is compared to the ceiling —
+        # 252 for every daily substrate, hence byte-identical there.
         power = (stamp_substrate_power(panel.T, float(ek.get("holdout_frac", 0.25)), sweep, sweep_hash,
-                                       candidate_types=tuple(sorted(sweep)))
+                                       candidate_types=tuple(sorted(sweep)),
+                                       bars_per_year=float(cfg.periods_per_year))
                  if sweep is not None else None)
         # NOW-6 (C2-07): fold the panel content-hash into snapshot_hash so a PRICE-bar arrival (or a
         # revision) flips the substrate dirty — the alt-data catalog hash alone missed the primary
@@ -333,7 +465,7 @@ def _build_substrate(args, cfg, ek, meta, sweep, sweep_hash) -> tuple[Substrate,
         proposer = LlmProposer(model=args.llm_model)
         est_tokens = int(args.est_tokens_per_tick)
     else:
-        proposer = LibrarySeedProposer()
+        proposer = LibrarySeedProposer(extended_cs_bank=args.extended_seed_bank)
         est_tokens = 0
     # crucible-v6.0 DECISION CONTRACT (operator choice, never the agent's). "shipped" keeps the
     # historical 6-way AND; "corrected" swaps the holdout decision for the audit §5 contract, whose
@@ -499,6 +631,14 @@ def main() -> int:
                          "single-slot panel; use >=5 to give the overlay pool de-correlated breadth so "
                          "the opt-in weak-signal cohort gate can form a cohort)")
     ap.add_argument("--max-proposals", type=int, default=32)
+    ap.add_argument(
+        "--extended-seed-bank", action="store_true",
+        help="draw the FULL published WQ101 cross-sectional bank (100 formulas) instead of the "
+             "curated 8. The 8 are exhausted against us_equity's ledger, so without this the "
+             "substrate_dirty gate reports 'no fresh hypotheses' and the mine cannot run at all. "
+             "Each extra spec is pre-registered and charges one LORD++ test; the cohort still "
+             "charges exactly one regardless of pool size (ADR-4). Proposal types are interleaved "
+             "so --max-proposals truncation does not starve the overlay leg.")
     ap.add_argument("--proposer", choices=("library", "llm"), default="library",
                     help="library = deterministic offline seed bank (default, no cost/network, "
                          "bit-reproducible). llm = live LLM-backed proposer (spec Part A2); needs "
@@ -525,6 +665,8 @@ def main() -> int:
     ap.add_argument("--no-cohort", action="store_true",
                     help="detach the weak-signal cohort gate entirely (pure pre-cohort byte-identical "
                          "path; used by crucible reproduce / testing)")
+    ap.add_argument("--altdata-config", default=str(DEFAULT_ALTDATA_GATES),
+                    help="alt-data INGEST gates (altdata.max_slot_corr redundancy filter)")
     ap.add_argument("--no-altdata-slots", action="store_true",
                     help="real mode only: skip bridging macro/positioning/fundamental connector "
                          "series into Panel feature slots (mine the cross-sectional bank only)")

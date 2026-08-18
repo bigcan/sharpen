@@ -641,7 +641,171 @@ from pathlib import Path
 # is owed (verified: scripts/research/crucible_calibration.py imports no scorecard symbol).
 # to_markdown gained a `fricSh` column: the 2026-07-31 miss was partly a REPORTING failure, since the
 # table that carried the PROMISING showed netSh@std and costWall but never the frictionless Sharpe.
-CRUCIBLE_VERSION = "crucible-v11.0"
+# v12.0 = A PRE-REGISTERED SPEC IS TESTED, NOT SCREENED. Under `eligibility.offspring_policy:
+# prereg_only` (the default) the cheap TRAIN pre-filter no longer applies to pre-registered seeds; the
+# eligible set IS the pre-registration, and every spec that produced a FitnessResult reaches the
+# binding holdout gate. MEASURED motivation (S553-cont-153, on the first adequately-powered substrate):
+# `us_equity` culled 8 of 8 pre-registered seeds on train — all on the `uplift` leg, train ΔSR
+# -0.19..-1.03 against a +0.10 floor — so `train_passers` was EMPTY, the holdout loop never iterated,
+# and `corrected_contract_fitness` never executed on one pre-registered hypothesis. The tick reported
+# `mined=True fdr_tests=8 promising=0` and CHARGED eight LORD++ tests for tests that never ran. Same
+# shape as the defect v6.0 was built to remove (train re-applying the final gate ⇒ the holdout stage
+# never runs), through a different door: an ECONOMIC-SIZE screen rather than a significance one, with
+# the identical consequence — `promising=0` carrying no evidence and being indistinguishable from a
+# run where the test did execute. It is also selection in the wrong direction (keep the
+# pre-registrations that already look good IN-sample, then test those out-of-sample), which is what
+# pre-registration exists to prevent. No guard is lost: uplift/fragility/collinearity are all
+# re-applied on the HOLDOUT inside `corrected_contract_fitness`, where they judge out-of-sample
+# evidence. `offspring_policy: all` is untouched — with an unbounded search feeding it the pre-filter
+# is a compute bound, not a screen on pre-registrations.
+#
+# MAJOR because it changes WHICH hypotheses a tick tests — the v10.0 precedent exactly (semantic dedup
+# / re-admission), a decision-layer change with no gate value moved. NO gate byte changes; the three
+# sealed moats 519158fa1450 / 22a18172be1a / 0ccf6dd584f0 are UNCHANGED, and no threshold is retuned.
+#
+# CRU-1 verdict-preservation IS claimed for the existing record and was VERIFIED, not assumed: the
+# eight `us_equity` seeds — the only pre-registrations this change would have routed differently —
+# were re-scored through the SHIPPED `corrected_contract_fitness` on the embargoed holdout
+# (scripts/research/crucible_prereg_prefilter_forensics.py, results/crucible_prereg_forensics/).
+# 0 of 8 pass, and not marginally: best corrected_t = 0.44 against t_min 2.33, seven of eight with a
+# NEGATIVE holdout ΔSR. So the recorded `promising=0` stands unchanged — what changes is that it is
+# now a result rather than a vacuity, and the ledger's `rejection_class` stops being NULL.
+#
+# Ships with the REPORTING half, which is the durable part: `GenerationReport.n_holdout_tested` ->
+# `TickRecord.n_holdout_tested` (nullable, migrated by _ensure_columns; NULL on pre-v12 rows means
+# UNKNOWN, never zero) records the DENOMINATOR of `n_promising`, and the orchestrator warns loudly
+# when it is zero. Two consecutive sessions lost real time to a `promising=0` whose denominator was
+# unreadable — the cont-152 dedup livelock, then this pre-filter. The count now travels with the
+# verdict instead of living in a log line.
+# v12.1 = THE COHORT GATE ADMITS CROSS-SECTIONAL CANDIDATES. MINOR. Through v12.0
+# `agentic/loop.py` assembled the cohort pool with a hard `candidate_type == "overlay"` filter
+# (ADR-3 option (A); (C) was deferred as "future extension, only if measured to help"). The 2026-08-09
+# root-cause work measured it, and the pairing was backwards on both sides:
+#   * CROSS-SECTIONAL candidates carry the panel's breadth (n_eff 42.1 on us_equity) and so hold the
+#     large per-member IR — the δ in `IR_cohort = δ·√K·hit_rate` — but were adjudicated ONLY by the
+#     per-candidate corrected contract, whose measured power is ~0% for any plausible alpha (IR 1.18
+#     needed for a coin flip on the deepest substrate; max `corrected_t` ever recorded = +1.644 vs
+#     t_min 2.33, across 559 ledger rows and 6 substrates).
+#   * OVERLAYS are one scalar per day and structurally correlated with the base book they tilt, so
+#     their δ is small by construction — and they were the ONLY input the selection-aware MC null (the
+#     one gate with measured power: 25% @ IR 0.30, 50% @ IR 0.50 at a 15% hit rate) ever saw. Both
+#     cohort verdicts ever rendered sat on the null median (p=0.5385 / p=0.5934).
+# High-information hypotheses went to the powerless gate; low-information hypotheses went to the
+# powerful one. This bump crosses them: `cohort_eval.assemble_candidate_pool` dispatches per member on
+# `candidate_type` (`_candidate_returns` for cross-sectional, `_overlay_returns` for overlay — each
+# member's OWN funnel scoring path, so the cohort scores exactly the stream the per-candidate gate
+# did), and `loop.py` admits cross-sectional pre-registrations when
+# `cohort.include_cross_sectional` is set (SHIPPED true in configs/crucible_cohort.gates.yaml,
+# code default False so an absent key reproduces the pre-v12.1 pool).
+#
+# MINOR, not MAJOR: NO statistic and NO threshold changed. Admission, the MC null and the embargoed
+# holdout guard consume `(T,)` return streams and never inspect how a stream was produced; the null's
+# calibration is a property of the stationary bootstrap, not of the pool's provenance. The deflation N
+# (`n_candidates_seen`) grows with the pool, which makes the analytic benchmark STRICTER. ADR-4 still
+# charges ONE LORD++ test per cohort EVALUATED, not per member — no extra multiplicity is spent.
+#
+# NOTE what this does NOT claim. The cohort statistic is still T observations of a book ΔSR; a
+# candidate's T×N panel buys a cleaner per-day stream (larger δ), not more rows for the null. And
+# `IR_cohort = δ·√K·hit_rate` is LINEAR in hit rate, so this change raises δ and K but leaves the
+# hypothesis bank as the binding constraint.
+#
+# CRU-1: no recorded verdict moves. Two cohort cards exist (both LOGGED, both overlay-only pools);
+# `pool_content_hash` folds `candidate_type` ONLY for non-overlay members, so an all-overlay pool
+# hashes and seeds byte-identically to pre-v12.1. The funnel gates_hash (519158fa1450) lives in a
+# different file and is untouched; `configs/crucible_cohort.gates.yaml`'s own hash changes, which is
+# exactly the visible-provenance mechanism the two-file split (ADR-1) exists for.
+# v13.0 = THE COHORT IS A TEST THE SCHEDULER CAN SEE, AND THE HYPOTHESIS BANK IS NO LONGER 8.
+# MAJOR: it changes WHICH hypotheses a tick tests and WHEN a tick fires — the v10.0/v12.0 precedent
+# exactly (both were MAJOR for changing which hypotheses are tested, with no gate value moved).
+# No threshold and no gate byte changes here either; the three sealed moats are untouched.
+#
+# TRIGGER, measured 2026-08-11 while trying to run the first mixed-pool cohort on `us_equity`. The
+# substrate refused to mine twice, for two DIFFERENT reasons, and neither was a verdict about alpha:
+#   1. `_CS_SEED_BANK` is 8 formulas, deterministic, and all 8 were already in the ledger ⇒ the
+#      Author deduped every proposal to zero ⇒ `substrate_dirty` reported "no fresh hypotheses". The
+#      only adequately-powered substrate in the project could not be mined AT ALL. The 2026-08-09
+#      root cause had already named the hypothesis bank as the binding constraint (`IR_cohort =
+#      δ·√K·hit_rate` is LINEAR in hit rate); this is that constraint reached operationally.
+#   2. `substrate_dirty` keyed exclusively on PER-CANDIDATE novelty. Those 8 had each been tested
+#      individually and lost, so the substrate read as clean — while the COHORT test over exactly
+#      those hypotheses, a different statistic and the only one with measured power, had never run
+#      once. FOURTH instance of this project's recurring shape: a cheap upstream screen silently
+#      blocking the gate that is the actual test (cf. the pre-v6.0 train re-application, the v12.0
+#      train cull of 8/8 pre-registrations, and the v12.1-era analytic cohort floor).
+#
+# SHIPS:
+#   * `LibrarySeedProposer.extended_cs_bank` (opt-in, `--extended-seed-bank`): the remaining
+#     published WQ101 alphas, 8 -> 100 cross-sectional. Pre-registered with GENERIC priors, and
+#     labelled as such — these are breadth, not 8-style curated economic stories. Proposal types are
+#     INTERLEAVED so a `--max-proposals` cap cannot silently become a type filter (100 xsec would
+#     otherwise be emitted before the first overlay and starve the mixed pool v12.1 exists for).
+#   * `substrate_dirty(..., cohort_pending=)` + `OrchestratorStore.last_cohort_key/set_cohort_key`
+#     (with a `last_seen.cohort_key` migration — the production store predates the column). The
+#     condition is EDGE-TRIGGERED on the cohort's configuration key (gates hash + the
+#     include_cross_sectional policy, since flipping it turns an overlay-only pool into a mixed one),
+#     and the key is written ONLY on a rendered verdict, so a cohort fires once per configuration and
+#     a crashed tick re-runs. The §10.1 FDR-conservation intent is preserved: ADR-4 still charges
+#     exactly ONE test per cohort EVALUATED, independent of pool size.
+#   * `TrialLedger.pre_registered_pool(run_prefix)` + `loop.run_cohort_only` + a `_cohort_only_tick`
+#     orchestrator branch: the cohort can now adjudicate the substrate's WHOLE pre-registered set
+#     (140 on us_equity) instead of one night's batch, without mining — mining would re-score and
+#     re-charge hypotheses whose per-candidate answer is already recorded. The tick records
+#     `mined=False`, because no per-candidate hypothesis was scored and a reader must not mistake it
+#     for a mining night. Offspring are excluded (no `spec_json`): non-deterministic membership would
+#     break `pool_content_hash`, hence the MC seed, hence reproduce (ADR-3 (B)).
+#
+# NOT A POWER CLAIM. `max_cohort_size` is 12, so a 140-member pool does NOT raise admitted K past 12;
+# what it buys is a better menu to select 12 de-correlated members from and more selection
+# multiplicity for the MC null to price. That threshold is a gate value and was not touched.
+#
+# ANTI-SELECTION. `pre_registered_pool` returns ALL of a substrate's pre-registrations, never a
+# performance-ranked subset, and reads no verdict column. Routing a Sharpe-SELECTED pool through a
+# gate that does not price the selection measured FPR 1.000 (2026-08-09); the MC null prices only the
+# selection it performs itself, on a pool handed to it whole. Pinned by a test.
+#
+# CRU-1: every new path is opt-in and defaults OFF (`extended_cs_bank=False`; `cohort_pending` cannot
+# fire when the cohort gate is disabled), so a pre-v13.0 tick's proposal batch, dirty decision and
+# manifest are byte-identical. No recorded verdict moves.
+# `crucible-v13.1` is the **MINOR** bump that wires `taiwan_smallcap` as a substrate: the cap-rank
+# 51-250 TWSE/TPEx small/mid-cap daily panel becomes something the orchestrator can MINE, not only
+# something four probe scripts could score.
+#
+# WHAT WAS ACTUALLY WRONG. The panel builder lived inside
+# `scripts/research/taiwan_smallcap_altdata_eval.py` and the other three probe scripts reached it by
+# `sys.path` injection. The orchestrator could not import it at all, so the one substrate in this
+# project carrying six causally-aligned per-name alt-data channels — and the only PROMISING ever
+# recorded (P1 `tw_smallcap_mom_rev`) — had a full evaluation path and NO mining path. The two halves
+# of the system could not meet on it, the same shape as the v12.1 cross-sectional mispairing.
+#
+# SHIPS:
+#   * `crucible/data/taiwan_smallcap_panel.py` — the builder, promoted verbatim into the library with
+#     its causal helpers, plus the flow/short channels that had been re-implemented in the two
+#     2026-07-31 probe scripts. `balance_util` is now ONE function for the margin and short legs of
+#     `margin_short.parquet`, which differ only in which column is divided; they were hand-copied and
+#     a divergence between them would have been invisible (both produce well-formed numbers).
+#   * `taiwan_smallcap` in `_WIRED_SUBSTRATES` (book: TX/TE/TF futures TSMOM, shared with `taiwan`)
+#     + an orchestrator branch + `configs/taiwan_smallcap_signal_eval.gates.yaml` (a NEW file — the
+#     probe gates file is a sealed pre-registration and appending to it would break that seal).
+#
+# THE BOOK IS A MEASUREMENT, NOT A CONVENTION. Both candidate comparators were priced on this panel's
+# own clock at hold 21 / 10bps: TX/TE/TF futures TSMOM SR +0.273 on 5291 of 5292 bars, versus the
+# validated US ETF core SR +0.511 on only 4620 (87.3%). The binding rule is that the comparator must
+# not bleed; the Taiwan book clears it, so the higher Sharpe does not buy enough to accept a book
+# that is FLAT on 12.7% of the panel — that gap is the same free-pass channel a bleeding comparator
+# opens. `us_equity` had no such choice (its native comparator is a recorded NO-GO).
+#
+# NOT A DISCOVERY CLAIM, and specifically not a power claim. Wiring a substrate says the miner can
+# now reach it; whether it can DETECT anything there is a separate measurement the power guard makes
+# on its own (`crucible_real_alpha_breadth.py --panel taiwan_smallcap`). The substrate is also
+# survivorship-biased by construction — the free FinMind feed enumerates currently-listed names, in
+# the band where delisting is most common — so every number it produces is an UPPER BOUND, and
+# `panel.meta.survivorship_free = False` carries that into every scorecard.
+#
+# CRU-1: the three frozen gate hashes are untouched (`519158fa1450` / `22a18172be1a` /
+# `0ccf6dd584f0`); the new gates file is a fourth, registered in tests. Every changed probe script
+# was re-run and its scorecard verified byte-identical to the pre-refactor artifact. No recorded
+# verdict moves.
+CRUCIBLE_VERSION = "crucible-v13.1"
 
 # The baseline (pre-gate-repair) system, preserved as a git tag for reproducibility comparisons.
 CRUCIBLE_BASELINE_VERSION = "crucible-v1.0"

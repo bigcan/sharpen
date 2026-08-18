@@ -34,6 +34,7 @@ from finrl_pro_ds.signals.scorecard import (  # noqa: E402
     to_markdown,
     write_scorecard,
 )
+from finrl_pro_ds.crucible.data import taiwan_smallcap_panel as tsp  # noqa: E402
 from finrl_pro_ds.signals.spec import SignalSpec  # noqa: E402
 import taiwan_smallcap_altdata_eval as base  # noqa: E402
 
@@ -49,37 +50,14 @@ DECLARED_HYPOTHESES = 8       # cumulative across all campaigns on this substrat
 def _short_util(margin: pd.DataFrame, shareholding: pd.DataFrame) -> pd.DataFrame:
     """``[stock_id, avail_date, short_util]`` = short balance / causal total shares.
 
-    Byte-for-byte the same causal construction as `base._margin_util`, with `short_balance`
-    substituted for `margin_balance`: shares are merged as-of BACKWARD on the balance row's own
-    trading date (so only an already-public share count is used) and the result is stamped T+1
-    because TWSE publishes balances after the close.
+    The SAME causal construction as the margin leg, with `short_balance` substituted for
+    `margin_balance` — which is why both now route through one library function
+    (:func:`taiwan_smallcap_panel.balance_util`) rather than two hand-copied ones: shares are merged
+    as-of BACKWARD on the balance row's own trading date (so only an already-public share count is
+    used) and the result is stamped T+1 because TWSE publishes balances after the close.
     """
-    empty = pd.DataFrame(columns=["stock_id", "avail_date", "short_util"])
-    if margin.empty or shareholding.empty or "total_shares" not in shareholding.columns:
-        return empty
-    mg = margin.copy()
-    mg["stock_id"] = mg["stock_id"].astype(str)
-    mg["date"] = pd.to_datetime(mg["date"])
-    sh = shareholding.dropna(subset=["total_shares"]).copy()
-    sh["stock_id"] = sh["stock_id"].astype(str)
-    sh["avail_date"] = pd.to_datetime(sh["avail_date"])
-    frames = []
-    for tk, g in mg.groupby("stock_id"):
-        s = sh[sh["stock_id"] == tk][["avail_date", "total_shares"]].sort_values("avail_date")
-        if s.empty:
-            continue
-        g = g.sort_values("date")
-        merged = pd.merge_asof(
-            g[["date", "short_balance"]].rename(columns={"date": "avail_date"}),
-            s, on="avail_date", direction="backward")
-        util = np.where(merged["total_shares"] > 0,
-                        merged["short_balance"] / merged["total_shares"], np.nan)
-        frames.append(pd.DataFrame({
-            "stock_id": tk,
-            "avail_date": pd.to_datetime(g["date"].to_numpy()) + pd.tseries.offsets.BDay(1),
-            "short_util": util}))
-    return (pd.concat(frames, ignore_index=True).dropna(subset=["short_util"])
-            if frames else empty)
+    return tsp.balance_util(margin, shareholding,
+                            balance_col="short_balance", out_col="short_util")
 
 
 class _SlotLevel:
