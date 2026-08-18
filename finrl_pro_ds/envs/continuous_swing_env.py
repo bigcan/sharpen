@@ -75,6 +75,26 @@ class ContinuousSwingEnv(gym.Env):
         # absolute (acts as hard safety in high-vol regimes regardless of leverage).
         self.max_leverage = float(config.get("max_leverage", 1.0))
 
+        # Long-only mode: target position constrained to [0, +max_leverage] — the agent may
+        # size and time exposure but never sell short. Default False = unchanged two-sided V7.
+        #
+        # ENFORCEMENT IS IN THE ENV, NOT THE POLICY, and that is deliberate rather than lazy.
+        # The SAC actor (agents/sac/networks.py:283) is hardwired to a tanh-squashed Gaussian on
+        # [-1, 1] and never reads action_space.low, so narrowing the Box alone would change
+        # NOTHING about what the agent emits. Same choice as CryptoPerpEnv (crypto_perp_env.py:203).
+        #
+        # Tradeoff, recorded because it biases the comparison: clipping (rather than affinely
+        # rescaling [-1,1] -> [0,1]) leaves the negative half of the policy's range mapping to
+        # flat, so ~half of an untrained policy's samples are flat and the critic sees a plateau
+        # there. Rescaling would use the full range but would push "flat" to the saturating edge
+        # of tanh, making a truly flat position nearly unreachable and turning the variant into
+        # leveraged buy-and-hold instead of a timing strategy. Clipping keeps the long half of
+        # the action semantics BYTE-IDENTICAL to the two-sided variant, which is what makes the
+        # A/B a test of the short constraint rather than of two different action encodings.
+        self.long_only = bool(config.get("long_only", False))
+        self._action_low = 0.0 if self.long_only else -1.0
+        self._position_floor = 0.0 if self.long_only else -self.max_leverage
+
         # Gap detection: zero out returns exceeding 3x ATR/price (session gaps, rolls)
         # Default off — enable for futures with trading halts (Gold, ES).
         self.gap_detection = bool(config.get("gap_detection", False))
@@ -129,7 +149,7 @@ class ContinuousSwingEnv(gym.Env):
 
         # Spaces
         self.action_space = gym.spaces.Box(
-            low=-1.0, high=1.0, shape=(1,), dtype=np.float32,
+            low=self._action_low, high=1.0, shape=(1,), dtype=np.float32,
         )
 
         # Build obs space dynamically from scales config
@@ -273,7 +293,8 @@ class ContinuousSwingEnv(gym.Env):
 
     def step(self, action):
         raw_action = float(action[0]) if hasattr(action, '__len__') else float(action)
-        target_position = np.clip(raw_action, -1.0, 1.0) * self.max_leverage
+        # _action_low is -1.0 normally, 0.0 in long_only mode (see __init__).
+        target_position = np.clip(raw_action, self._action_low, 1.0) * self.max_leverage
 
         self.current_step += 1
 
@@ -332,7 +353,9 @@ class ContinuousSwingEnv(gym.Env):
                 if self.current_atr > atr_pct[p90_idx]:
                     target_position = np.clip(
                         target_position,
-                        -self.atr_cap_max_position,
+                        # long_only floors the ATR cap at flat instead of letting the
+                        # high-vol clamp open a short.
+                        0.0 if self.long_only else -self.atr_cap_max_position,
                         self.atr_cap_max_position,
                     )
                     delta = target_position - self.current_position
@@ -342,7 +365,7 @@ class ContinuousSwingEnv(gym.Env):
             if delta != 0.0:
                 self.current_position += delta
                 self.current_position = np.clip(
-                    self.current_position, -self.max_leverage, self.max_leverage,
+                    self.current_position, self._position_floor, self.max_leverage,
                 )
                 traded = True
                 self.trade_count += 1
