@@ -322,7 +322,8 @@ def run_training(config, run_name, device, agent_type="bdq", warm_start=None):
         # Create environment (pass shm_config explicitly)
         # Also pass use_shm to Gymnasium to disable internal SHM if needed
         use_sync = config.get("training", {}).get("use_sync", False)
-        env = create_vector_env(config, num_envs, shm_config=shm_config, gym_shm=use_shm, use_sync=use_sync)
+        env = create_vector_env(config, num_envs, shm_config=shm_config, gym_shm=use_shm,
+                                use_sync=use_sync, seed=config.get("seed"))
         logger.info(f"Environment ready: {num_envs} workers")
 
         # Train — dispatch based on agent type
@@ -445,7 +446,11 @@ def run_backtest(config, checkpoint_path, device, start_date=None, end_date=None
                 backtest_config["env"]["taker_fee"] = final_fee
             logger.info(f"[R2-AUD-03] Backtest fee overridden from fee_schedule: {final_fee:.6f}")
 
-        env = make_env(backtest_config, start_date=start_date, end_date=end_date, norm_cutoff_date=norm_cutoff_date)
+        # FIX SEED-01: run_backtest forces random_start=False/episode_length=0 above,
+        # so the episode start is already deterministic here; seeding is defence in
+        # depth for any other env-level draw (and keeps every env path consistent).
+        env = make_env(backtest_config, start_date=start_date, end_date=end_date,
+                       norm_cutoff_date=norm_cutoff_date, seed=config.get("seed"))
 
         # Create agent
         sample_obs, _ = env.reset()
@@ -957,6 +962,15 @@ def main():
         if torch.cuda.is_available():
             torch.cuda.manual_seed_all(args.seed)
         logger.info(f"Global seed set: {args.seed}")
+        # FIX SEED-01: the calls above seed the PARENT process only. Envs are built
+        # in spawned workers that inherit none of it, so the seed must travel in the
+        # config to reach create_vector_env/make_env.
+        base_config["seed"] = args.seed
+    else:
+        logger.warning(
+            "[SEED-01] No --seed passed: env episode starts self-seed from OS entropy "
+            "and this run is NOT reproducible.",
+        )
 
     try:
         # =====================================================================

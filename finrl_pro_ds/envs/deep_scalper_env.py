@@ -399,7 +399,9 @@ class DeepScalperEnv(gym.Env):
             if self.episode_length > 0 and data_len > 0:
                 if self.random_start:
                     max_start = max(1, data_len - self.episode_length - self.window_size)
-                    start_idx = np.random.randint(0, max_start)
+                    # FIX SEED-01: was np.random (global RNG) — unreachable by seeding,
+                    # so V5 random starts stayed non-reproducible in spawned workers.
+                    start_idx = int(self.np_random.integers(0, max_start))
                     self.handler._ptr = start_idx
                     self.current_step = 0
                 self._episode_end = self.episode_length
@@ -441,9 +443,9 @@ class DeepScalperEnv(gym.Env):
                      self.current_mid_price = first_step['mid_price']
 
                 # Deviation #8: Private State Augmentation
-                if self.private_state_augment_prob > 0.0 and np.random.random() < self.private_state_augment_prob:
+                if self.private_state_augment_prob > 0.0 and self.np_random.random() < self.private_state_augment_prob:
                     # Random Position: [-Max, Max]
-                    self.position = np.random.uniform(-self.max_position, self.max_position)
+                    self.position = self.np_random.uniform(-self.max_position, self.max_position)
 
                     # Random Balance: Need enough to cover margin + buffer
                     value = abs(self.position) * self.current_mid_price
@@ -452,7 +454,7 @@ class DeepScalperEnv(gym.Env):
                     # Range: [Required * 1.05, Initial * 1.5]
                     min_bal = required_margin * 1.05
                     max_bal = max(min_bal * 1.1, self.initial_balance * 1.5)
-                    self.balance = np.random.uniform(min_bal, max_bal)
+                    self.balance = self.np_random.uniform(min_bal, max_bal)
 
                     # Initialize notional_debt for leveraged positions
                     # Long: debt = borrowed cash (partial notional)

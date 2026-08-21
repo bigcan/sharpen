@@ -79,7 +79,14 @@ class AugmentedDataWrapper(gym.ObservationWrapper):
         self._vol_scale = 1.0
         self._spread_scale = 1.0
         self._ofi_scale = 1.0
-        self._rng = np.random.default_rng()
+        # FIX SEED-01: was np.random.default_rng() — an UNSEEDED generator driving
+        # per-episode obs perturbation, unreachable by any seed. Expose the wrapped
+        # env's generator instead (as a property, since Env.reset(seed=...) REPLACES
+        # the generator object and a cached reference would go stale).
+
+    @property
+    def _rng(self) -> np.random.Generator:
+        return self.env.np_random
 
     def reset(self, **kwargs) -> tuple[dict[str, np.ndarray], dict]:
         obs, info = self.env.reset(**kwargs)
