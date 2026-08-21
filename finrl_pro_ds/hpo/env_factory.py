@@ -7,6 +7,7 @@ import logging
 import os
 
 import gymnasium as gym
+from gymnasium.utils import seeding
 
 from finrl_pro_ds.data.parquet_handler import ParquetDataHandler
 from finrl_pro_ds.envs.deep_scalper_env import DeepScalperEnv
@@ -15,7 +16,7 @@ from finrl_pro_ds.envs.swing_scalper_env import SwingScalperEnv
 logger = logging.getLogger("FinRL.HPO")
 
 
-def make_env(config, start_date=None, end_date=None, shm_config=None, norm_cutoff_date=None):
+def _build_env(config, start_date=None, end_date=None, shm_config=None, norm_cutoff_date=None):
     """Factory to create environment with real data.
 
     Args:
@@ -216,20 +217,73 @@ def make_env(config, start_date=None, end_date=None, shm_config=None, norm_cutof
     return DeepScalperEnv(config=env_config, data_handler=handler)
 
 
+def _seed_env(env, seed):
+    """Deterministically seed ``env``'s Gymnasium RNG.
+
+    FIX SEED-01: ``ContinuousSwingEnv.reset`` draws the random episode start from
+    ``self.np_random``. With ``reset(seed=None)`` Gymnasium never initializes
+    ``_np_random``, so it lazily self-seeds from OS entropy and every run walks a
+    different episode-start sequence — including across the spawned vector workers,
+    which are fresh interpreters that inherit nothing from the parent's global seed.
+    Seeding here (rather than only at reset) makes the env deterministic for callers
+    that reset without a seed, e.g. the HPO eval path and the backtest path.
+    """
+    if seed is None:
+        return env
+    # Gymnasium's Wrapper delegates the np_random property to the wrapped env,
+    # so this reaches the base env through PropFirmWrapperV7/RiskShapingWrapper.
+    env.np_random, _ = seeding.np_random(int(seed))
+    return env
+
+
+def make_env(config, start_date=None, end_date=None, shm_config=None,
+             norm_cutoff_date=None, seed=None):
+    """Factory to create environment with real data.
+
+    Args:
+        norm_cutoff_date: FIX LEAK-1 — When set, rolling normalization statistics
+            (z-scores, SMAs) are reset at this date boundary so that training
+            data does not leak into val/test feature statistics.
+        seed: FIX SEED-01 — When set, seeds the env RNG so the random episode
+            start (and any other env-level draw) is reproducible. ``None``
+            preserves the historical self-seeding behaviour.
+    """
+    env = _build_env(
+        config, start_date=start_date, end_date=end_date,
+        shm_config=shm_config, norm_cutoff_date=norm_cutoff_date,
+    )
+    return _seed_env(env, seed)
+
+
 def create_vector_env(config, num_envs, start_date=None, end_date=None,
                       shm_config=None, gym_shm=True, use_sync=False,
-                      norm_cutoff_date=None):
+                      norm_cutoff_date=None, seed=None):
     """Create vectorized environment for training.
 
     Note: Using AsyncVectorEnv for parallel data loading. Context 'spawn' is used
     for CUDA/PyTorch safety. Set use_sync=True to use SyncVectorEnv (no subprocesses),
     which avoids IPC/FD limits on constrained containers.
+
+    Args:
+        seed: FIX SEED-01 — base seed. Worker ``i`` is seeded with ``seed + i`` so
+            the workers stay decorrelated (they must not all walk the same episode
+            starts) while the whole batch is reproducible. This derivation is
+            deliberately identical to Gymnasium's own ``reset(seed=int)`` fan-out
+            (``[seed + i for i in range(num_envs)]``), so construction-time seeding
+            and a later ``reset(seed=base)`` agree instead of fighting.
+            Under ``context="spawn"`` the workers are fresh interpreters, so the
+            seed must travel in the pickled factory — a parent-process
+            ``np.random.seed`` does not reach them.
     """
     # FIX BUG-02: Forward norm_cutoff_date to individual envs for normalization isolation
-    env_factory = functools.partial(
-        make_env, config=config, start_date=start_date, end_date=end_date,
-        shm_config=shm_config, norm_cutoff_date=norm_cutoff_date,
-    )
+    env_fns = [
+        functools.partial(
+            make_env, config=config, start_date=start_date, end_date=end_date,
+            shm_config=shm_config, norm_cutoff_date=norm_cutoff_date,
+            seed=(None if seed is None else int(seed) + i),
+        )
+        for i in range(num_envs)
+    ]
 
     # audit F17: the phantom-transition auto-reset filter (sac_trainer) assumes
     # Gymnasium >=1.0 NEXT_STEP autoreset semantics. Under 0.29.x (SAME_STEP) it
@@ -245,15 +299,16 @@ def create_vector_env(config, num_envs, start_date=None, end_date=None,
     if use_sync:
         # SyncVectorEnv: all envs run in main process. No pipes, no FD issues.
         # Slower but reliable on containers with restricted ulimits.
-        env = gym.vector.SyncVectorEnv(
-            [env_factory for _ in range(num_envs)],
-        )
+        env = gym.vector.SyncVectorEnv(env_fns)
     else:
         # AsyncVectorEnv for production training (parallel data loading)
         env = gym.vector.AsyncVectorEnv(
-            [env_factory for _ in range(num_envs)],
+            env_fns,
             context="spawn",
             shared_memory=False,
         )
 
+    # Carry the base seed so trainers can reproduce it at reset time without
+    # re-deriving it from config (which may not carry --seed at all).
+    env.finrl_base_seed = seed
     return env

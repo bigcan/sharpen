@@ -378,7 +378,16 @@ def make_objective(base_config, steps_per_trial, agent_type, device, trial_recor
         try:
             hpo_num_envs = min(config.get("training", {}).get("num_envs",
                               config["env"].get("num_envs", 24)), 24)
-            env = create_vector_env(config, num_envs=hpo_num_envs, gym_shm=False, use_sync=True)
+            # FIX SEED-01: HPO train env. Each trial needs its OWN seed (otherwise
+            # every trial walks identical episode starts and the search sees no
+            # env variation), but a REPRODUCIBLE one. Stride by 1000 so a trial's
+            # per-worker fan-out (seed..seed+num_envs, num_envs<=24) cannot collide
+            # with the next trial's block.
+            _base_seed = config.get("seed")
+            _trial_seed = (None if _base_seed is None
+                           else int(_base_seed) + 1000 * (trial.number + 1))
+            env = create_vector_env(config, num_envs=hpo_num_envs, gym_shm=False, use_sync=True,
+                                    seed=_trial_seed)
 
             # S487 race-fix: trial-unique run_name so co-located replicas
             # don't clobber each other's checkpoints/sac_run/. Falls back to
@@ -410,11 +419,19 @@ def make_objective(base_config, steps_per_trial, agent_type, device, trial_recor
                     final_fee = final_tier.get("ramp_to", final_tier.get("taker_fee", 0.0))
                     eval_config["env"]["taker_fee"] = final_fee
                 logger.info("[AUD-S129-01] HPO eval fee overridden from fee_schedule: %.6f", final_fee)
+            # FIX SEED-01: HPO eval env takes the BASE seed, deliberately NOT the
+            # per-trial seed. eval_config inherits env.random_start/episode_length
+            # from the training config (the fee override is the only edit), so with
+            # an unseeded env each trial was scored on a different random validation
+            # slice — trial ranking was partly a window lottery. A seed shared by
+            # every trial puts them all on the same slice, which is what makes the
+            # objective comparable across trials.
             eval_env = create_vector_env(
                 eval_config, num_envs=1, gym_shm=False, use_sync=True,
                 start_date=data_cfg.get("val_start_date"),
                 end_date=data_cfg.get("val_end_date"),
                 norm_cutoff_date=data_cfg.get("val_start_date"),
+                seed=_base_seed,
             )
 
             # Compute bar_minutes for correct Sharpe annualization

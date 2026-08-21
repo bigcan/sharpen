@@ -192,7 +192,22 @@ class SACTrainer:
     def train(self, optuna_trial=None, pruning_callback=None) -> str:
         """Main training loop. Returns path to final checkpoint."""
         num_envs = getattr(self.env, 'num_envs', 1)
-        obs, info = self.env.reset()
+        # FIX SEED-01: seed the initial reset. Without this the envs self-seed from
+        # OS entropy and --seed never reaches them, so nominally identical runs
+        # diverge (measured: 11.1pp on gmgp1_spx500_lo_wf_f1 at --seed 42). Prefer
+        # the base seed recorded by create_vector_env; fall back to config.
+        _seed = getattr(self.env, "finrl_base_seed", None)
+        if _seed is None:
+            _seed = self.config.get("seed")
+        if _seed is None:
+            logger.warning(
+                "[SEED-01] No seed available — env episode starts are NOT reproducible. "
+                "Pass --seed to run_full_pipeline for a reproducible run.",
+            )
+            obs, info = self.env.reset()
+        else:
+            logger.info("[SEED-01] Seeding env reset with base seed %d", int(_seed))
+            obs, info = self.env.reset(seed=int(_seed))
 
         episode_reward = np.zeros(num_envs, dtype=np.float64)
         episode_length = np.zeros(num_envs, dtype=np.int64)
