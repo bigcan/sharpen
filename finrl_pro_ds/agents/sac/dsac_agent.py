@@ -350,6 +350,7 @@ class DistributionalSACAgent(SACAgent):
                 alpha_loss = -(self.log_alpha * (log_prob.float() + self.target_entropy).detach()).mean()
                 self.alpha_optimizer.zero_grad()
                 alpha_loss.backward()
+                self._guard_alpha_grad()          # NAN-01 — see SACAgent._guard_alpha_grad
                 self.alpha_optimizer.step()
 
                 self._last_actor_loss = actor_loss
