@@ -361,16 +361,34 @@ class ExecutionSchedulerEnv(gym.Env):
         # --- advance clock; terminal guard on any residual (forced phi=1 makes this ~0) ---
         self.step_idx += 1
         self._h += 1
-        terminated = False
-        truncated = self._h >= self.H
-        if truncated:
+        # HORIZON-END IS A GENUINE MDP TERMINAL, NOT A TIME LIMIT (TERM-01).
+        #
+        # This deliberately breaks the project's usual `truncated`-at-horizon convention, so
+        # the reason matters. `truncated` means "cut off, but the task would have continued" —
+        # and the trainer acts on exactly that reading (``sac_trainer``: ``dones_for_buffer =
+        # terms``, so a truncated step stores ``done=0`` and the critic BOOTSTRAPS across the
+        # boundary). That is right for a walker stopped at 1000 steps. It is wrong here: at
+        # ``h = H−1`` the env forces ``phi=1``, ``W_held -> W_target``, and the parent order is
+        # COMPLETE. There is no continuation to bootstrap into — the vec-env's next observation
+        # belongs to a different rebalance, months away, with a freshly warmed book.
+        #
+        # With `truncated` the critic therefore never saw a terminal state anywhere in this MDP
+        # and learned the discounted sum over an endless chain of UNRELATED parent orders: an
+        # effective horizon of 1/(1−gamma) = 100 bars = 20 parent orders instead of H=5. That is
+        # the measured `cvar_q_mean` ≈ −880-and-climbing of the 75K seedcheck (randd_log
+        # S553-cont-165) — an order of magnitude past the episodic CVaR (≈ −42) and heading for
+        # the infinite-horizon fixed point (≈ −400). Not divergence: convergence to the wrong
+        # quantity, with ~95 of those 100 bars being rewards the agent cannot influence.
+        terminated = self._h >= self.H
+        truncated = False
+        if terminated:
             residual_l1 = float(np.abs(self.W_target[k] - self._W_held).sum())
             if residual_l1 > 1e-9 and self.unexecuted_penalty > 0.0:
                 reward -= self.unexecuted_penalty * residual_l1 / max(self._gap0_l1, _L1_EPS)
 
         reward = float(np.clip(reward, -1e4, 1e4))
         portfolio_value = self._rel_equity if self.relative_equity else info_book["portfolio_value"]
-        obs = self._get_obs() if not truncated else self._get_obs(terminal=True)
+        obs = self._get_obs(terminal=True) if terminated else self._get_obs()
         info = {
             "portfolio_value": portfolio_value,
             "cumulative_return": portfolio_value / self.initial_capital - 1.0,
