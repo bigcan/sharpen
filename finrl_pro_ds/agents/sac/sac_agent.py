@@ -305,71 +305,49 @@ class SACAgent:
         """
         return self.train_step_mega(1)
 
-    def _step_if_finite(self, optimizer: optim.Optimizer, total_norm: torch.Tensor) -> None:
-        """AMP-off counterpart to ``GradScaler``'s skip-on-non-finite (NAN-01).
+    def _step_if_finite(self, optimizer: optim.Optimizer, probe: Optional[torch.Tensor]) -> None:
+        """Step ``optimizer`` only if ``probe`` is finite; otherwise skip and count it (NAN-01).
 
-        When AMP is enabled with float16, ``scaler.step()`` skips the update whenever
-        ``unscale_`` found inf/NaN in that optimizer's gradients. But the scaler is disabled
-        for ``use_amp: false`` AND for ``amp_dtype: bfloat16`` (bf16 has fp32's exponent range,
-        so loss scaling is pointless) — and on that branch the code fell through to a plain
-        ``optimizer.step()`` with no check at all. ``clip_grad_norm_`` does not cover the gap:
-        a non-finite gradient makes ``total_norm`` non-finite, so ``clip_coef`` is non-finite,
-        so every gradient is multiplied to NaN and the step writes NaN into EVERY parameter of
-        the network in one shot — strictly worse than the ``log_alpha`` case, which corrupts a
-        single scalar.
+        The single skip primitive for every optimizer in this agent, so all three behave the
+        same way on a non-finite gradient. ``probe`` is whatever value proves the gradients are
+        clean: the ``total_norm`` returned by ``clip_grad_norm_`` for the actor and critics, and
+        ``log_alpha.grad`` itself for alpha (which has no clipping step). A norm is a COMPLETE
+        detector — it is a sum over every gradient element, so it is non-finite iff at least one
+        element is.
 
-        ``total_norm`` is a COMPLETE detector, which is why it is the thing checked: it is the
-        square root of a sum over every gradient element, so it is non-finite if and only if at
-        least one gradient element is. ``clip_grad_norm_`` has already poisoned the gradients
-        by the time this runs, but skipping the step means they are never applied and the next
-        ``zero_grad()`` clears them.
+        **Why skipping, and why one mechanism.** ``GradScaler`` already skips a step when
+        ``unscale_`` finds inf/NaN, but it is disabled for ``use_amp: false`` AND for
+        ``amp_dtype: bfloat16`` (bf16 carries fp32's exponent range, so loss scaling is
+        pointless), and the alpha update never passes through it at all — its loss is
+        deliberately float32. Those unguarded branches fell through to a bare
+        ``optimizer.step()``. Skipping (rather than zeroing or clamping the gradient) is chosen
+        because it is precisely GradScaler's own semantic: the goal is that every path behaves
+        identically, not that each does something individually defensible.
 
-        Costs one device sync, which is deliberate and not a regression: the AMP path already
-        pays exactly this — ``GradScaler._maybe_opt_step`` reads ``found_inf`` with ``.item()``
-        before deciding. The point is to make the two branches behave identically, and
-        skipping (rather than zeroing or clamping) is precisely GradScaler's own semantic.
+        ``clip_grad_norm_`` is not a guard and must not be mistaken for one: a non-finite
+        gradient makes ``total_norm`` non-finite, hence ``clip_coef`` non-finite, hence EVERY
+        gradient NaN — so an unguarded step writes NaN into every parameter at once. The
+        gradients are already poisoned by the time this runs; skipping means they are never
+        applied and the next ``zero_grad()`` clears them.
 
-        Skips are counted into ``grad_skips`` so a run that has silently stopped learning is
-        visible in the metrics rather than looking like healthy-but-flat training.
+        **Why alpha matters disproportionately.** ``log_alpha`` is a single scalar, but
+        ``alpha = log_alpha.exp()`` multiplies the entropy term of the target for the ENTIRE
+        batch (``target = min(q1,q2) − alpha·next_log_prob``). One NaN row in ``log_prob``
+        therefore latches every subsequent target for every row, permanently — the run cannot
+        recover even if no further bad row is ever sampled (randd_log S553-cont-164/165).
+
+        Costs one device sync per guarded step. Deliberate and not a regression: the AMP path
+        already pays exactly this, as ``GradScaler._maybe_opt_step`` reads ``found_inf`` with
+        ``.item()`` before deciding. ``probe is None`` (no backward yet) is not a fault and is
+        not counted — the optimizer no-ops on absent gradients.
+
+        This CONTAINS a fault; it does not report one. Detection is ``SACTrainer``'s
+        finite-metric assertion, which still sees the NaN loss this must not suppress.
         """
-        if torch.isfinite(total_norm):
+        if probe is None or bool(torch.isfinite(probe).all()):
             optimizer.step()
         else:
             self._nonfinite_grad_skips += 1
-
-    def _guard_alpha_grad(self) -> None:
-        """Zero a non-finite ``log_alpha`` gradient in place, before the optimizer sees it (NAN-01).
-
-        ``log_alpha`` is the ONE unguarded optimizer in this agent. The twin critics and the
-        actor are both protected by ``GradScaler``, which skips an optimizer step whenever
-        ``unscale_`` finds inf/NaN — but the alpha update is deliberately run outside AMP
-        (its loss is already float32), so it never passes through the scaler and takes any
-        gradient it is handed.
-
-        That asymmetry is what turns a LOCAL fault into a GLOBAL, PERMANENT one. A single
-        NaN row in ``log_prob`` (e.g. one poisoned observation in the batch — the crash in
-        randd_log S553-cont-164/165) makes ``alpha_loss`` NaN via ``.mean()``, which writes a
-        NaN gradient into ``log_alpha``. From that step on ``alpha = log_alpha.exp()`` is NaN,
-        and since alpha multiplies the entropy term of the target for the ENTIRE batch
-        (``target = min(q1,q2) − alpha·next_log_prob``), every subsequent target is NaN for
-        every row — the run cannot recover even if no further bad row is ever sampled. Weights
-        do not un-NaN themselves.
-
-        Zeroing the gradient makes that step a no-op for ``log_alpha``, which is exactly the
-        skip semantics ``GradScaler`` gives the other two optimizers.
-
-        **Deliberately branch-free.** ``torch.isfinite(g).all()`` read in Python forces a
-        device sync on every actor update, on the hot path OPT-07/08 restructured to overlap
-        GPU training with CPU env work. ``nan_to_num_`` stays on-device and costs nothing
-        measurable on a 1-element tensor.
-
-        This CONTAINS the fault; it does not report it. Detection is
-        ``SACTrainer``'s finite-metric assertion, which still sees the NaN ``actor_loss`` this
-        guard does not (and must not) suppress, and halts the run.
-        """
-        g = self.log_alpha.grad
-        if g is not None:
-            torch.nan_to_num_(g, nan=0.0, posinf=0.0, neginf=0.0)
 
     def train_step_mega(self, n_steps: int = 1) -> Optional[dict[str, float]]:
         """Run n_steps SAC gradient updates from a single mega-batch.
@@ -500,8 +478,7 @@ class SACAgent:
                 alpha_loss = -(self.log_alpha * (log_prob.float() + self.target_entropy).detach()).mean()
                 self.alpha_optimizer.zero_grad()
                 alpha_loss.backward()
-                self._guard_alpha_grad()
-                self.alpha_optimizer.step()
+                self._step_if_finite(self.alpha_optimizer, self.log_alpha.grad)   # NAN-01
 
                 # Stash for metrics on non-actor steps
                 self._last_actor_loss = actor_loss
