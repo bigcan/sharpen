@@ -49,8 +49,27 @@ from finrl_pro_ds.crypto.options_pricing import (
     straddle_vega,
 )
 from finrl_pro_ds.envs.dsr import DSRCalculator
+from finrl_pro_ds.envs.obs_guard import sanitize_obs
 
 logger = logging.getLogger(__name__)
+
+# NAN-01 source bounds.
+#
+# Short gamma means `equity` can go NEGATIVE in a crash bar, and the obs for that bar
+# is built and pushed into the replay buffer before `terminated` is honoured. The
+# greek features (premium frac, vega, $-gamma, residual delta) are all divided by
+# equity; the old `max(equity, 1e-6)` floor turned a ruin step into ~1e10 — finite in
+# float64, `inf` the instant fp16 AMP casts it, then a per-row NaN out of the
+# encoder's LayerNorm and an invalid `loc` in the SAC actor's Normal. The vega/premium
+# caps are enforced against equity AT THE ROLL, so they do not bound this ratio at the
+# current bar. Floor the denominator at a fraction of initial capital instead — the
+# termination threshold is already 0.01 * initial_capital, so this can only bind on a
+# step the episode is ending on anyway.
+EQ_FLOOR_FRAC = 0.01
+
+# `r.mean() / sd` with sd barely above the old 1e-12 floor reaches ~1e9. A running
+# Sharpe is meaningless past this band; saturate instead of emitting a huge finite.
+SHARPE_CLIP = 100.0
 
 
 class OptionsVolHarvestEnv(gym.Env):
@@ -465,7 +484,7 @@ class OptionsVolHarvestEnv(gym.Env):
         tau = max(self.tau, self.tau_step)
         buf = self._obs_buffer
         inv_cap = 1.0 / self.initial_capital
-        eq = max(self.equity, 1e-6)
+        eq = max(self.equity, self.initial_capital * EQ_FLOOR_FRAC)   # NAN-01
 
         V_t = straddle_price(S, self.K, sigma, tau) if self.K > 0 else 0.0
         vega = straddle_vega(S, self.K, sigma, tau) if self.K > 0 else 0.0
@@ -486,9 +505,7 @@ class OptionsVolHarvestEnv(gym.Env):
         buf[11] = self._running_sharpe()
         buf[12] = float(1.0 - self.equity / self.eq_peak) if self.eq_peak > 0 else 0.0
 
-        if not np.isfinite(buf).all():
-            np.nan_to_num(buf, copy=False, nan=0.0, posinf=0.0, neginf=0.0)
-        return buf
+        return sanitize_obs(buf)
 
     def _running_sharpe(self) -> float:
         if len(self.returns_history) < 8:
@@ -497,7 +514,7 @@ class OptionsVolHarvestEnv(gym.Env):
         sd = r.std(ddof=1)
         if sd < 1e-12 or not np.isfinite(sd):
             return 0.0
-        return float(r.mean() / sd * np.sqrt(ANN))
+        return float(np.clip(r.mean() / sd * np.sqrt(ANN), -SHARPE_CLIP, SHARPE_CLIP))
 
     # -----------------------------------------------------------------------
     @classmethod
