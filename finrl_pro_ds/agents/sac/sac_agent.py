@@ -304,6 +304,40 @@ class SACAgent:
         """
         return self.train_step_mega(1)
 
+    def _guard_alpha_grad(self) -> None:
+        """Zero a non-finite ``log_alpha`` gradient in place, before the optimizer sees it (NAN-01).
+
+        ``log_alpha`` is the ONE unguarded optimizer in this agent. The twin critics and the
+        actor are both protected by ``GradScaler``, which skips an optimizer step whenever
+        ``unscale_`` finds inf/NaN — but the alpha update is deliberately run outside AMP
+        (its loss is already float32), so it never passes through the scaler and takes any
+        gradient it is handed.
+
+        That asymmetry is what turns a LOCAL fault into a GLOBAL, PERMANENT one. A single
+        NaN row in ``log_prob`` (e.g. one poisoned observation in the batch — the crash in
+        randd_log S553-cont-164/165) makes ``alpha_loss`` NaN via ``.mean()``, which writes a
+        NaN gradient into ``log_alpha``. From that step on ``alpha = log_alpha.exp()`` is NaN,
+        and since alpha multiplies the entropy term of the target for the ENTIRE batch
+        (``target = min(q1,q2) − alpha·next_log_prob``), every subsequent target is NaN for
+        every row — the run cannot recover even if no further bad row is ever sampled. Weights
+        do not un-NaN themselves.
+
+        Zeroing the gradient makes that step a no-op for ``log_alpha``, which is exactly the
+        skip semantics ``GradScaler`` gives the other two optimizers.
+
+        **Deliberately branch-free.** ``torch.isfinite(g).all()`` read in Python forces a
+        device sync on every actor update, on the hot path OPT-07/08 restructured to overlap
+        GPU training with CPU env work. ``nan_to_num_`` stays on-device and costs nothing
+        measurable on a 1-element tensor.
+
+        This CONTAINS the fault; it does not report it. Detection is
+        ``SACTrainer``'s finite-metric assertion, which still sees the NaN ``actor_loss`` this
+        guard does not (and must not) suppress, and halts the run.
+        """
+        g = self.log_alpha.grad
+        if g is not None:
+            torch.nan_to_num_(g, nan=0.0, posinf=0.0, neginf=0.0)
+
     def train_step_mega(self, n_steps: int = 1) -> Optional[dict[str, float]]:
         """Run n_steps SAC gradient updates from a single mega-batch.
 
@@ -433,6 +467,7 @@ class SACAgent:
                 alpha_loss = -(self.log_alpha * (log_prob.float() + self.target_entropy).detach()).mean()
                 self.alpha_optimizer.zero_grad()
                 alpha_loss.backward()
+                self._guard_alpha_grad()
                 self.alpha_optimizer.step()
 
                 # Stash for metrics on non-actor steps
