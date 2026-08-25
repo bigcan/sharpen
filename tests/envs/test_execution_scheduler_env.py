@@ -84,7 +84,8 @@ def test_neutral_action_is_twap_equal_slices():
     gap0_l1 = abs(np.array([0.1, 0.3, -0.2]) - np.array([0.3, -0.2, 0.1])).sum()  # 1.0
     for e in executed:
         assert abs(e - gap0_l1 / 4) < 1e-9                       # equal TWAP slices
-    assert steps[-1][3] is True                                  # truncated at horizon end
+    assert steps[-1][2] is True                                  # TERMINATED at horizon end (TERM-01)
+    assert steps[-1][3] is False                                 # ...not truncated
     np.testing.assert_allclose(env._W_held, env.W_target[env._r], atol=1e-9)  # completion
 
 
@@ -92,7 +93,7 @@ def test_horizon_one_is_snap():
     """H=1 ⇒ the single bar forces φ=1 ⇒ full snap to the target (== the _replay behavior)."""
     env = ExecutionSchedulerEnv(**_synthetic(horizon_bars=1))
     steps = _run(env, [-1.0])                                    # urgency irrelevant; forced φ=1
-    assert steps[0][3] is True
+    assert steps[0][2] is True and steps[0][3] is False          # terminated, not truncated (TERM-01)
     np.testing.assert_allclose(env._W_held, env.W_target[env._r], atol=1e-12)
     gap0_l1 = abs(np.array([0.1, 0.3, -0.2]) - np.array([0.3, -0.2, 0.1])).sum()
     assert abs(steps[0][4]["executed_l1"] - gap0_l1) < 1e-12
@@ -439,3 +440,43 @@ def test_obs_clip_bounds_an_empty_parent_order():
                 "parent order — the obs clip is the last line of defence")
         obs, _rew, term, trunc, _info = env.step(np.array([1.0], dtype=np.float32))
         done = term or trunc
+
+
+# --------------------------------------------------------------------------- #
+# TERM-01 — the horizon end is a genuine MDP terminal, not a time limit
+#
+# `truncated` and `terminated` are not interchangeable here: SACTrainer stores
+# `dones_for_buffer = terms` (terminated only), so a TRUNCATED horizon end writes done=0
+# and the critic bootstraps across the episode boundary into an unrelated parent order
+# months away. With done never set, the value function has no terminal anywhere in the MDP
+# and targets the infinite-horizon sum (1/(1-gamma) = 100 bars = 20 parent orders) instead
+# of the H=5 episodic one. That is the cvar_q_mean ~ -880-and-climbing measured in the 75K
+# seedcheck, against an episodic CVaR of ~ -42 (randd_log S553-cont-165).
+#
+# Negative tests: they fail if the horizon end reverts to signalling truncation.
+# --------------------------------------------------------------------------- #
+def test_horizon_end_terminates_not_truncates():
+    env = ExecutionSchedulerEnv(**_synthetic())                  # H=4
+    steps = _run(env, [0.0, 0.0, 0.0, 0.0])
+    for i, (_obs, _r, term, trunc, _info) in enumerate(steps[:-1]):
+        assert not term and not trunc, f"step {i} ended the episode early"
+    _, _, term, trunc, _ = steps[-1]
+    assert term is True, "horizon end must TERMINATE (done=1 reaches the replay buffer)"
+    assert trunc is False, "horizon end must not be reported as a time-limit truncation"
+
+
+def test_terminated_is_what_reaches_the_replay_buffer():
+    """Pins the CONSEQUENCE, not the flag. SACTrainer derives done from `terminated` alone,
+    so this asserts the training signal the critic actually sees at the boundary."""
+    env = ExecutionSchedulerEnv(**_synthetic())
+    steps = _run(env, [0.0, 0.0, 0.0, 0.0])
+    dones = [float(term) for _o, _r, term, _t, _i in steps]      # sac_trainer: dones = terms
+    assert dones == [0.0, 0.0, 0.0, 1.0], (
+        f"critic would bootstrap past the parent order's end; dones={dones}")
+
+
+def test_completion_still_holds_at_the_terminal_step():
+    """The terminal flag must not disturb the structural completion invariant."""
+    env = ExecutionSchedulerEnv(**_synthetic())
+    _run(env, [-1.0, -1.0, -1.0, -1.0])                          # pause as long as possible
+    np.testing.assert_allclose(env._W_held, env.W_target[env._r], atol=1e-9)
