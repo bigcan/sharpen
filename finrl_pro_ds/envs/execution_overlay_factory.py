@@ -66,6 +66,7 @@ _OVERLAY_PASSTHROUGH = (
     "horizon_bars", "urgency_min", "urgency_max", "is_reward_scale",
     "impact_penalty", "risk_penalty", "unexecuted_penalty", "asymmetric_dampen",
     "reactive_decay", "vol_window", "mom_window", "relative_equity",
+    "min_parent_l1",
 )
 _BOOL_OVERLAY = {"relative_equity"}
 # Accepted-but-ignored in v1 (the built env is closed-loop TWAP; AC is a v2 schedule, ADR-4).
