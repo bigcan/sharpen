@@ -11,7 +11,7 @@ target for every row. Meanwhile nothing inspected the metrics, so run ``pqwttrqd
 Two separable mechanisms, tested separately because they must stay separable — the guard must
 CONTAIN without suppressing the signal the assertion DETECTS:
   * ``SACTrainer._assert_finite_metrics`` — halts the run (detection).
-  * ``SACAgent._guard_alpha_grad``        — zeroes a non-finite log_alpha grad (containment).
+  * ``SACAgent._step_if_finite``          — skips a step on non-finite grads (containment).
 
 All negative tests: each fails if its half is reverted.
 """
@@ -61,11 +61,10 @@ def test_non_numeric_metrics_are_ignored():
     SACTrainer._assert_finite_metrics(dict(_HEALTHY, phase="warmup", note=None), total_steps=1)
 
 
-# --------------------------------------------------------------------------- #
-# Containment — SACAgent._guard_alpha_grad
-# --------------------------------------------------------------------------- #
 @pytest.fixture
 def agent():
+    """CPU/AMP-off DistributionalSACAgent — the scaler is disabled here, which is exactly
+    the unguarded branch under test (same branch bfloat16 takes on GPU)."""
     return DistributionalSACAgent(
         network_config={"summary_input_dim": 13, "private_dim": 0, "fusion_dim": 64,
                         "n_scales": 1, "window_size": 1, "action_dim": 1,
@@ -76,54 +75,8 @@ def agent():
     )
 
 
-@pytest.mark.parametrize("bad", [float("nan"), float("inf"), float("-inf")])
-def test_guard_zeroes_non_finite_alpha_grad(agent, bad):
-    agent.log_alpha.grad = torch.full_like(agent.log_alpha, bad)
-    agent._guard_alpha_grad()
-    assert torch.isfinite(agent.log_alpha.grad).all()
-    assert float(agent.log_alpha.grad) == 0.0, "a poisoned grad must become a no-op step"
-
-
-def test_guard_preserves_a_healthy_grad(agent):
-    """Containment must not distort ordinary learning."""
-    agent.log_alpha.grad = torch.full_like(agent.log_alpha, 0.37)
-    agent._guard_alpha_grad()
-    assert float(agent.log_alpha.grad) == pytest.approx(0.37)
-
-
-def test_guard_tolerates_absent_grad(agent):
-    agent.log_alpha.grad = None
-    agent._guard_alpha_grad()          # must not raise before the first backward()
-
-
-def test_log_alpha_survives_a_nan_gradient_step(agent):
-    """THE REGRESSION: a NaN gradient must not latch log_alpha, because alpha then
-    poisons the entropy term of EVERY row's target, permanently."""
-    before = float(agent.log_alpha.detach())
-    agent.log_alpha.grad = torch.full_like(agent.log_alpha, float("nan"))
-    agent._guard_alpha_grad()
-    agent.alpha_optimizer.step()
-    after = float(agent.log_alpha.detach())
-    assert math.isfinite(after), "log_alpha latched to NaN — one bad row poisons the whole run"
-    assert after == pytest.approx(before, abs=1e-6), "a poisoned step must be a no-op"
-    assert math.isfinite(float(agent.log_alpha.exp())), "alpha = exp(log_alpha) must stay finite"
-
-
-def test_guard_is_wired_into_both_agents():
-    """Declared-but-not-wired is the failure mode this project keeps hitting: assert the
-    call actually appears in both update paths, not merely that the helper exists."""
-    import inspect
-
-    from finrl_pro_ds.agents.sac.sac_agent import SACAgent
-    for cls in (SACAgent, DistributionalSACAgent):
-        src = inspect.getsource(cls.train_step_mega)
-        assert "_guard_alpha_grad()" in src, f"{cls.__name__}.train_step_mega does not guard alpha"
-        assert src.index("_guard_alpha_grad()") < src.index("self.alpha_optimizer.step()"), \
-            f"{cls.__name__} guards alpha AFTER the optimizer step — too late"
-
-
 # --------------------------------------------------------------------------- #
-# Containment (AMP-off path) — SACAgent._step_if_finite
+# Containment — SACAgent._step_if_finite (the ONE skip primitive, all 3 optimizers)
 #
 # GradScaler skips an optimizer step when unscale_ finds inf/NaN, but the scaler is
 # DISABLED for use_amp:false AND for amp_dtype:bfloat16 — and that branch fell through to a
@@ -181,21 +134,6 @@ def test_network_survives_a_nan_gradient_with_amp_off(agent):
     assert _params_finite(agent.actor), "a single NaN grad element NaN'd the entire actor"
 
 
-def test_amp_off_guard_is_wired_into_both_agents():
-    """Declared-but-not-wired check for all four call sites (critic + actor x 2 agents)."""
-    import inspect
-
-    from finrl_pro_ds.agents.sac.sac_agent import SACAgent
-    for cls in (SACAgent, DistributionalSACAgent):
-        src = inspect.getsource(cls.train_step_mega)
-        assert src.count("_step_if_finite(") == 2, \
-            f"{cls.__name__}.train_step_mega must guard BOTH critic and actor on the AMP-off path"
-        assert "self.critic_optimizer.step()" not in src, \
-            f"{cls.__name__} still has an unguarded bare critic step"
-        assert "self.actor_optimizer.step()" not in src, \
-            f"{cls.__name__} still has an unguarded bare actor step"
-
-
 def test_grad_skips_is_exposed_in_metrics():
     """A run that has silently stopped learning must be visible, not look like flat training."""
     import inspect
@@ -204,3 +142,58 @@ def test_grad_skips_is_exposed_in_metrics():
     for cls in (SACAgent, DistributionalSACAgent):
         assert '"grad_skips"' in inspect.getsource(cls.train_step_mega), \
             f"{cls.__name__} does not report grad_skips"
+
+
+# --------------------------------------------------------------------------- #
+# Containment — alpha, through the SAME primitive
+#
+# log_alpha is one scalar but alpha = exp(log_alpha) multiplies the entropy term of the
+# target for the ENTIRE batch, so a single NaN row in log_prob latches every subsequent
+# target for every row, permanently. It has no clip_grad_norm_, so its probe is the
+# gradient itself rather than a norm.
+# --------------------------------------------------------------------------- #
+@pytest.mark.parametrize("bad", [float("nan"), float("inf"), float("-inf")])
+def test_alpha_step_skipped_on_non_finite_grad(agent, bad):
+    before = float(agent.log_alpha.detach())
+    skips0 = agent._nonfinite_grad_skips
+    agent.log_alpha.grad = torch.full_like(agent.log_alpha, bad)
+    agent._step_if_finite(agent.alpha_optimizer, agent.log_alpha.grad)
+    after = float(agent.log_alpha.detach())
+    assert agent._nonfinite_grad_skips == skips0 + 1, "a skipped alpha step must be counted"
+    assert math.isfinite(after), "log_alpha latched — one bad row poisons every later target"
+    assert after == pytest.approx(before, abs=1e-9), "a skipped step must not move log_alpha"
+    assert math.isfinite(float(agent.log_alpha.exp())), "alpha must stay finite"
+
+
+def test_alpha_step_taken_when_healthy(agent):
+    before = float(agent.log_alpha.detach())
+    skips0 = agent._nonfinite_grad_skips
+    agent.log_alpha.grad = torch.full_like(agent.log_alpha, 0.37)
+    agent._step_if_finite(agent.alpha_optimizer, agent.log_alpha.grad)
+    assert agent._nonfinite_grad_skips == skips0, "healthy step counted as a skip"
+    assert float(agent.log_alpha.detach()) != pytest.approx(before, abs=1e-9),         "containment must not block ordinary alpha learning"
+
+
+def test_absent_grad_is_not_a_fault(agent):
+    """No backward yet is not a fault: step (the optimizer no-ops) and do not inflate skips."""
+    skips0 = agent._nonfinite_grad_skips
+    agent.log_alpha.grad = None
+    agent._step_if_finite(agent.alpha_optimizer, None)
+    assert agent._nonfinite_grad_skips == skips0
+
+
+def test_all_three_optimizers_use_the_one_primitive():
+    """Unified: every optimizer in both agents goes through _step_if_finite, and no bare
+    step survives anywhere. Guards against a future path re-introducing an unguarded one."""
+    import inspect
+
+    from finrl_pro_ds.agents.sac.sac_agent import SACAgent
+    for cls in (SACAgent, DistributionalSACAgent):
+        src = inspect.getsource(cls.train_step_mega)
+        assert src.count("_step_if_finite(") == 3, (
+            f"{cls.__name__} must route critic, actor AND alpha through the one primitive; "
+            f"found {src.count('_step_if_finite(')}")
+        for bare in ("self.critic_optimizer.step()", "self.actor_optimizer.step()",
+                     "self.alpha_optimizer.step()"):
+            assert bare not in src, f"{cls.__name__} still has an unguarded `{bare}`"
+    assert not hasattr(SACAgent, "_guard_alpha_grad"),         "the superseded zeroing helper must be gone, not left as a second mechanism"
