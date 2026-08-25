@@ -331,6 +331,18 @@ def main() -> int:
     ap.add_argument("--skip_validate", action="store_true",
                     help="skip the fail-closed validate_config gate (debug only)")
     ap.add_argument("--force_refetch", action="store_true")
+    # deploy_bare_metal.py compatibility (unconditionally injects these three for ANY
+    # --script target, matching run_full_pipeline.py's convention) — without them this
+    # runner is unlaunchable via the shared deploy tool (argparse rejects unrecognized args).
+    ap.add_argument("--run_name", type=str, default=None,
+                    help="override the WandB run name (deploy-tool compatibility); default "
+                         "derives from config strategy.id + smoke/seed suffix")
+    ap.add_argument("--tags", nargs="*", default=None,
+                    help="extra WandB tags, appended to config wandb.tags (deploy-tool "
+                         "compatibility, e.g. platform/GPU tags deploy_bare_metal.py injects)")
+    ap.add_argument("--hpo_storage", type=str, default=None,
+                    help="accepted for deploy-tool compatibility; UNUSED — this runner has no "
+                         "Optuna/HPO trial loop (single fixed-hyperparameter train)")
     args = ap.parse_args()
 
     # 0) Global seed (random/numpy/torch parent-process state + network init). Set BEFORE any
@@ -437,11 +449,16 @@ def main() -> int:
     from finrl_pro_ds.training.sac_trainer import SACTrainer
 
     device = args.device or ("cuda" if torch.cuda.is_available() else "cpu")
-    run_name = config.get("strategy", {}).get("id", "exec-overlay-2sleeve")
-    if args.smoke:
-        run_name = f"{run_name}-smoke"
-    if args.seed is not None:
-        run_name = f"{run_name}-seed{args.seed}"
+    if args.run_name:
+        # Deploy-tool-supplied name is authoritative (already canonical/timestamped) — no
+        # smoke/seed suffix layered on top, unlike the locally-derived default below.
+        run_name = args.run_name
+    else:
+        run_name = config.get("strategy", {}).get("id", "exec-overlay-2sleeve")
+        if args.smoke:
+            run_name = f"{run_name}-smoke"
+        if args.seed is not None:
+            run_name = f"{run_name}-seed{args.seed}"
     log.info("training overlay: %d envs, device=%s, steps=%d (TRAIN window only)",
              num_envs, device, config["training"]["total_timesteps"])
     # Full runs log to WandB (SACTrainer.train calls wandb.log at log_interval when not hpo_mode);
@@ -449,7 +466,7 @@ def main() -> int:
     if not args.smoke:
         from finrl_pro_ds.logging import init_wandb
 
-        init_wandb(config, fallback_name=run_name)
+        init_wandb(config, fallback_name=run_name, tags=args.tags)
     trainer = SACTrainer(vec_env, config, device=device, run_name=run_name, hpo_mode=args.smoke)
     try:
         trainer.train()
