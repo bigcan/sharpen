@@ -525,6 +525,10 @@ class FundingArbEnv(gym.Env):
         notionals = abs_delta[active] * portfolio_value
         total_fees = float(np.sum(notionals) * fee_pct)
 
+        # NOTE (OBS-STEPCOST-01): the `> 1e-6` guard catches only exactly-zero volume and
+        # silently assumes bar dollar volume is O(1e3)+. Deliberately left UNBOUNDED —
+        # unlike the obs-side copy in `_calc_cost_to_exit`, this ratio sets the cost
+        # actually CHARGED, so capping it would move validated backtest numbers.
         vol_idx = max(self.step_idx - 1, 0)
         hourly_vols = volume_ary[vol_idx, active]
         volume_ratios = np.ones_like(notionals)

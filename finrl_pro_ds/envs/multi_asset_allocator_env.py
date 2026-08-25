@@ -507,6 +507,17 @@ class MultiAssetAllocatorEnv(gym.Env):
         # volume_ary is shares×price (F1), so notionals / bar_vols is a dimensionless
         # participation fraction. Missing/zero volume (halt, holiday, data gap) ⇒ assume
         # MAX impact (ratio 1.0), the conservative CryptoPerpEnv default — never silently free.
+        #
+        # NOTE (OBS-STEPCOST-01): `> 1e-6` is a dimensionally loose guard — an epsilon sized
+        # for a dimensionless ratio applied to a DOLLAR quantity. It catches only
+        # exactly-zero volume and silently assumes bar dollar volume is O(1e4)+. That holds
+        # on every substrate in the repo (measured 2026-08-25: ETF min $32,244, Taiwan min
+        # $32,889, BTC 1-min min $1,251; zero rows below $1e4 on the daily panels, and NaN
+        # rows resolve to exactly 0.0 via ffill().fillna(0.0)), so this is deliberately left
+        # UNBOUNDED — unlike the obs-side copy in `_get_obs`, this ratio sets the cost
+        # actually CHARGED, and capping it would move validated backtest numbers for no
+        # measurable benefit. Re-check before pointing this env at intraday bars or a
+        # penny-stock universe, where dollar volume per bar is orders of magnitude smaller.
         vol_idx = max(self.step_idx - 1, 0)
         bar_vols = self.volume_ary[vol_idx, active]
         volume_ratios = np.where(bar_vols > 1e-6, notionals / bar_vols, 1.0)
