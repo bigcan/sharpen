@@ -9,6 +9,7 @@ Handles:
   - Checkpointing
 """
 import logging
+import math
 import os
 import time
 from collections import deque
@@ -144,6 +145,42 @@ class SACTrainer:
         self.episode_rewards = deque(maxlen=100)
         self.episode_lengths = deque(maxlen=100)
 
+    @staticmethod
+    def _assert_finite_metrics(metrics: dict, total_steps: int) -> None:
+        """Halt the run the first time a training metric goes non-finite (NAN-01).
+
+        Without this a NaN loss is simply logged and the loop continues. That is not
+        hypothetical: run ``pqwttrqd`` (randd_log S553-cont-165) reached 75,000/75,000, exited
+        ``state=finished``, and wrote a full gate verdict JSON — with ``actor_loss``/
+        ``critic_loss``/``alpha`` NaN from the first logged point after ``learning_starts``.
+        A crashed run is loud; that one was silent and indistinguishable from a real result.
+        **``state=finished`` is not evidence a run trained.**
+
+        Cheap by construction: ``train_step_mega`` already paid the ``.item()`` device syncs to
+        build this dict, so these are plain Python floats — checking them costs nothing. The
+        alternative, a ``torch.isnan`` probe inside the update loop, would force a sync on every
+        gradient step and break the CPU/GPU overlap OPT-07/08 exists for.
+
+        Raising (rather than warning) is right because NaN here is TERMINAL, not transient. AMP
+        does have a legitimate transient path — ``GradScaler`` skipping a step when ``unscale_``
+        finds inf/NaN — but that is NaN in the GRADIENTS and it self-corrects. A NaN in a metric
+        means the FORWARD pass produced it, i.e. weights or inputs are already NaN, and neither
+        un-NaNs itself. Failing at the first bad step turns a 27-minute silent waste into a
+        loud one a few thousand steps in.
+
+        Containment is ``SACAgent._guard_alpha_grad``'s job; this is detection. The two are
+        deliberately separate — the guard must not suppress the signal this reads.
+        """
+        bad = {k: v for k, v in metrics.items()
+               if isinstance(v, (int, float)) and not math.isfinite(float(v))}
+        if bad:
+            raise RuntimeError(
+                f"NAN-01: non-finite training metric(s) {sorted(bad)} at total_steps="
+                f"{total_steps} — halting instead of logging NaN for the rest of the run "
+                f"(a 'finished' run with NaN losses looks exactly like a real result). "
+                f"metrics={metrics}"
+            )
+
     def train(self, optuna_trial=None, pruning_callback=None) -> str:
         """Main training loop. Returns path to final checkpoint."""
         num_envs = getattr(self.env, 'num_envs', 1)
@@ -199,6 +236,7 @@ class SACTrainer:
             if train_future is not None:
                 m = train_future.result()
                 if m is not None:
+                    self._assert_finite_metrics(m, total_steps)
                     metrics = m
                 train_future = None
 
@@ -357,6 +395,7 @@ class SACTrainer:
                 if train_future is not None:
                     m = train_future.result()
                     if m is not None:
+                        self._assert_finite_metrics(m, total_steps)
                         metrics = m
                     train_future = None
                 ckpt_path = os.path.join(self.ckpt_dir, f"checkpoint_step_{total_steps}.pth")
