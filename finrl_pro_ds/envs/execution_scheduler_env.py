@@ -59,6 +59,7 @@ from typing import Optional
 import gymnasium as gym
 import numpy as np
 
+from finrl_pro_ds.envs.obs_guard import sanitize_obs
 from finrl_pro_ds.paper.fill_engine import ReactiveSimFillEngine
 from finrl_pro_ds.paper.paper_state import PaperState
 
@@ -67,21 +68,6 @@ logger = logging.getLogger(__name__)
 _PRICE_EPS = 1e-10
 _VOL_EPS = 1e-6
 _L1_EPS = 1e-12
-
-# Hard finite bound on every emitted observation feature (NAN-01).
-#
-# The obs is consumed under mixed precision (`training.use_amp: true`, default
-# `amp_dtype: float16`). float16's maximum finite value is 65504, so ANY feature above
-# that becomes `+/-inf` the instant autocast casts the batch — and the encoder's first
-# `LayerNorm` turns that inf into NaN for that ROW ONLY, which then reaches
-# `torch.distributions.Normal(mu, sigma)` as an invalid `loc`. `np.isfinite` in float64
-# does not catch this: the value is perfectly finite until the dtype narrows.
-#
-# Every feature here is naturally O(1) (fractions, ratios, bps of the parent notional),
-# so this clip is a structural backstop, not a semantic transform — it can only ever bind
-# on a degenerate parent order. 1e4 leaves >6x headroom under the float16 ceiling for the
-# encoder's own Linear/LayerNorm activations. Mirrors the reward clip in `step`.
-OBS_CLIP = 1.0e4
 
 # Smallest L1 target shift that counts as a real parent order (NAN-01).
 #
@@ -117,7 +103,7 @@ class ExecutionSchedulerEnv(gym.Env):
     parent order has nothing to schedule, is undefined as an execution decision (overlay and
     TWAP book the same zero trade), and would divide every parent-normalized obs/reward
     quantity by ~0 — producing values that are finite in float64 but ``inf`` under fp16 AMP.
-    ``OBS_CLIP`` is the independent backstop on the emitted obs.
+    ``obs_guard.sanitize_obs`` is the independent backstop on the emitted obs.
     """
 
     metadata = {"render_modes": ["human"]}
@@ -434,17 +420,13 @@ class ExecutionSchedulerEnv(gym.Env):
         mkt[4] = (self._cum_cost / self._parent_notional) * 1e4   # cost_so_far_bps
         mkt[5] = self._gap0_l1                                    # parent_gross
 
-        # NaN/inf → 0, then a HARD finite bound. The nan_to_num alone is not enough: a
-        # merely-huge finite float64 (a near-empty parent order divided into an O(1) gap)
-        # survives it and only becomes inf once autocast narrows the batch to float16 —
-        # which the encoder's LayerNorm then turns into a per-row NaN in the actor's `loc`
-        # (NAN-01). Clip in the env, where the semantics are known. See OBS_CLIP.
-        if not np.isfinite(priv).all():
-            np.nan_to_num(priv, copy=False, nan=0.0, posinf=0.0, neginf=0.0)
-        if not np.isfinite(mkt).all():
-            np.nan_to_num(mkt, copy=False, nan=0.0, posinf=0.0, neginf=0.0)
-        np.clip(priv, -OBS_CLIP, OBS_CLIP, out=priv)
-        np.clip(mkt, -OBS_CLIP, OBS_CLIP, out=mkt)
+        # NaN/inf → 0, then a HARD finite bound (NAN-01). The nan_to_num alone is not
+        # enough: a merely-huge finite float64 (a near-empty parent order divided into an
+        # O(1) gap) survives it and only becomes inf once autocast narrows the batch to
+        # float16 — which the encoder's LayerNorm then turns into a per-row NaN in the
+        # actor's `loc`. See `obs_guard` for the full mechanism.
+        sanitize_obs(priv)
+        sanitize_obs(mkt)
         return {"scale_0": mkt.copy(), "private": priv.copy()}
 
     def _basket_realized_vol(self, k: int, wprof: np.ndarray) -> float:
