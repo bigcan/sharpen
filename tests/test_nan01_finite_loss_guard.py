@@ -120,3 +120,87 @@ def test_guard_is_wired_into_both_agents():
         assert "_guard_alpha_grad()" in src, f"{cls.__name__}.train_step_mega does not guard alpha"
         assert src.index("_guard_alpha_grad()") < src.index("self.alpha_optimizer.step()"), \
             f"{cls.__name__} guards alpha AFTER the optimizer step — too late"
+
+
+# --------------------------------------------------------------------------- #
+# Containment (AMP-off path) — SACAgent._step_if_finite
+#
+# GradScaler skips an optimizer step when unscale_ finds inf/NaN, but the scaler is
+# DISABLED for use_amp:false AND for amp_dtype:bfloat16 — and that branch fell through to a
+# bare optimizer.step(). clip_grad_norm_ is not a guard: a non-finite gradient makes
+# total_norm non-finite, hence clip_coef non-finite, hence EVERY gradient NaN and the step
+# writes NaN into every parameter at once. Worse than the log_alpha case, which corrupts
+# one scalar.
+# --------------------------------------------------------------------------- #
+def _params_finite(mod) -> bool:
+    return all(torch.isfinite(p).all() for p in mod.parameters())
+
+
+def test_clip_grad_norm_does_not_protect_against_nan():
+    """Pins the PREMISE. If torch ever made clip_grad_norm_ safe on its own, this fails and
+    the guard below can be reconsidered — rather than being cargo-culted forever."""
+    lin = torch.nn.Linear(4, 4)
+    lin.weight.grad = torch.full_like(lin.weight, float("nan"))
+    lin.bias.grad = torch.ones_like(lin.bias)
+    total = torch.nn.utils.clip_grad_norm_(lin.parameters(), 10.0)
+    assert not torch.isfinite(total), "expected a non-finite total_norm"
+    assert not torch.isfinite(lin.bias.grad).all(), \
+        "clip_grad_norm_ propagated the non-finite norm into an initially-HEALTHY grad"
+
+
+@pytest.mark.parametrize("bad", [float("nan"), float("inf")])
+def test_step_if_finite_skips_and_counts(agent, bad):
+    before = [p.detach().clone() for p in agent.actor.parameters()]
+    for p in agent.actor.parameters():
+        p.grad = torch.zeros_like(p)
+    skips0 = agent._nonfinite_grad_skips
+    agent._step_if_finite(agent.actor_optimizer, torch.tensor(bad))
+    assert agent._nonfinite_grad_skips == skips0 + 1, "a skipped step must be counted"
+    for b, p in zip(before, agent.actor.parameters()):
+        assert torch.equal(b, p.detach()), "parameters moved on a skipped step"
+
+
+def test_step_if_finite_steps_when_healthy(agent):
+    for p in agent.actor.parameters():
+        p.grad = torch.ones_like(p)
+    skips0 = agent._nonfinite_grad_skips
+    agent._step_if_finite(agent.actor_optimizer, torch.tensor(3.0))
+    assert agent._nonfinite_grad_skips == skips0, "a healthy step must not be counted as a skip"
+    assert _params_finite(agent.actor)
+
+
+def test_network_survives_a_nan_gradient_with_amp_off(agent):
+    """THE REGRESSION: with the scaler disabled, one non-finite gradient must not NaN the
+    whole actor. Reproduces the bare-step path taken by use_amp:false and bfloat16."""
+    assert not agent.scaler.is_enabled(), "fixture is CPU/AMP-off — the path under test"
+    for p in agent.actor.parameters():
+        p.grad = torch.zeros_like(p)
+    next(agent.actor.parameters()).grad[0][0] = float("nan")
+    total = torch.nn.utils.clip_grad_norm_(agent.actor.parameters(), agent.gradient_clip)
+    agent._step_if_finite(agent.actor_optimizer, total)
+    assert _params_finite(agent.actor), "a single NaN grad element NaN'd the entire actor"
+
+
+def test_amp_off_guard_is_wired_into_both_agents():
+    """Declared-but-not-wired check for all four call sites (critic + actor x 2 agents)."""
+    import inspect
+
+    from finrl_pro_ds.agents.sac.sac_agent import SACAgent
+    for cls in (SACAgent, DistributionalSACAgent):
+        src = inspect.getsource(cls.train_step_mega)
+        assert src.count("_step_if_finite(") == 2, \
+            f"{cls.__name__}.train_step_mega must guard BOTH critic and actor on the AMP-off path"
+        assert "self.critic_optimizer.step()" not in src, \
+            f"{cls.__name__} still has an unguarded bare critic step"
+        assert "self.actor_optimizer.step()" not in src, \
+            f"{cls.__name__} still has an unguarded bare actor step"
+
+
+def test_grad_skips_is_exposed_in_metrics():
+    """A run that has silently stopped learning must be visible, not look like flat training."""
+    import inspect
+
+    from finrl_pro_ds.agents.sac.sac_agent import SACAgent
+    for cls in (SACAgent, DistributionalSACAgent):
+        assert '"grad_skips"' in inspect.getsource(cls.train_step_mega), \
+            f"{cls.__name__} does not report grad_skips"

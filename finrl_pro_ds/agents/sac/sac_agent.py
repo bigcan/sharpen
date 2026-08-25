@@ -74,6 +74,7 @@ class SACAgent:
         # OB-AUD-01: Initialize metric stash so getattr fallback is never needed
         self._last_actor_loss = None
         self._last_alpha_loss = None
+        self._nonfinite_grad_skips = 0   # NAN-01 — see _step_if_finite
         self._last_log_prob = None
         # pin_memory disabled: cudaHostAlloc overhead dominates for small batch
         # sizes typical in HPO/training. Sync .to(device) is faster in practice.
@@ -304,6 +305,38 @@ class SACAgent:
         """
         return self.train_step_mega(1)
 
+    def _step_if_finite(self, optimizer: optim.Optimizer, total_norm: torch.Tensor) -> None:
+        """AMP-off counterpart to ``GradScaler``'s skip-on-non-finite (NAN-01).
+
+        When AMP is enabled with float16, ``scaler.step()`` skips the update whenever
+        ``unscale_`` found inf/NaN in that optimizer's gradients. But the scaler is disabled
+        for ``use_amp: false`` AND for ``amp_dtype: bfloat16`` (bf16 has fp32's exponent range,
+        so loss scaling is pointless) — and on that branch the code fell through to a plain
+        ``optimizer.step()`` with no check at all. ``clip_grad_norm_`` does not cover the gap:
+        a non-finite gradient makes ``total_norm`` non-finite, so ``clip_coef`` is non-finite,
+        so every gradient is multiplied to NaN and the step writes NaN into EVERY parameter of
+        the network in one shot — strictly worse than the ``log_alpha`` case, which corrupts a
+        single scalar.
+
+        ``total_norm`` is a COMPLETE detector, which is why it is the thing checked: it is the
+        square root of a sum over every gradient element, so it is non-finite if and only if at
+        least one gradient element is. ``clip_grad_norm_`` has already poisoned the gradients
+        by the time this runs, but skipping the step means they are never applied and the next
+        ``zero_grad()`` clears them.
+
+        Costs one device sync, which is deliberate and not a regression: the AMP path already
+        pays exactly this — ``GradScaler._maybe_opt_step`` reads ``found_inf`` with ``.item()``
+        before deciding. The point is to make the two branches behave identically, and
+        skipping (rather than zeroing or clamping) is precisely GradScaler's own semantic.
+
+        Skips are counted into ``grad_skips`` so a run that has silently stopped learning is
+        visible in the metrics rather than looking like healthy-but-flat training.
+        """
+        if torch.isfinite(total_norm):
+            optimizer.step()
+        else:
+            self._nonfinite_grad_skips += 1
+
     def _guard_alpha_grad(self) -> None:
         """Zero a non-finite ``log_alpha`` gradient in place, before the optimizer sees it (NAN-01).
 
@@ -431,14 +464,14 @@ class SACAgent:
                 self.scaler.unscale_(self.critic_optimizer)
             else:
                 critic_loss.backward()
-            nn.utils.clip_grad_norm_(
+            critic_norm = nn.utils.clip_grad_norm_(
                 list(self.critic1.parameters()) + list(self.critic2.parameters()),
                 self.gradient_clip,
             )
             if self.scaler.is_enabled():
                 self.scaler.step(self.critic_optimizer)
             else:
-                self.critic_optimizer.step()
+                self._step_if_finite(self.critic_optimizer, critic_norm)   # NAN-01
 
             # --- Actor + Alpha update (O-B: delayed, every actor_update_freq steps) ---
             if self._train_step_count % self.actor_update_freq == 0:
@@ -457,11 +490,11 @@ class SACAgent:
                     self.scaler.unscale_(self.actor_optimizer)
                 else:
                     actor_loss.backward()
-                nn.utils.clip_grad_norm_(self.actor.parameters(), self.gradient_clip)
+                actor_norm = nn.utils.clip_grad_norm_(self.actor.parameters(), self.gradient_clip)
                 if self.scaler.is_enabled():
                     self.scaler.step(self.actor_optimizer)
                 else:
-                    self.actor_optimizer.step()
+                    self._step_if_finite(self.actor_optimizer, actor_norm)   # NAN-01
 
                 # --- Alpha update (float32 — no AMP) ---
                 alpha_loss = -(self.log_alpha * (log_prob.float() + self.target_entropy).detach()).mean()
@@ -489,6 +522,7 @@ class SACAgent:
             if self._train_step_count % 50 == 0:
                 metrics = {
                     "critic_loss": critic_loss.item(),
+                    "grad_skips": float(self._nonfinite_grad_skips),
                     "actor_loss": self._last_actor_loss.item() if self._last_actor_loss is not None else 0.0,
                     "alpha": alpha.item(),
                     "alpha_loss": self._last_alpha_loss.item() if self._last_alpha_loss is not None else 0.0,
