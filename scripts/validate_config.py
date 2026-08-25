@@ -24,6 +24,14 @@ from typing import Any
 
 import yaml
 
+# Repo root on sys.path so lazy `finrl_pro_ds.*` imports (e.g. `_resolve_base_book`'s
+# `config_utils.deep_merge`) resolve when this file is invoked directly as a script
+# (`python scripts/validate_config.py ...`), where sys.path[0] is `scripts/`, not the
+# repo root or cwd. Mirrors the guard `execution_overlay_runner.py` already carries.
+_ROOT = Path(__file__).resolve().parent.parent
+if str(_ROOT) not in sys.path:
+    sys.path.insert(0, str(_ROOT))
+
 logger = logging.getLogger("validate_config")
 
 PROTOCOL_DOC = "docs/protocol_v2.md"

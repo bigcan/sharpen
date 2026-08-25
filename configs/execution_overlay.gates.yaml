@@ -45,6 +45,25 @@ provenance:
   drafted_by_session: S553-cont-57
   architecture_ref: .agent/artifacts/execution_overlay_architecture.md
   consumed_by: [validate_config, execution_overlay_runner]
+  hpo_stage_skip: >-
+    Protocol v2's `hpo` stage is deliberately SKIPPED for this workstream (2026-08-25,
+    execution_overlay_prelaunch_review.md finding 2) — execution_overlay_runner.py trains one
+    fixed-hyperparameter policy directly at `--stage wf`, never running check_hpo's gate.
+    Justification: the tunable surface is small and interpretable (horizon_bars, urgency
+    bounds, impact_penalty, reward scale — ~8 execution_overlay keys), unlike a full
+    alpha-search SAC agent's HPO space; an Optuna sweep over it is a candidate follow-up, not
+    a launch blocker. Revisit if the shipped defaults show sensitivity across the seed check
+    below (fold uplift sign flipping with hyperparameters held fixed would indicate the
+    single-config choice is under-justified).
+  seed_robustness: >-
+    2026-08-25: execution_overlay_runner.py gained --seed (global random/numpy/torch state +
+    vec_env.reset(seed=...); SyncVectorEnv keeps sub-envs in-process, so this fully seeds the
+    run — no AsyncVectorEnv/spawn gap). Verified reproducible: --seed 7 run twice gives a
+    byte-identical uplift; --seed 99 gives a different one. Run 3-5 seeds at reduced steps and
+    check the uplift SIGN is stable before committing the full training budget — this
+    project's own SEED-01 finding (2026-08-22, on an unmerged branch as of this writing) showed
+    prior "multiseed" results elsewhere measured noise, not a seed effect, because the seed
+    never reached env construction. Do not skip this check.
   rationale: >-
     Step 5 of the RL execution-overlay build. Pre-registered BEFORE the first trained-overlay
     eval as a commitment device (the leak-era lesson: verdicts read post-hoc get rationalized).

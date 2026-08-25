@@ -323,12 +323,34 @@ def main() -> int:
                          "OOS window the deploy gate is graded on (default 0.7)")
     ap.add_argument("--num_envs", type=int, default=None, help="override training.num_envs")
     ap.add_argument("--device", default=None, help="cuda|cpu (default: auto)")
+    ap.add_argument("--seed", type=int, default=None,
+                    help="global seed (random/numpy/torch + the training vec-env's RNG streams) "
+                         "for reproducibility / multiseed robustness checks (default: unseeded)")
     ap.add_argument("--smoke", action="store_true",
                     help="tiny CPU plumbing run (the step-5 acceptance check)")
     ap.add_argument("--skip_validate", action="store_true",
                     help="skip the fail-closed validate_config gate (debug only)")
     ap.add_argument("--force_refetch", action="store_true")
     args = ap.parse_args()
+
+    # 0) Global seed (random/numpy/torch parent-process state + network init). Set BEFORE any
+    # model/env construction. Safe as parent-process-only seeding here (unlike the AsyncVectorEnv
+    # + spawn-context case elsewhere in the project, SEED-01): this runner's vec_env is a
+    # SyncVectorEnv, so sub-envs live in THIS process and inherit this state directly — no fresh
+    # interpreter to re-seed. The env-level Gymnasium RNG stream (random_start's rebalance-event
+    # draw) is seeded separately below via vec_env.reset(seed=...), once the vec_env exists.
+    if args.seed is not None:
+        import random
+
+        import numpy as np
+        import torch
+
+        torch.manual_seed(args.seed)
+        np.random.seed(args.seed)
+        random.seed(args.seed)
+        if torch.cuda.is_available():
+            torch.cuda.manual_seed_all(args.seed)
+        log.info("Global seed set: %d", args.seed)
 
     # 1) Fail-closed protocol gate (the runner refuses to train a config that violates v2).
     if not args.skip_validate:
@@ -402,6 +424,12 @@ def main() -> int:
                                   eval_mode=False, apply_prop_firm=apply_pf)
 
     vec_env = gym.vector.SyncVectorEnv([_make_train_env for _ in range(num_envs)])
+    if args.seed is not None:
+        # Seeds each sub-env's Gymnasium np_random (env i gets seed+i, Gymnasium convention).
+        # SACTrainer.train() later calls self.env.reset() with no seed argument — that does NOT
+        # re-randomize an already-seeded np_random, it only resets episode state, so this stream
+        # carries forward through the whole training run.
+        vec_env.reset(seed=args.seed)
 
     # 4) Train the overlay (DistributionalSAC, CVaR on tail-IS).
     import torch
@@ -412,6 +440,8 @@ def main() -> int:
     run_name = config.get("strategy", {}).get("id", "exec-overlay-2sleeve")
     if args.smoke:
         run_name = f"{run_name}-smoke"
+    if args.seed is not None:
+        run_name = f"{run_name}-seed{args.seed}"
     log.info("training overlay: %d envs, device=%s, steps=%d (TRAIN window only)",
              num_envs, device, config["training"]["total_timesteps"])
     # Full runs log to WandB (SACTrainer.train calls wandb.log at log_interval when not hpo_mode);
@@ -454,6 +484,7 @@ def main() -> int:
         "device": device,
         "train_steps": int(config["training"]["total_timesteps"]),
         "smoke": bool(args.smoke),
+        "seed": args.seed,
         # Honesty: the gate is OOS (disjoint test window), but the WF folds are a partition of
         # that OOS window under ONE trained policy — NOT a per-fold retrain WF (a separate
         # artifact). Do not read a PASS as a per-fold-robust walk-forward.
