@@ -138,7 +138,24 @@ def sweep_candidate_type(sweep: dict) -> str:
     return str(sweep.get("mde_sweep", {}).get("candidate_type", _DEFAULT_SWEEP_CANDIDATE_TYPE))
 
 
-def _pooled_points(sweep: dict) -> list[tuple[int, float]]:
+def lord_depth_for(sweep: dict, lord_tests_already: int) -> "int | None":
+    """The account depth in the sweep's ``lord_tests_grid`` to read for a live account that has
+    already charged ``lord_tests_already`` tests, or ``None`` when the sweep carries no family.
+
+    CONSERVATIVE SELECTION (POWER-LORD-01). LORD++ levels only decay over a barren stream, so a
+    DEEPER account has a TIGHTER level and therefore a HIGHER MDE. We take the smallest measured depth
+    that is ``>=`` the live count: rounding DOWN would read a looser level than the tick actually
+    spends and hand back more power than exists — the fail-OPEN direction this guard exists to close.
+    Past the top of the grid we clamp to the deepest measured depth (the caller marks the mode), which
+    is the closest measured statement available; the honest fix there is to extend the grid."""
+    grid = sorted(int(k) for k in sweep.get("mde_sweep", {}).get("lord_tests_grid", []))
+    if not grid:
+        return None
+    k = int(lord_tests_already)
+    return next((g for g in grid if g >= k), grid[-1])
+
+
+def _pooled_points(sweep: dict, lord_depth: "int | None" = None) -> list[tuple[int, float]]:
     """``[(holdout_bars, mde)]`` ascending, POOLED over any extra sweep axis by taking the WORST
     (largest) MDE at each depth.
 
@@ -152,10 +169,20 @@ def _pooled_points(sweep: dict) -> list[tuple[int, float]]:
     refuses when MDE is too high.
 
     Rows with a null MDE (the sweep detected nothing at any beta) are DROPPED rather than read as 0:
-    "undetected" is the opposite of "detectable at zero effect"."""
+    "undetected" is the opposite of "detectable at zero effect".
+
+    ``lord_depth`` (POWER-LORD-01) selects WHICH MDE each row contributes: ``None`` reads the legacy
+    fresh-account field ``mde_realized_delta_sr`` and is byte-identical to the pre-family behaviour;
+    an int reads ``mde_by_lord_tests[str(lord_depth)]`` — the MDE at the LORD++ level an account of
+    that depth actually charges. A row that carries no family entry for the requested depth is DROPPED
+    exactly like a null MDE, so a partially-migrated surface degrades to "not measured at this depth"
+    rather than silently mixing two thresholds into one interpolation."""
     by_h: dict[int, float] = {}
     for r in sweep.get("mde_sweep", {}).get("rows", []):
-        m = r.get("mde_realized_delta_sr")
+        if lord_depth is None:
+            m = r.get("mde_realized_delta_sr")
+        else:
+            m = (r.get("mde_by_lord_tests") or {}).get(str(int(lord_depth)))
         if m is None:
             continue
         mf = float(m)
@@ -166,7 +193,7 @@ def _pooled_points(sweep: dict) -> list[tuple[int, float]]:
     return sorted(by_h.items())
 
 
-def interp_mde(holdout_bars: int, sweep: dict) -> tuple[float, str]:
+def interp_mde(holdout_bars: int, sweep: dict, lord_depth: "int | None" = None) -> tuple[float, str]:
     """Minimum-detectable marginal ΔSR (at the sweep's target power) for a holdout of ``holdout_bars``,
     read off the E1/E2 MDE sweep. Returns ``(mde, mode)``.
 
@@ -210,9 +237,18 @@ def interp_mde(holdout_bars: int, sweep: dict) -> tuple[float, str]:
     true-alpha ceiling (ΔSR ~0.3-0.5), so it refuses whatever the exponent. Its value is a provenance
     figure (the flagship's ≈4.45), never a number the verdict turns on — so it is left byte-stable
     rather than perturbed for a cosmetic gain.
+
+    ``lord_depth`` (POWER-LORD-01) reads the curve at the LORD++ level an account of that depth
+    charges, instead of a fresh account's first level. ``None`` is the legacy fresh reading and is
+    byte-identical to the pre-family behaviour. Every branch below is unchanged — only WHICH measured
+    MDE each row contributes changes, so the interpolation, the sentinels and their justifications all
+    carry over untouched.
     """
-    pts = _pooled_points(sweep)
+    pts = _pooled_points(sweep, lord_depth)
     if not pts:
+        # A family read that finds nothing means this surface has no MDE at that account depth. Do NOT
+        # silently retry at the fresh level here: that would convert "not measured" into "measured and
+        # fine", the fail-OPEN direction. The caller decides whether to degrade, and labels it.
         return math.inf, "unmeasured_empty"
     h = int(holdout_bars)
     if h <= 0:            # degenerate/empty holdout: nothing is tested, so nothing is detectable. Also
@@ -244,7 +280,8 @@ CURVE_BARS_PER_YEAR: float = 252.0
 def stamp_substrate_power(panel_T: int, holdout_frac: float, sweep: "dict | Mapping[str, dict]",
                           sweep_hash: str,
                           candidate_types: "tuple[str, ...] | None" = None,
-                          bars_per_year: float = CURVE_BARS_PER_YEAR) -> SubstratePower:
+                          bars_per_year: float = CURVE_BARS_PER_YEAR,
+                          lord_tests_already: "int | None" = None) -> SubstratePower:
     """Build the :class:`SubstratePower` stamp for a panel of ``panel_T`` bars.
 
     ``bars_per_year`` is the substrate's OWN bar clock (252 = daily, the default, under which this
@@ -266,7 +303,20 @@ def stamp_substrate_power(panel_T: int, holdout_frac: float, sweep: "dict | Mapp
 
     The stamp therefore takes the WORST (largest) MDE across the types being mined, and a type with no
     measured curve yields ``(+inf, 'unmeasured_candidate_type')`` — refuse — rather than silently
-    borrowing another type's curve. ``None`` keeps the historical single-curve behaviour."""
+    borrowing another type's curve. ``None`` keeps the historical single-curve behaviour.
+
+    ``lord_tests_already`` (POWER-LORD-01, S553-cont-166) is how many LORD++ tests the substrate's
+    PERSISTENT account has already charged. The calibration curve used to be scored only at a fresh
+    account's first level, while production runs a decaying one — so the guard stamped power at a
+    threshold production does not use, one-directionally (levels only decay over a barren stream) and
+    invisibly (nothing in the stamp said so). Measured on us_equity: 1.00x fresh -> 1.33x after 8
+    tests. Passing the live count reads the curve at the level the tick will actually spend.
+
+    ``None`` (the default) keeps the fresh reading and is byte-identical to the pre-family behaviour.
+    When a count IS passed but the surface carries no family at that depth, the stamp DEGRADES to the
+    fresh reading and says so in ``interp_mode`` (``...:lord_unmeasured``) rather than refusing — the
+    fresh reading is exactly the status quo, so degrading is not a regression, but it IS anti-
+    conservative and must never be silent. ``:lord{k}`` marks a real family read at depth ``k``."""
     hb = _power_holdout_bars(panel_T, holdout_frac)
     bpy = float(bars_per_year)
     if bpy <= 0.0:
@@ -291,7 +341,19 @@ def stamp_substrate_power(panel_T: int, holdout_frac: float, sweep: "dict | Mapp
         if sw is None:
             worst_mde, worst_mode = math.inf, "unmeasured_candidate_type"
             break
-        mde, mode = interp_mde(hb, sw)
+        if lord_tests_already is None:
+            mde, mode = interp_mde(hb, sw)
+        else:
+            depth = lord_depth_for(sw, lord_tests_already)
+            mde, mode = (math.inf, "unmeasured_empty") if depth is None else interp_mde(hb, sw, depth)
+            if depth is None or not math.isfinite(mde):
+                # No family at this depth (e.g. a surface whose deep rows predate the schema). Fall
+                # back to the fresh reading — the status quo — but LABEL it, so a tick log never shows
+                # a fresh-level stamp masquerading as a live-level one.
+                mde, mode = interp_mde(hb, sw)
+                mode = f"{mode}:lord_unmeasured"
+            else:
+                mode = f"{mode}:lord{depth}"
         if mde > worst_mde:
             worst_mde, worst_mode = mde, (mode if len(wanted) == 1 else f"{mode}:{ct}")
     # math.inf * scale is still inf, so the fail-closed sentinel survives the rescale untouched.

@@ -56,6 +56,7 @@ from finrl_pro_ds.crucible.corrected_contract import (  # noqa: E402
     corrected_contract_fitness,
     fresh_lord_level,
 )
+from finrl_pro_ds.crucible.orchestrator.fdr import OnlineFDR  # noqa: E402
 from finrl_pro_ds.crucible.orchestrator.substrate import _power_holdout_bars  # noqa: E402
 from finrl_pro_ds.signals.features import Panel  # noqa: E402
 from finrl_pro_ds.signals.generation.config import load_generation_config  # noqa: E402
@@ -716,22 +717,57 @@ def _e2_power_curve(cc: CalibConfig, *, t: int, n: int, betas: list[float], n_se
     return curve
 
 
+def lord_level_after(corrected: CorrectedConfig, n_tests_already: int) -> float:
+    """The LORD++ level the NEXT test is charged at on an account that has already run
+    ``n_tests_already`` barren tests. ``n_tests_already == 0`` is exactly ``fresh_lord_level``.
+
+    Mirrors `_tick_lord_level`'s conservative convention (simulate on a copy assuming NO discovery —
+    a real discovery only replenishes, raising later levels)."""
+    acct = OnlineFDR(alpha=corrected.fdr_alpha, w0=corrected.fdr_w0)
+    for _ in range(max(0, int(n_tests_already))):
+        acct.observe(is_discovery=False)
+    return float(acct.next_level())
+
+
 def _xsec_power_curve(cc: CalibConfig, *, t: int, n: int, betas: list[float], n_seeds: int,
                       cost_bps: float, corrected: CorrectedConfig, holdout_frac: float,
                       hold_horizon: int, min_names: int,
-                      alpha: float = 0.05) -> list[dict[str, Any]]:
+                      alpha: float = 0.05,
+                      lord_tests_grid: "list[int] | None" = None) -> list[dict[str, Any]]:
     """The CROSS-SECTIONAL power curve at a fixed ``(t, n)``: plant a per-name characteristic, build the
     oracle rank-L/S book on it, and score its marginal contribution through the corrected contract on the
     BINDING holdout window — the cross-sectional analogue of :func:`_e2_power_curve`.
 
     ``n`` is the axis the overlay curve cannot see. A cross-sectional book averages its spread over ``n``
     names, so its noise falls with breadth while ``holdout_bars`` stays fixed; measuring along ``n`` is
-    the whole point of this sweep."""
-    lord = fresh_lord_level(corrected)
+    the whole point of this sweep.
+
+    POWER AT MORE THAN ONE LORD++ LEVEL (S553-cont-166, POWER-LORD-01). This curve used to be scored
+    only at ``fresh_lord_level`` — the level a first-ever test spends — while production runs a
+    PERSISTENT per-substrate account whose level DECAYS over a barren stream. The guard therefore
+    stamped power at a threshold production does not use, one-directionally and invisibly. The fix is
+    to emit a FAMILY of powers indexed by how many tests the account has already charged, so the guard
+    can read the row matching the live account instead of the fresh one.
+
+    It is nearly free, and exactly equivalent to re-scoring. The level enters
+    ``corrected_contract_fitness`` ONLY through ``lord_pass`` (`corrected_contract.py`), so scoring
+    ONCE at ``lord_level=1.0`` yields ``passes_corrected`` with the LORD++ leg held open — every other
+    leg, including the cont-151 ``exposure_pass`` this function never names, already folded in — and
+    each level's detection is that AND ``p_value <= level``. Taking the non-LORD pass from the scorer
+    rather than re-ANDing leg flags by hand is what stops a future leg from being silently dropped.
+
+    ⚠ RNG SAFETY: the extra levels are pure post-processing of one scored draw. No additional panel is
+    generated and no additional random number is drawn, so ``power``/``mean_realized_delta_sr`` at the
+    fresh level stay BIT-IDENTICAL to the pre-family implementation. That is asserted by
+    ``tests/crucible/test_calibration_lord_family.py``."""
+    grid = sorted({0, *(int(k) for k in (lord_tests_grid or []))})
+    levels = {k: lord_level_after(corrected, k) for k in grid}
+    lord = levels[0]                                   # == fresh_lord_level(corrected)
     hb = _power_holdout_bars(t, holdout_frac)
     curve: list[dict[str, Any]] = []
     for beta in betas:
         detections = 0
+        by_level = {k: 0 for k in grid}
         realized: list[float] = []
         for k in range(n_seeds):
             panel, x = _planted_xsec_panel(t, n, seed=7000 + k, beta=beta)
@@ -741,9 +777,15 @@ def _xsec_power_curve(cc: CalibConfig, *, t: int, n: int, betas: list[float], n_
                                                   cost_bps=cost_bps, min_names=min_names)
             cand_ho = cand[t - hb:]
             base_ho = {k2: np.asarray(v)[t - hb:] for k2, v in base.items()}
+            # Score ONCE with the LORD++ leg held open; every level is then a threshold on p_value.
             cr = corrected_contract_fitness(cand_ho, base_ho, ts[t - hb:], cc.fit_cfg, corrected,
-                                            lord_level=lord)
-            if cr.passes_corrected:
+                                            lord_level=1.0)
+            non_lord_pass = bool(cr.passes_corrected)
+            p = float(cr.p_value)
+            for kk, lvl in levels.items():
+                if non_lord_pass and np.isfinite(p) and p <= lvl:
+                    by_level[kk] += 1
+            if non_lord_pass and np.isfinite(p) and p <= lord:
                 detections += 1
             if np.isfinite(cr.delta_sr):
                 realized.append(float(cr.delta_sr))
@@ -753,6 +795,9 @@ def _xsec_power_curve(cc: CalibConfig, *, t: int, n: int, betas: list[float], n_
             "power_cp_lower95": clopper_pearson_lower(detections, n_seeds, alpha),
             "mean_realized_delta_sr": float(np.mean(realized)) if realized else float("nan"),
             "scored_bars": int(hb), "lord_level": float(lord),
+            # POWER-LORD-01: detection rate at each account depth. Key is the number of tests ALREADY
+            # charged; "0" is the fresh level and reproduces `power` above.
+            "power_by_lord_tests": {str(k): by_level[k] / max(1, n_seeds) for k in grid},
         })
     return curve
 
@@ -782,23 +827,40 @@ def run_xsec_mde_sweep(cc: CalibConfig, *, quick: bool, corrected: CorrectedConf
     t_grid = [1512, 4044] if quick else [int(x) for x in sw["t_grid"]]
     n_grid = [12, 50] if quick else [int(x) for x in sw["n_grid"]]
 
-    log.info("XSEC MDE surface [corrected]: T in %s x N in %s x %d betas x %d seeds",
-             t_grid, n_grid, len(betas), n_seeds)
+    # POWER-LORD-01: account depths at which the MDE is ALSO reported, so the guard can stamp at the
+    # level production actually runs instead of the fresh one. From the calibration gates file; 0 is
+    # always included (it IS the fresh level) so the legacy fields below never move.
+    lord_grid = sorted({0, *(int(k) for k in sw.get("lord_tests_grid", []))})
+
+    log.info("XSEC MDE surface [corrected]: T in %s x N in %s x %d betas x %d seeds "
+             "| LORD++ account depths %s", t_grid, n_grid, len(betas), n_seeds, lord_grid)
     rows: list[dict[str, Any]] = []
     for n in n_grid:
         for t in t_grid:
             curve = _xsec_power_curve(cc, t=t, n=n, betas=betas, n_seeds=n_seeds, cost_bps=cost_bps,
                                       corrected=corrected, holdout_frac=holdout_frac,
-                                      hold_horizon=hold_horizon, min_names=min_names)
+                                      hold_horizon=hold_horizon, min_names=min_names,
+                                      lord_tests_grid=lord_grid)
             mde = _mde_from_curve(curve, power_target)
+            # The same first-point-reaching-target-power convention as `_mde_from_curve`, read off
+            # each account depth's own power column.
+            mde_by_lord: dict[str, Any] = {}
+            for k in lord_grid:
+                hit = next((p for p in curve
+                            if float(p["power_by_lord_tests"][str(k)]) >= power_target), None)
+                mde_by_lord[str(k)] = (float(hit["mean_realized_delta_sr"]) if hit else None)
             rows.append({
                 "t": t, "n": n, "holdout_bars": _power_holdout_bars(t, holdout_frac),
                 "mde_realized_delta_sr": (float(mde["mean_realized_delta_sr"]) if mde else None),
                 "mde_beta": (mde["beta"] if mde else None),
                 "mde_power": (float(mde["power"]) if mde else None),
                 "max_power": max((float(p["power"]) for p in curve), default=0.0),
+                # None ⇔ this depth never reached target power on the grid — the guard must read that
+                # as unmeasured (refuse), never as "no depletion".
+                "mde_by_lord_tests": mde_by_lord,
                 "curve": [{"beta": p["beta"], "power": p["power"],
-                           "realized_delta_sr": p["mean_realized_delta_sr"]} for p in curve],
+                           "realized_delta_sr": p["mean_realized_delta_sr"],
+                           "power_by_lord_tests": p["power_by_lord_tests"]} for p in curve],
             })
             log.info("  N=%-4d T=%-6d (holdout %d): MDE=%s @power=%s", n, t,
                      rows[-1]["holdout_bars"], rows[-1]["mde_realized_delta_sr"],
@@ -808,6 +870,11 @@ def run_xsec_mde_sweep(cc: CalibConfig, *, quick: bool, corrected: CorrectedConf
         "t_grid": t_grid, "n_grid": n_grid, "beta_grid": betas, "n_seeds": n_seeds,
         "power_target": power_target, "holdout_frac": holdout_frac,
         "hold_horizon": hold_horizon, "ls_min_names": min_names, "rows": rows,
+        # POWER-LORD-01: the account depths every row carries an MDE for, and the LORD++ level each
+        # one corresponds to. A consumer that does not know this key reads the fresh-level fields and
+        # behaves exactly as before.
+        "lord_tests_grid": lord_grid,
+        "lord_levels": {str(k): lord_level_after(corrected, k) for k in lord_grid},
         "corrected_thresholds": {"t_min": corrected.t_min, "n_eff_mode": corrected.n_eff_mode,
                                  "p_value_model": corrected.p_value_model,
                                  "fdr_binding": corrected.fdr_binding,
