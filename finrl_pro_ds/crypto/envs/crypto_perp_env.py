@@ -20,7 +20,14 @@ from typing import Optional
 import gymnasium as gym
 import numpy as np
 
+from finrl_pro_ds.envs.obs_guard import sanitize_obs
+
 logger = logging.getLogger(__name__)
+
+# NAN-01: ceiling on the OBSERVED participation ratio (order notional / bar volume)
+# used by the cost-to-rebalance feature. Bounds the obs only — the cost actually
+# CHARGED in the step path is deliberately left unbounded so economics are unchanged.
+MAX_OBS_PARTICIPATION = 1.0e4
 
 
 class CryptoPerpEnv(gym.Env):
@@ -686,7 +693,12 @@ class CryptoPerpEnv(gym.Env):
             obs_vol_idx = max(self.step_idx - 1, 0)
             notionals = abs_pos[active_pos] * pv_for_cost
             hourly_vols = self.volume_ary[obs_vol_idx, active_pos]
+            # NAN-01: `> 1e-6` only catches a volume of EXACTLY ~zero; a tiny-but-nonzero
+            # volume bar divides an O(capital) notional by ~0 and emits ~1e10 — finite in
+            # float64 (so `sanitize_obs`'s isfinite scan never sees it) but `inf` under fp16
+            # AMP, which LayerNorm then turns into a per-row NaN in the actor's `loc`.
             vol_ratios = np.where(hourly_vols > 1e-6, notionals / hourly_vols, 1.0)
+            np.minimum(vol_ratios, MAX_OBS_PARTICIPATION, out=vol_ratios)
             slip_bps = self.slippage_base_bps + self.slippage_impact_bps * vol_ratios
             costs = notionals * (self.taker_fee_pct + slip_bps * 1e-4)
             cost_buf[active_pos] = costs / (self.initial_capital + 1e-6)
@@ -703,11 +715,8 @@ class CryptoPerpEnv(gym.Env):
             enb = 0.0
         buf[off] = enb
 
-        # NaN guard (fast path: skip if all finite)
-        if not np.isfinite(buf).all():
-            np.nan_to_num(buf, copy=False, nan=0.0, posinf=0.0, neginf=0.0)
-
-        return buf
+        # NaN/inf guard + hard float16-safe magnitude bound (NAN-01).
+        return sanitize_obs(buf)
 
     # -----------------------------------------------------------------------
     # Utilities
