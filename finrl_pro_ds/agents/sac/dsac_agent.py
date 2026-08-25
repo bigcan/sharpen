@@ -308,14 +308,14 @@ class DistributionalSACAgent(SACAgent):
                 self.scaler.unscale_(self.critic_optimizer)
             else:
                 critic_loss.backward()
-            nn.utils.clip_grad_norm_(
+            critic_norm = nn.utils.clip_grad_norm_(
                 list(self.critic1.parameters()) + list(self.critic2.parameters()),
                 self.gradient_clip,
             )
             if self.scaler.is_enabled():
                 self.scaler.step(self.critic_optimizer)
             else:
-                self.critic_optimizer.step()
+                self._step_if_finite(self.critic_optimizer, critic_norm)   # NAN-01
 
             # === ACTOR UPDATE (CVaR-aware) + ALPHA UPDATE ===
             if self._train_step_count % self.actor_update_freq == 0:
@@ -340,11 +340,11 @@ class DistributionalSACAgent(SACAgent):
                     self.scaler.unscale_(self.actor_optimizer)
                 else:
                     actor_loss.backward()
-                nn.utils.clip_grad_norm_(self.actor.parameters(), self.gradient_clip)
+                actor_norm = nn.utils.clip_grad_norm_(self.actor.parameters(), self.gradient_clip)
                 if self.scaler.is_enabled():
                     self.scaler.step(self.actor_optimizer)
                 else:
-                    self.actor_optimizer.step()
+                    self._step_if_finite(self.actor_optimizer, actor_norm)   # NAN-01
 
                 # Alpha update (float32, no AMP)
                 alpha_loss = -(self.log_alpha * (log_prob.float() + self.target_entropy).detach()).mean()
@@ -371,6 +371,7 @@ class DistributionalSACAgent(SACAgent):
             if self._train_step_count % 50 == 0:
                 metrics = {
                     "critic_loss": critic_loss.item(),
+                    "grad_skips": float(self._nonfinite_grad_skips),
                     "actor_loss": self._last_actor_loss.item() if self._last_actor_loss is not None else 0.0,
                     "alpha": alpha.item(),
                     "alpha_loss": self._last_alpha_loss.item() if self._last_alpha_loss is not None else 0.0,
