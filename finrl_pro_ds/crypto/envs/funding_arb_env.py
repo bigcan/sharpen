@@ -20,7 +20,25 @@ from typing import Optional
 import gymnasium as gym
 import numpy as np
 
+from finrl_pro_ds.envs.obs_guard import sanitize_obs
+
 logger = logging.getLogger(__name__)
+
+# NAN-01 source bounds.
+#
+# `_get_portfolio_value` returns `max(margin_balance + unrealized, 0.0)`, so on a
+# wipe-out it is EXACTLY 0.0 — and the terminal obs of that step is still built and
+# pushed into the replay buffer before the circuit breaker terminates. Dividing an
+# O(capital) margin/deployed-capital figure by `0.0 + 1e-10` emits ~1e15: finite in
+# float64, `inf` the instant fp16 AMP casts it, then a per-row NaN out of the
+# encoder's first LayerNorm and an invalid `loc` in the SAC actor's Normal.
+# Denominate the ratio features in a floor tied to initial capital instead — the same
+# `max(pv, capital * 0.01)` idiom CryptoPerpEnv already uses for its cost features.
+PV_FLOOR_FRAC = 0.01
+
+# Ceiling on the OBSERVED participation ratio in `_calc_cost_to_exit` (same failure
+# shape: the `> 1e-6` volume guard only catches a volume of exactly ~zero).
+MAX_OBS_PARTICIPATION = 1.0e4
 
 
 class FundingArbEnv(gym.Env):
@@ -749,17 +767,15 @@ class FundingArbEnv(gym.Env):
         net_delta = self._calc_net_delta(spot_price, perp_price, portfolio_value)
         delta_pct = np.array([net_delta], dtype=np.float32)
 
-        # 9. Margin usage %
-        perp_margin_used = float(self.perp_notionals.sum()) * self.perp_margin_rate
-        margin_pct = np.array(
-            [perp_margin_used / (portfolio_value + 1e-10)], dtype=np.float32,
-        )
+        # 9-10. Margin usage % and capital deployed %, both denominated in a portfolio
+        # value floored at PV_FLOOR_FRAC of initial capital (NAN-01 — see module header).
+        pv_denom = max(portfolio_value, self.initial_capital * PV_FLOOR_FRAC)
 
-        # 10. Capital deployed %
+        perp_margin_used = float(self.perp_notionals.sum()) * self.perp_margin_rate
+        margin_pct = np.array([perp_margin_used / pv_denom], dtype=np.float32)
+
         capital_deployed = float(self.spot_notionals.sum()) + perp_margin_used
-        capital_pct = np.array(
-            [capital_deployed / (portfolio_value + 1e-10)], dtype=np.float32,
-        )
+        capital_pct = np.array([capital_deployed / pv_denom], dtype=np.float32)
 
         # 11. Portfolio concentration (ENB)
         abs_w = np.abs(self.arb_weights)
@@ -772,7 +788,7 @@ class FundingArbEnv(gym.Env):
             enb = 0.0
         enb_arr = np.array([enb / self.n_assets], dtype=np.float32)
 
-        return np.concatenate([
+        obs = np.concatenate([
             pv_pct,
             tech_flat,
             weights,
@@ -785,6 +801,9 @@ class FundingArbEnv(gym.Env):
             capital_pct,
             enb_arr,
         ]).astype(np.float32)
+        # NAN-01: the pre-fix env guarded only `tech_flat`; every env-computed block below
+        # it went out raw. NaN/inf -> 0, then a hard float16-safe bound.
+        return sanitize_obs(obs)
 
     def _calc_per_asset_basis_pnl(
         self, spot_price: np.ndarray, perp_price: np.ndarray,
@@ -831,6 +850,7 @@ class FundingArbEnv(gym.Env):
         spot_vols = self.spot_volume_ary[vol_idx, active]
         spot_ratios = np.ones_like(notionals)
         np.divide(notionals, spot_vols, out=spot_ratios, where=spot_vols > 1e-6)
+        np.minimum(spot_ratios, MAX_OBS_PARTICIPATION, out=spot_ratios)   # NAN-01
         spot_slip = self.slippage_base_bps + self.slippage_impact_bps * spot_ratios
         spot_cost = notionals * (self.spot_taker_fee_pct + spot_slip * 1e-4)
 
@@ -838,6 +858,7 @@ class FundingArbEnv(gym.Env):
         perp_vols = self.perp_volume_ary[vol_idx, active]
         perp_ratios = np.ones_like(notionals)
         np.divide(notionals, perp_vols, out=perp_ratios, where=perp_vols > 1e-6)
+        np.minimum(perp_ratios, MAX_OBS_PARTICIPATION, out=perp_ratios)   # NAN-01
         perp_slip = self.slippage_base_bps + self.slippage_impact_bps * perp_ratios
         perp_cost = notionals * (self.perp_taker_fee_pct + perp_slip * 1e-4)
 
