@@ -39,8 +39,14 @@ import gymnasium as gym
 import numpy as np
 
 from finrl_pro_ds.envs.dsr import DSRCalculator
+from finrl_pro_ds.envs.obs_guard import sanitize_obs
 
 logger = logging.getLogger(__name__)
+
+# NAN-01: ceiling on the OBSERVED participation ratio (order notional / bar dollar
+# volume) used by the cost-to-unwind feature. Bounds the obs only — the cost actually
+# CHARGED in `_calc_costs` is deliberately left unbounded so economics are unchanged.
+MAX_OBS_PARTICIPATION = 1.0e4
 
 
 class MultiAssetAllocatorEnv(gym.Env):
@@ -626,7 +632,14 @@ class MultiAssetAllocatorEnv(gym.Env):
             obs_vol_idx = max(self.step_idx - 1, 0)
             notionals = abs_pos[active_pos] * pv_for_cost
             bar_vols = self.volume_ary[obs_vol_idx, active_pos]  # DOLLAR volume (F1)
+            # NAN-01: the `> 1e-6` guard only catches a volume of EXACTLY ~zero. A bar with
+            # a tiny-but-nonzero dollar volume (halt, holiday stub, data gap) divides an
+            # O(capital) notional by ~0 and emits a participation ~1e10 — finite in float64,
+            # therefore invisible to `sanitize_obs`'s isfinite scan, but `inf` under fp16 AMP.
+            # Participation beyond MAX_OBS_PARTICIPATION is saturated nonsense either way
+            # (trading 1e4x the bar's whole volume), so bound it at the source.
             vol_ratios = np.where(bar_vols > 1e-6, notionals / bar_vols, 1.0)
+            np.minimum(vol_ratios, MAX_OBS_PARTICIPATION, out=vol_ratios)
             slip_bps = self.slippage_base_bps + self.slippage_impact_bps * vol_ratios
             costs = notionals * (self.taker_fee_pct + slip_bps * 1e-4)
             cost_buf[active_pos] = costs / (self.initial_capital + 1e-6)
@@ -643,9 +656,7 @@ class MultiAssetAllocatorEnv(gym.Env):
             enb = 0.0
         buf[off] = enb
 
-        if not np.isfinite(buf).all():
-            np.nan_to_num(buf, copy=False, nan=0.0, posinf=0.0, neginf=0.0)
-        return buf
+        return sanitize_obs(buf)
 
     # -----------------------------------------------------------------------
     def render(self):
