@@ -1,0 +1,117 @@
+# ============================================================================
+# EXECUTION OVERLAY (RL) — SAC seed-robustness check (exec-overlay-2sleeve-seedcheck)
+# ============================================================================
+# Intermediate-budget multiseed check, GPU. NOT the production launch config
+# (configs/execution_overlay_sac.yaml) — a sibling with ONLY training.total_timesteps
+# reduced. Real num_envs/batch_size/learning_starts/buffer_size are kept so the training
+# dynamics are representative, unlike the CPU-sandbox check this replaces (8K steps,
+# ~875 gradient updates, undertrained-policy noise — see randd_log.md S553-cont-163).
+#
+# WHY THIS EXISTS: a 5-seed CPU-only check at 8K steps found is_uplift_bps's SIGN
+# unstable (2/5 PASS, 3/5 FAIL, range -5.23..+2.73 bps) but was caveated inconclusive —
+# actor_loss/critic_loss/cvar_q_mean were still wildly divergent across seeds, i.e. the
+# policies were barely past initialization. This config runs long enough (75,000 steps,
+# ~65,000 past learning_starts, ~8,100 gradient updates at update_interval=8 — ~9x the
+# CPU check) to see whether the loss curves actually stabilize before trusting a
+# sign-stability read. It is still ~27x cheaper than the full 2,000,000-step launch.
+#
+# RUN ALL 5 SEEDS (same seeds as the CPU check, for a direct before/after comparison):
+#   for s in 1 2 3 4 5; do
+#     python scripts/execution_overlay_runner.py \
+#       --config configs/execution_overlay_sac_seedcheck.yaml --seed $s \
+#       --out results/execution_overlay/seedcheck_gpu/seed${s}.json
+#   done
+# Or via the fleet (gpuhub-1/2/3, up to 4 concurrent — allocation order in the Deploy
+# skill): one deploy_bare_metal.py call per seed, --script scripts/execution_overlay_runner.py
+# --extra_args "--config configs/execution_overlay_sac_seedcheck.yaml --seed N --out ...".
+#
+# GATE: this is a PRE-LAUNCH ROBUSTNESS CHECK, not a capital promotion. A PASS here
+# authorizes nothing on its own — configs/execution_overlay.gates.yaml's provenance
+# already states that explicitly for the underlying execution_beats_baseline gate.
+# ============================================================================
+
+strategy:
+  id: "exec-overlay-2sleeve-seedcheck"
+  name: "execution_overlay_rl"
+  version: "0.1.0"
+  instrument: "execution_scheduler"
+
+# ---------- BASE BOOK (inheritance) ------------------------------------------
+base_book: configs/live_cross_asset_paper.yaml
+
+# ---------- EXECUTION OVERLAY (ExecutionSchedulerEnv params; ADR-3/4/6/7) -----
+execution_overlay:
+  horizon_bars: 5
+  baseline_schedule: twap
+  urgency_min: 0.0
+  urgency_max: 2.0
+  is_reward_scale: 1.0e4
+  impact_penalty: 1.0
+  risk_penalty: 0.0
+  unexecuted_penalty: 50.0
+  asymmetric_dampen: 0.0
+  reactive_impact_bps: 8.0
+  reactive_decay: 0.5
+  vol_window: 20
+  mom_window: 5
+  relative_equity: true
+
+# ---------- PROP FIRM (PropFirmWrapperV7; ADR-5) -----------------------------
+prop_firm:
+  max_trailing_drawdown_pct: 0.05
+  drawdown_penalty_start: 0.02
+  drawdown_penalty_scale: 5.0
+  augment_obs: true
+  static_peak: true
+
+# ---------- NETWORK (dict-obs summary_stats; ADR-9) --------------------------
+network:
+  obs_mode: summary_stats
+  n_scales: 1
+  fusion_dim: 256
+  window_size: 1
+
+features:
+  scales: [1]
+
+# ---------- AGENT (DistributionalSAC, CVaR on tail-IS; action_dim=1) ---------
+# Real production hyperparameters, UNCHANGED from execution_overlay_sac.yaml — only
+# the training budget below is reduced, so this is representative of what the full
+# 2M-step run's early training dynamics actually look like.
+agents:
+  sac:
+    distributional: true
+    cvar_alpha: 0.25
+    n_quantiles: 32
+    update_interval: 8            # tau auto-scales
+    batch_size: 512
+    learning_starts: 10000
+    buffer_size: 1000000
+
+training:
+  total_timesteps: 75000          # SEEDCHECK: 2,000,000 -> 75,000 (~9x the CPU check's ~875 grad updates)
+  torch_compile: true
+  use_amp: true
+  num_envs: 8
+
+# ---------- GATES (decision gates; ADR-8) ------------------------------------
+gates:
+  execution_beats_baseline:
+    metric: "net_is_uplift_bps"
+    min_uplift_bps: 2.0
+    cost_stress_factor: 1.5
+    cost_stress_min_uplift_bps: 0.5
+    wf_folds: 4
+    robust_folds_required: 3
+    else: "ship_snap_executor"
+  overlay_parity:
+    max_completion_l1_drift: 0.01
+    max_intra_horizon_drift: 1.0
+
+ensemble:
+  gates_file: configs/execution_overlay.gates.yaml
+
+wandb:
+  project: "FinRL-Pro-DS"
+  consolidate: true
+  tags: ["exec-overlay", "execution", "two-sleeve", "sac", "rl-execution", "s553", "seedcheck-gpu"]
