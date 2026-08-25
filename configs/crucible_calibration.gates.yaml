@@ -147,7 +147,40 @@ xsec_mde_sweep:
   # of the Sharpe-DIFFERENCE is set by the number of TIME observations, not by the cross-section. What
   # breadth buys is a HIGHER ΔSR for the same underlying per-name signal (5.9 vs 2.4 at beta=0.001), so
   # it moves a real alpha ABOVE a fixed ceiling rather than moving the ceiling down.
-  beta_grid: [0.0, 0.0001, 0.00015, 0.0002, 0.0003, 0.0004, 0.0005, 0.0007, 0.001, 0.0015]
+  #
+  # REFINED 2026-08-25 (S553-cont-166, POWER-LORD-01), 10 -> 16 points. The previous grid QUANTIZED the
+  # stamp: `_mde_from_curve` reports the realized ΔSR at the FIRST grid beta reaching target power, and
+  # the steps were wide enough (n=100 at holdout 1011 jumps 1.398 -> 2.001 between adjacent betas) that
+  # a real change in the decision threshold could move the crossing by less than one step and read as NO
+  # change. That is what made the depletion measurement ambiguous — on this grid the live-level MDE
+  # crossed the 1.457 ceiling by 0.5%, a margin far inside one step of the estimator producing it.
+  # A gate whose answer flips on its own step size is not measuring what it claims to three digits.
+  #
+  # The 6 added points are STRICTLY INTERSTITIAL — every original beta is retained, so the refinement
+  # can only find the power crossing EARLIER (lower MDE) or leave it unchanged; it cannot invent a
+  # crossing the old grid would have missed in the other direction. Expect all MDEs to move DOWN, which
+  # makes the power guard STRICTER about nothing and more accurate about everything.
+  #
+  # ⚠ MUST stay byte-identical to the same key in `crucible_calibration_deep.gates.yaml` — the two
+  # sweeps overlap at t in {8064, 16128, 32256} and `crucible_merge_mde_sweeps.py` REFUSES to merge if
+  # the overlapping points disagree beyond --tol. Different grids there would abort the union build.
+  beta_grid: [0.0, 0.0001, 0.00015, 0.0002, 0.00025, 0.0003, 0.00035, 0.0004, 0.00045, 0.0005, 0.0006, 0.0007, 0.00085, 0.001, 0.00125, 0.0015]
+
+  # POWER-LORD-01 (S553-cont-166). Account depths at which every row ALSO reports an MDE, so the
+  # power guard can stamp at the LORD++ level production actually runs instead of a fresh account's
+  # first level. The number is how many barren tests the per-substrate account has ALREADY charged.
+  #
+  # 0 is implicit and always emitted — it IS `fresh_lord_level`, so the legacy `mde_realized_delta_sr`
+  # field is unchanged and any consumer that ignores this key behaves exactly as before.
+  #
+  # Depths are geometric because the LORD++ level decays geometrically: on us_equity the measured
+  # effect is 1.00x fresh -> 1.33x after 8 tests -> 1.39x at a 40-spec batch, so the interesting
+  # structure is all in the first few dozen tests. 64 is included as headroom so a long-lived account
+  # reads a MEASURED depth rather than falling off the end of the grid.
+  #
+  # Emitting these costs ~nothing: the level enters `corrected_contract_fitness` only through
+  # `lord_pass`, so one scoring pass serves every depth (see `_xsec_power_curve`).
+  lord_tests_grid: [0, 4, 8, 16, 32, 64]
 
 # ---- E1 sensitivity sweep (F4 realistic-null robustness) -------------------------------
 # The F4 finding "E1 stays GREEN under a realistic null" is measured at ONE null-shape point

@@ -156,7 +156,21 @@ xsec_mde_sweep:
   # of the Sharpe-DIFFERENCE is set by the number of TIME observations, not by the cross-section. What
   # breadth buys is a HIGHER ΔSR for the same underlying per-name signal (5.9 vs 2.4 at beta=0.001), so
   # it moves a real alpha ABOVE a fixed ceiling rather than moving the ceiling down.
-  beta_grid: [0.0, 0.0001, 0.00015, 0.0002, 0.0003, 0.0004, 0.0005, 0.0007, 0.001, 0.0015]
+  #
+  # REFINED 2026-08-25 (S553-cont-166, POWER-LORD-01), 10 -> 16 points. ⚠ This key MUST stay
+  # byte-identical to the same key in `crucible_calibration.gates.yaml`: the shallow and deep sweeps
+  # overlap at t in {8064, 16128, 32256} x n in {12, 25, 50, 100}, and `crucible_merge_mde_sweeps.py`
+  # REFUSES to merge when an overlapping point disagrees beyond --tol. Refining one grid and not the
+  # other aborts the union build (correctly — it would mix two resolutions inside one surface that
+  # `interp_mde` interpolates ACROSS depths). Full rationale in the shallow config.
+  beta_grid: [0.0, 0.0001, 0.00015, 0.0002, 0.00025, 0.0003, 0.00035, 0.0004, 0.00045, 0.0005, 0.0006, 0.0007, 0.00085, 0.001, 0.00125, 0.0015]
+
+  # POWER-LORD-01: deliberately ABSENT here (see the shallow config for the key and its rationale).
+  # The deep sweep in flight 2026-08-25 predates the family schema, and its rows serve only substrates
+  # with holdout > 8,064 bars — intraday territory, closed on the record. Those depths therefore keep
+  # the FRESH-level stamp, and the guard degrades to it explicitly rather than silently (interp_mode
+  # gains a `:lord_unmeasured` suffix). Re-run this sweep with a `lord_tests_grid` before mining any
+  # substrate whose holdout is bracketed by t >= 64512.
 
 # ---- E1 sensitivity sweep (F4 realistic-null robustness) -------------------------------
 # The F4 finding "E1 stays GREEN under a realistic null" is measured at ONE null-shape point
