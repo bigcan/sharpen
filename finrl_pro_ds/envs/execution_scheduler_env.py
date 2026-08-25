@@ -68,6 +68,32 @@ _PRICE_EPS = 1e-10
 _VOL_EPS = 1e-6
 _L1_EPS = 1e-12
 
+# Hard finite bound on every emitted observation feature (NAN-01).
+#
+# The obs is consumed under mixed precision (`training.use_amp: true`, default
+# `amp_dtype: float16`). float16's maximum finite value is 65504, so ANY feature above
+# that becomes `+/-inf` the instant autocast casts the batch — and the encoder's first
+# `LayerNorm` turns that inf into NaN for that ROW ONLY, which then reaches
+# `torch.distributions.Normal(mu, sigma)` as an invalid `loc`. `np.isfinite` in float64
+# does not catch this: the value is perfectly finite until the dtype narrows.
+#
+# Every feature here is naturally O(1) (fractions, ratios, bps of the parent notional),
+# so this clip is a structural backstop, not a semantic transform — it can only ever bind
+# on a degenerate parent order. 1e4 leaves >6x headroom under the float16 ceiling for the
+# encoder's own Linear/LayerNorm activations. Mirrors the reward clip in `step`.
+OBS_CLIP = 1.0e4
+
+# Smallest L1 target shift that counts as a real parent order (NAN-01).
+#
+# `W_target[r] == W_target[r-1]` (e.g. the signal-warmup months where the linear book's
+# lookbacks are unmet and `combined_w` is identically zero) opens a parent order with
+# NOTHING to execute. Such an episode is not merely uninformative — every quantity the env
+# normalizes BY the parent size (`inventory_remaining`, `schedule_deviation`,
+# `cost_so_far_bps`, and the IS reward via `_parent_notional`) divides by ~0 and explodes.
+# It is also undefined as an execution decision: overlay and TWAP book the same (zero)
+# trade, so the gate's uplift on it is 0/0. Drop those steps from the calendar instead.
+MIN_PARENT_L1 = 1e-4
+
 # Private (execution-intrinsic) and market (microstructure-proxy) observation widths.
 PRIVATE_DIM = 4
 MARKET_DIM = 6
@@ -85,6 +111,13 @@ class ExecutionSchedulerEnv(gym.Env):
                         participation_dispersion, cost_so_far_bps, parent_gross]
 
     Action: ``Box(-1,1,(1,))`` scalar urgency; ``a=0 → m=1 →`` baseline TWAP slice.
+
+    **Calendar (NAN-01).** A rebalance step is admissible only if it is horizon-valid AND
+    opens a real parent order (``‖W_target[r] − W_target[r−1]‖₁ ≥ min_parent_l1``). An empty
+    parent order has nothing to schedule, is undefined as an execution decision (overlay and
+    TWAP book the same zero trade), and would divide every parent-normalized obs/reward
+    quantity by ~0 — producing values that are finite in float64 but ``inf`` under fp16 AMP.
+    ``OBS_CLIP`` is the independent backstop on the emitted obs.
     """
 
     metadata = {"render_modes": ["human"]}
@@ -118,6 +151,7 @@ class ExecutionSchedulerEnv(gym.Env):
         relative_equity: bool = True,          # info["portfolio_value"] = execution tracking-error equity (ADR-5)
         max_gross_exposure: float = 3.0,
         random_start: bool = True,             # train: start at a random rebalance event
+        min_parent_l1: float = MIN_PARENT_L1,  # drop degenerate (empty) parent orders (NAN-01)
     ) -> None:
         super().__init__()
 
@@ -157,16 +191,31 @@ class ExecutionSchedulerEnv(gym.Env):
         self.relative_equity = bool(relative_equity)
         self.max_gross_exposure = float(max_gross_exposure)
         self.random_start = bool(random_start)
+        self.min_parent_l1 = max(float(min_parent_l1), 0.0)
 
-        # Valid parent-open steps: need price[r-1..r+H] in range ⇒ r in [1, K-H].
+        # Valid parent-open steps: need price[r-1..r+H] in range ⇒ r in [1, K-H], AND a
+        # non-degenerate parent order ‖W_target[r] − W_target[r−1]‖₁ ≥ min_parent_l1 (NAN-01
+        # — an empty parent order has nothing to schedule and makes every parent-normalized
+        # quantity divide by ~0; see MIN_PARENT_L1).
         rs = np.asarray(rebalance_steps, dtype=np.int64).ravel()
         lo, hi = 1, self.K - self.H
-        self.rebalance_steps = np.array(sorted({int(r) for r in rs if lo <= int(r) <= hi}),
-                                        dtype=np.int64)
+        in_range = sorted({int(r) for r in rs if lo <= int(r) <= hi})
+        self.rebalance_steps = np.array(
+            [r for r in in_range
+             if float(np.abs(self.W_target[r] - self.W_target[r - 1]).sum()) >= self.min_parent_l1],
+            dtype=np.int64)
+        n_degenerate = len(in_range) - int(self.rebalance_steps.size)
+        if n_degenerate:
+            logger.info(
+                "ExecutionSchedulerEnv: dropped %d/%d horizon-valid rebalance step(s) with an "
+                "empty parent order (L1(dW_target) < %.3g) - nothing to execute there",
+                n_degenerate, len(in_range), self.min_parent_l1)
         if self.rebalance_steps.size == 0:
             raise ValueError(
-                f"no valid rebalance step in [1, {hi}] (H={self.H}, K={self.K}); "
-                "data window too short for the horizon")
+                f"no valid rebalance step in [1, {hi}] with L1(dW_target) >= "
+                f"{self.min_parent_l1:g} (H={self.H}, K={self.K}, "
+                f"{len(in_range)} in-range but all degenerate); data window too short for the "
+                "horizon, or the target never moves in it")
 
         self.engine = ReactiveSimFillEngine(
             taker_fee_pct=taker_fee_pct, slippage_base_bps=slippage_base_bps,
@@ -385,10 +434,17 @@ class ExecutionSchedulerEnv(gym.Env):
         mkt[4] = (self._cum_cost / self._parent_notional) * 1e4   # cost_so_far_bps
         mkt[5] = self._gap0_l1                                    # parent_gross
 
+        # NaN/inf → 0, then a HARD finite bound. The nan_to_num alone is not enough: a
+        # merely-huge finite float64 (a near-empty parent order divided into an O(1) gap)
+        # survives it and only becomes inf once autocast narrows the batch to float16 —
+        # which the encoder's LayerNorm then turns into a per-row NaN in the actor's `loc`
+        # (NAN-01). Clip in the env, where the semantics are known. See OBS_CLIP.
         if not np.isfinite(priv).all():
             np.nan_to_num(priv, copy=False, nan=0.0, posinf=0.0, neginf=0.0)
         if not np.isfinite(mkt).all():
             np.nan_to_num(mkt, copy=False, nan=0.0, posinf=0.0, neginf=0.0)
+        np.clip(priv, -OBS_CLIP, OBS_CLIP, out=priv)
+        np.clip(mkt, -OBS_CLIP, OBS_CLIP, out=mkt)
         return {"scale_0": mkt.copy(), "private": priv.copy()}
 
     def _basket_realized_vol(self, k: int, wprof: np.ndarray) -> float:

@@ -343,3 +343,99 @@ def test_bad_target_shape_rejected():
     kw["target_weights"] = kw["target_weights"][:, :2]         # wrong U
     with pytest.raises(AssertionError):
         ExecutionSchedulerEnv(**kw)
+
+
+# --------------------------------------------------------------------------- #
+# NAN-01 — degenerate (empty) parent orders + float16-safe observations
+#
+# Regression tripwires for the crash that killed the first real GPU training run
+# (randd_log S553-cont-164): 3/171 horizon-valid rebalance steps in the TRAIN window had
+# W_target[r] == W_target[r-1] (the linear book's signal-warmup months, combined_w ≡ 0), so
+# `_gap0_l1 == 0`. Every parent-normalized quantity then divided by ~0 and emitted ~1e11 —
+# finite in float64, therefore invisible to the env's `np.isfinite` guard, but `+/-inf` the
+# instant AMP narrowed the batch to float16. The encoder's first LayerNorm turned that inf
+# into a per-ROW NaN, which surfaced as an invalid `loc` in
+# `torch.distributions.Normal(mu, sigma)` inside the SAC actor.
+#
+# Both tests are NEGATIVE: they fail if either half of the fix is reverted.
+# --------------------------------------------------------------------------- #
+_FP16_MAX = 65504.0
+
+
+def _degenerate_target_kwargs(**overrides):
+    """A target whose FIRST rebalance is empty (block 0 == block 1) and whose second is real
+    — i.e. the signal-warmup shape that produced the crash."""
+    zero = np.zeros(3)
+    kw = _synthetic(targets=[zero, zero, np.array([-0.1, 0.1, 0.3])], held=zero)
+    kw.update(overrides)
+    return kw
+
+
+def test_degenerate_parent_order_dropped_from_calendar():
+    """A rebalance step whose target does not move is NOT a schedulable parent order."""
+    env = ExecutionSchedulerEnv(**_degenerate_target_kwargs())
+    assert 10 not in set(int(r) for r in env.rebalance_steps), \
+        "empty parent order (‖ΔW_target‖₁ == 0) must be dropped from the calendar"
+    assert 20 in set(int(r) for r in env.rebalance_steps), "real parent order must survive"
+    # ...and every surviving step is genuinely non-degenerate.
+    for r in env.rebalance_steps:
+        assert np.abs(env.W_target[r] - env.W_target[r - 1]).sum() >= env.min_parent_l1
+
+
+def test_all_degenerate_calendar_rejected():
+    """If NOTHING in the window moves the target there is no execution problem to pose."""
+    zero = np.zeros(3)
+    with pytest.raises(ValueError, match="degenerate"):
+        ExecutionSchedulerEnv(**_synthetic(targets=[zero, zero, zero], held=zero))
+
+
+def test_obs_is_float16_representable():
+    """Every emitted feature must survive the float16 cast AMP applies.
+
+    A merely-huge finite float64 passes `np.isfinite` and only becomes inf downstream — so
+    the env, not the agent, has to bound it. Drives every valid episode under adversarial
+    (max-urgency, min-urgency, neutral) actions.
+    """
+    env = ExecutionSchedulerEnv(**_synthetic(volume=1.0))       # tiny volume ⇒ huge participation
+    for r in (int(x) for x in env.rebalance_steps):
+        for a in (-1.0, 0.0, 1.0):
+            obs, _ = env.reset(options={"rebalance_step": r})
+            done = False
+            while not done:
+                for key, blk in obs.items():
+                    assert np.isfinite(blk).all(), f"{key} non-finite at r={r}"
+                    assert np.abs(blk).max() <= _FP16_MAX, (
+                        f"{key} at r={r} exceeds float16 max ({np.abs(blk).max():.4g}) — "
+                        "will become inf under AMP and NaN after LayerNorm")
+                    assert np.isfinite(np.asarray(blk, dtype=np.float16)).all()
+                obs, _rew, term, trunc, _info = env.step(np.array([a], dtype=np.float32))
+                done = term or trunc
+
+
+def test_obs_clip_bounds_an_empty_parent_order():
+    """The clip is an INDEPENDENT backstop, not decoration.
+
+    Disable the calendar filter (``min_parent_l1=0``, i.e. exactly the pre-fix behaviour) and
+    drive the empty parent order that crashed the GPU run. Unclipped, `inventory_remaining`
+    /`schedule_deviation`/`cost_so_far_bps` reach ~1e11 here; the obs must still be
+    float16-representable so neither half of the fix is load-bearing on its own.
+    """
+    # The production shape (randd_log S553-cont-164, train step 61 / 2006-03-31): an EMPTY
+    # parent order (‖ΔW_target‖₁ == 0 at r) whose horizon straddles the bar where the linear
+    # book's signal warmup completes and the target jumps 0 → O(1). gap0_l1 == 0 then
+    # normalizes an O(1) mid-horizon gap ⇒ inventory_remaining ~ 1e11.
+    zero = np.zeros(3)
+    env = ExecutionSchedulerEnv(**_synthetic(
+        targets=[zero, zero, np.array([-0.5, 0.5, 0.3])], held=zero,
+        rebal=(10, 12),                                         # target turns on at k=12, INSIDE
+        horizon_bars=4, min_parent_l1=0.0))                     # the r=10 horizon (k=10..13)
+    assert 10 in set(int(r) for r in env.rebalance_steps)       # filter off ⇒ still admissible
+    obs, _ = env.reset(options={"rebalance_step": 10})
+    done = False
+    while not done:
+        for key, blk in obs.items():
+            assert np.isfinite(np.asarray(blk, dtype=np.float16)).all(), (
+                f"{key} not float16-representable ({np.abs(blk).max():.4g}) on an empty "
+                "parent order — the obs clip is the last line of defence")
+        obs, _rew, term, trunc, _info = env.step(np.array([1.0], dtype=np.float32))
+        done = term or trunc
