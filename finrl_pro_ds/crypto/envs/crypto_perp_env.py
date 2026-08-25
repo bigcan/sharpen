@@ -546,6 +546,12 @@ class CryptoPerpEnv(gym.Env):
         # Volume-dependent slippage: base + impact * (order_size / hourly_volume)
         # Use previous bar's volume to avoid look-ahead bias (current bar
         # volume is unknowable at bar open when the trade is executed).
+        #
+        # NOTE (OBS-STEPCOST-01): the `> 1e-6` guard below catches only exactly-zero volume
+        # and silently assumes bar dollar volume is O(1e3)+ (measured 2026-08-25: BTC 1-min
+        # Bybit min $1,251 over 1.2M bars). Deliberately left UNBOUNDED — unlike the
+        # obs-side copy in `_get_obs`, this ratio sets the cost actually CHARGED, so capping
+        # it would move validated backtest numbers for no measurable benefit.
         vol_idx = max(self.step_idx - 1, 0)
         hourly_vols = self.volume_ary[vol_idx, active]
         volume_ratios = np.where(
