@@ -376,3 +376,171 @@ class TestSignalGatedWrapper:
                 obs, reward, terminated, truncated, info = wrapped.step(action)
                 if terminated or truncated:
                     break
+
+
+class _ScriptedTradeEnv(gym.Env):
+    """Inner env whose `traded` flag follows a fixed script.
+
+    Lets a test place a trade on the DECISION bar and holds after it, which is
+    exactly the shape that GATE-TRADED-01 erased.
+    """
+
+    def __init__(self, handler, traded_script, trades_per_traded_bar=1):
+        super().__init__()
+        self.handler = handler
+        self.traded_script = list(traded_script)
+        # ContinuousSwingEnv can log >1 trade on one bar (deadband move, then a
+        # stop-loss or max-holding forced flat), so this is configurable.
+        self.trades_per_traded_bar = int(trades_per_traded_bar)
+        self.action_space = gym.spaces.Box(-1, 1, shape=(1,), dtype=np.float32)
+        self.observation_space = gym.spaces.Dict({
+            "scale_0": gym.spaces.Box(
+                -np.inf, np.inf,
+                shape=(handler.window_size, handler.n_features), dtype=np.float32),
+            "private": gym.spaces.Box(-1, 1, shape=(5,), dtype=np.float32),
+        })
+        self.current_position = 0.0
+        self.inner_steps = 0
+        self.trade_count = 0
+
+    def reset(self, **kwargs):
+        self.handler.reset()
+        self.inner_steps = 0
+        self.trade_count = 0
+        return self._make_obs(), {}
+
+    def step(self, action):
+        traded = bool(self.traded_script[self.inner_steps]) \
+            if self.inner_steps < len(self.traded_script) else False
+        self.inner_steps += 1
+        if traded:
+            self.trade_count += self.trades_per_traded_bar
+        info = {"traded": traded, "trade_count": self.trade_count,
+                "portfolio_value": 100000.0, "position": self.current_position}
+        return self._make_obs(), 0.0, False, False, info
+
+    def _make_obs(self):
+        return {"scale_0": np.zeros((self.handler.window_size, self.handler.n_features),
+                                    dtype=np.float32),
+                "private": np.zeros(5, dtype=np.float32)}
+
+
+class TestGateTraded01:
+    """GATE-TRADED-01 regression: per-bar `traded` must survive gate-held bars.
+
+    The wrapper aggregates 1 + skipped inner bars and returns the LAST inner
+    info dict. Before the fix a trade on the decision bar was overwritten by the
+    hold bars that followed it, so the flag read False on ~half of real trades
+    (sg1-btc fold_00 solo_123: 145 position changes vs 69 flags).
+    """
+
+    @staticmethod
+    def _closed_gate_config(max_hold=5):
+        # Thresholds far above anything MockHandler emits => gate always shut,
+        # so every wrapper step aggregates max_hold hold bars after the decision.
+        return {
+            "enabled": True, "gate_mode": "composite",
+            "atr_threshold": 1e9, "parkinson_threshold": 1e9,
+            "volume_threshold": 1e9, "return_threshold": 1e9,
+            "max_hold_bars": max_hold, "gate_always_on_first": False,
+        }
+
+    def test_trade_on_decision_bar_survives_hold_bars(self, handler):
+        """A trade on the decision bar must not be erased by later hold bars."""
+        from finrl_pro_ds.envs.signal_gated_wrapper import SignalGatedWrapper
+
+        env = _ScriptedTradeEnv(handler, traded_script=[True] + [False] * 20)
+        wrapped = SignalGatedWrapper(env, self._closed_gate_config(max_hold=5))
+        wrapped.reset()
+        _, _, _, _, info = wrapped.step(np.array([1.0], dtype=np.float32))
+
+        assert info["gate_skipped_bars"] > 0, "gate should have held bars for this test to bite"
+        assert info["traded"] is True, (
+            "GATE-TRADED-01 regression: the decision bar traded but the flag was "
+            "overwritten by a later hold bar's info dict"
+        )
+        assert info["gate_inner_trades"] == 1
+
+    def test_forced_flat_on_a_hold_bar_is_reported(self, handler):
+        """A stop-loss/max-holding flat fired on a HOLD bar must be reported.
+
+        The inner env force-flattens regardless of the hold action it is handed,
+        so holds are not guaranteed trade-free.
+        """
+        from finrl_pro_ds.envs.signal_gated_wrapper import SignalGatedWrapper
+
+        env = _ScriptedTradeEnv(handler, traded_script=[False, False, True] + [False] * 20)
+        wrapped = SignalGatedWrapper(env, self._closed_gate_config(max_hold=5))
+        wrapped.reset()
+        _, _, _, _, info = wrapped.step(np.array([0.0], dtype=np.float32))
+
+        assert info["traded"] is True
+        assert info["gate_inner_trades"] == 1
+
+    def test_inner_trade_bars_reconcile_with_traded_bar_count(self, handler):
+        """`gate_inner_trades` must account for every traded BAR, losing none.
+
+        This is the property the sg1-btc trajectories violated: 145 real position
+        changes recorded as 69 flags.
+
+        The mock trades at most once per bar, so its `trade_count` equals its
+        traded-bar count and the two reconcile exactly here. That identity is a
+        property of the MOCK, not of the contract -- see
+        `test_inner_trades_counts_bars_not_trades`.
+        """
+        from finrl_pro_ds.envs.signal_gated_wrapper import SignalGatedWrapper
+
+        rng = np.random.RandomState(7)
+        script = (rng.rand(400) < 0.35).tolist()
+        env = _ScriptedTradeEnv(handler, traded_script=script)
+        wrapped = SignalGatedWrapper(env, self._closed_gate_config(max_hold=4))
+        wrapped.reset()
+
+        flag_sum = 0
+        inner_sum = 0
+        for _ in range(20):
+            _, _, term, trunc, info = wrapped.step(np.array([0.5], dtype=np.float32))
+            flag_sum += int(bool(info["traded"]))
+            inner_sum += int(info["gate_inner_trades"])
+            if term or trunc:
+                break
+
+        assert inner_sum == env.trade_count, (
+            f"gate_inner_trades summed to {inner_sum} but the env logged "
+            f"{env.trade_count} trades over {env.inner_steps} inner bars"
+        )
+        # The bool flag can only undercount (two traded bars in one outer step),
+        # never overcount -- and it must not be systematically zero.
+        assert flag_sum <= inner_sum
+        assert flag_sum > 0
+
+    def test_inner_trades_counts_bars_not_trades(self, handler):
+        """`gate_inner_trades` counts traded BARS; `trade_count` counts trades.
+
+        ContinuousSwingEnv.step increments `trade_count` at three sites -- the
+        deadband move, the stop_loss_bps flat, and the max_holding_bars flat --
+        so a single bar can log up to three trades while `traded` is one bool.
+        Pinning this stops the bar count being mistaken for a trade count.
+        """
+        from finrl_pro_ds.envs.signal_gated_wrapper import SignalGatedWrapper
+
+        env = _ScriptedTradeEnv(handler, traded_script=[True] + [False] * 20)
+        env.trades_per_traded_bar = 2      # e.g. deadband move + forced flat
+        wrapped = SignalGatedWrapper(env, self._closed_gate_config(max_hold=5))
+        wrapped.reset()
+        _, _, _, _, info = wrapped.step(np.array([1.0], dtype=np.float32))
+
+        assert info["gate_inner_trades"] == 1, "one traded BAR"
+        assert env.trade_count == 2, "which logged two TRADES"
+
+    def test_untraded_outer_step_stays_false(self, handler):
+        """No trade anywhere in the aggregate must still report False."""
+        from finrl_pro_ds.envs.signal_gated_wrapper import SignalGatedWrapper
+
+        env = _ScriptedTradeEnv(handler, traded_script=[False] * 30)
+        wrapped = SignalGatedWrapper(env, self._closed_gate_config(max_hold=5))
+        wrapped.reset()
+        _, _, _, _, info = wrapped.step(np.array([0.0], dtype=np.float32))
+
+        assert info["traded"] is False
+        assert info["gate_inner_trades"] == 0

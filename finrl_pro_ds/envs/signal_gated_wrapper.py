@@ -35,6 +35,22 @@ class SignalGatedWrapper(gym.Wrapper):
          - Accumulate reward
       3. Return final obs, accumulated reward, done flags, augmented info
 
+    Info aggregation contract (GATE-TRADED-01):
+      One wrapper step spans 1 + ``gate_skipped_bars`` inner bars, so the info
+      dict mixes two semantics. State and cumulative keys (portfolio_value,
+      position, trade_count, cumulative_fees, drawdown_pct, regime_code) carry
+      LAST-BAR values and are correct as-is. Per-bar EVENT keys must be
+      aggregated or they are lost: ``traded`` is the OR across the aggregated
+      bars, and ``gate_inner_trades`` counts the inner BARS on which at least
+      one trade occurred.
+
+      ``gate_inner_trades`` is a bar count, NOT a trade count -- one inner bar
+      can log up to three ``trade_count`` increments (deadband move, then a
+      stop-loss flat, then a max-holding flat; see ContinuousSwingEnv.step).
+      The authoritative trade total is the env's cumulative ``trade_count``,
+      diffed across outer steps. Summing ``traded`` undercounts further still,
+      because a bool cannot express two traded bars inside one outer step.
+
     Gate signals from handler._scale_features[base_scale]:
       idx 1: atr_norm    — ATR(14)/EMA(ATR,50) - 1.0, >0 = above-average vol
       idx 2: parkinson   — sqrt(log(H/L)^2 / (4*ln2)), intra-bar realized vol
@@ -106,7 +122,29 @@ class SignalGatedWrapper(gym.Wrapper):
         obs, reward, terminated, truncated, info = self.env.step(action)
         self._total_gated_steps += 1
 
+        # GATE-TRADED-01 (S553-cont-170). `traded` is a PER-BAR EVENT, but one
+        # wrapper step aggregates 1 + `skipped` inner bars and returns the LAST
+        # inner info dict. Left un-accumulated, a trade on the decision bar is
+        # erased by any hold bar that follows it, so the flag reads False on
+        # roughly half of all real trades (sg1-btc decay01-X1 fold_00 solo_123:
+        # 145 position changes, 69 flags). Downstream that silently understates
+        # turnover and fees, and mis-selects "untraded" bars.
+        #
+        # Only per-bar EVENT keys need accumulating. State and cumulative keys
+        # (portfolio_value, position, trade_count, cumulative_fees,
+        # drawdown_pct, regime_code) are correct with last-bar semantics and are
+        # deliberately left alone.
+        #
+        # A hold bar can legitimately trade: the inner env force-flattens on
+        # stop_loss_bps / max_holding_bars regardless of the action it was
+        # handed. So this accumulates observed flags rather than assuming holds
+        # never trade.
+        traded_any = bool(info.get("traded", False))
+        inner_trades = int(traded_any)
+
         if terminated or truncated:
+            info["traded"] = traded_any
+            info["gate_inner_trades"] = inner_trades
             info["gate_skipped_bars"] = 0
             info["gate_total_skipped"] = self._total_skipped
             info["gate_total_steps"] = self._total_gated_steps
@@ -133,6 +171,12 @@ class SignalGatedWrapper(gym.Wrapper):
             total_reward += r
             skipped += 1
 
+            # GATE-TRADED-01: read the flag off THIS inner info before the next
+            # iteration overwrites `info`.
+            if info.get("traded", False):
+                traded_any = True
+                inner_trades += 1
+
             if terminated or truncated:
                 break
 
@@ -144,6 +188,15 @@ class SignalGatedWrapper(gym.Wrapper):
             total_reward = total_reward / (1 + skipped)
 
         # Augment info
+        # GATE-TRADED-01: `traded` is the OR across the aggregated bars, so it
+        # keeps its documented bool contract. `gate_inner_trades` adds the count
+        # of traded BARS, which a bool cannot express once an outer step holds
+        # two of them. It is deliberately NOT a trade count: one bar can log
+        # three `trade_count` increments (deadband move / stop-loss flat /
+        # max-holding flat), so the env's cumulative `trade_count` stays the
+        # authoritative total.
+        info["traded"] = traded_any
+        info["gate_inner_trades"] = inner_trades
         info["gate_skipped_bars"] = skipped
         info["gate_total_skipped"] = self._total_skipped
         info["gate_total_steps"] = self._total_gated_steps
