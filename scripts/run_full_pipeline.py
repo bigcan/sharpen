@@ -413,6 +413,7 @@ def run_backtest(config, checkpoint_path, device, start_date=None, end_date=None
                 buffer_size=100,  # FIX R2-AUD-06: Minimal buffer for backtest (never used)
                 initial_alpha=sac_cfg.get("initial_alpha", 0.2),
                 device=device,
+                crossq=sac_cfg.get("crossq"),
             )
         elif agent_type == "ppo":
             ppo_cfg = config.get("agents", {}).get("ppo", {})
