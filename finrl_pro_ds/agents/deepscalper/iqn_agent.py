@@ -105,6 +105,8 @@ class IQNAgent:
         self.tau = tau
         self.batch_size = batch_size
         self.num_quantiles = num_quantiles
+        # Lazily-built fixed tau grid for deterministic action selection.
+        self._eval_tau: Optional[torch.Tensor] = None
         self.kappa = quantile_huber_kappa
         self.gradient_clip = gradient_clip
         self.target_q_clip = target_q_clip
@@ -240,7 +242,9 @@ class IQNAgent:
           Q = alpha * Q_short + (1-alpha) * Q_long
 
         NoisyNets provide exploration (no epsilon needed).
-        In eval/deterministic mode, noise is suppressed by NoisyLinear.eval().
+        In eval/deterministic mode, noise is suppressed by NoisyLinear.eval() and
+        tau is the fixed midpoint grid rather than a fresh sample — see
+        `_deterministic_tau`.
 
         Args:
             context: Optional dict with 'current_direction' (np.ndarray of shape (B,))
@@ -256,7 +260,11 @@ class IQNAgent:
 
         with torch.no_grad():
             batch_size = micro.shape[0]
-            tau = torch.rand(batch_size, self.num_quantiles, device=self.device)
+            tau = (
+                self._deterministic_tau(batch_size)
+                if deterministic
+                else torch.rand(batch_size, self.num_quantiles, device=self.device)
+            )
 
             if self.multi_horizon:
                 q_short, q_long, _, new_hidden = self.policy_net.forward_dual(
@@ -325,6 +333,36 @@ class IQNAgent:
         # the next predict() call.  Saves ~80-160 kernel dispatches/step.
 
         return actions.cpu().numpy()
+
+    def _deterministic_tau(self, batch_size: int) -> torch.Tensor:
+        """Fixed quantile midpoints, for reproducible greedy action selection.
+
+        Q(s,a) = E_{tau~U(0,1)}[Z_tau(s,a)], and training estimates that
+        expectation by sampling tau. Sampling it at INFERENCE too made
+        `deterministic=True` untrue: on a net whose per-action Q-means are close,
+        the argmax flips between calls on identical input. A backtest was
+        therefore not reproducible, and two eval arms could differ by RNG state
+        rather than by policy.
+
+        The midpoint rule tau_i = (i - 0.5) / K estimates the SAME expectation
+        with zero variance (and lower quadrature error than K random draws for a
+        monotone quantile function), so this changes the estimator, not the
+        quantity being estimated. Stochastic sampling is retained for
+        `deterministic=False`, where the exploration it provides is the point.
+
+        The grid is cached and expanded (no copy); it is rebuilt if
+        `num_quantiles` or the device changes.
+        """
+        cached = self._eval_tau
+        if (
+            cached is None
+            or cached.shape[1] != self.num_quantiles
+            or cached.device != self.device
+        ):
+            k = self.num_quantiles
+            grid = (torch.arange(k, device=self.device, dtype=torch.float32) + 0.5) / k
+            self._eval_tau = cached = grid.unsqueeze(0)
+        return cached.expand(batch_size, -1)
 
     def _to_device_pinned(self, arr: np.ndarray, dtype=torch.float32) -> torch.Tensor:
         """Transfer numpy array to GPU via pinned memory for async DMA."""
