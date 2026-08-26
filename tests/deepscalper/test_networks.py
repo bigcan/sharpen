@@ -11,14 +11,15 @@ from finrl_pro_ds.agents.deepscalper.networks import (
     MicroEncoderTCN,
 )
 from finrl_pro_ds.data.parquet_handler import ParquetDataHandler
-from finrl_pro_ds.envs.deep_scalper_env import NUM_MACRO_FEATURES, DeepScalperEnv
+from finrl_pro_ds.data.feature_engineering import NUM_MACRO_FEATURES, NUM_MICRO_FEATURES
+from finrl_pro_ds.envs.deep_scalper_env import DeepScalperEnv
 
 
 class TestDeepScalperNetworks(unittest.TestCase):
     def setUp(self):
         self.batch_size = 32
         self.window_size = 15
-        self.micro_features = 30  # v2: evidence-ranked LOB features
+        self.micro_features = NUM_MICRO_FEATURES  # fev3: 40 evidence-ranked LOB features
         self.private_features = 5  # Tier 2: pos, bal, time, order_dir, order_dist
         self.macro_features = NUM_MACRO_FEATURES  # 15 (v2 from feature_engineering)
 
@@ -119,12 +120,13 @@ class TestDeepScalperNetworks(unittest.TestCase):
         obs, _ = env.reset()
 
         # Convert to tensors for Network
-        micro = torch.tensor(obs["micro"]).unsqueeze(0)  # (1, 15, 30)
+        micro = torch.tensor(obs["micro"]).unsqueeze(0)  # (1, 15, NUM_MICRO_FEATURES)
         private = torch.tensor(obs["private"]).unsqueeze(0)  # (1, 15, 5)
         macro = torch.tensor(obs["macro"]).unsqueeze(0)  # (1, 15)
 
-        # Verify shapes match network expectations
-        self.assertEqual(micro.shape, (1, 15, 30))
+        # Verify shapes match network expectations (feature count is not hardcoded:
+        # it tracks MICRO_FEATURE_COLS so a feature-set change cannot silently stale this test)
+        self.assertEqual(micro.shape, (1, 15, NUM_MICRO_FEATURES))
         self.assertEqual(private.shape, (1, 15, 5))
         self.assertEqual(macro.shape, (1, 15))
 
