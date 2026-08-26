@@ -194,13 +194,18 @@ def run_rule(config: dict, agents: Dict[int, object], rule_name: str, rule_fn: C
     env = make_env(cfg, start_date=start, end_date=end,
                    norm_cutoff_date=data_cfg.get("val_end_date"))
 
-    # locate base-scale timestamps (same trick as sg1_arm_gate_backtest)
+    # unwrap to the env that owns the handler (same trick as sg1_arm_gate_backtest)
     base_env = env
     while hasattr(base_env, "env") and not hasattr(base_env, "timestamps"):
         base_env = base_env.env
-    base_ts = getattr(base_env, "timestamps", None)
-    if base_ts is None and hasattr(base_env, "handler"):
-        base_ts = getattr(base_env.handler, "_base_timestamps", None)
+    # TRAJ-TS-01: timestamps now come from base_env.current_timestamp per row.
+    # Check availability ONCE and say so loudly — a run that silently writes a
+    # trajectory of all-None timestamps is the failure mode worth catching here.
+    if getattr(base_env, "timestamps", None) is None:
+        log.warning(
+            "[%s] base timestamps unavailable on %s — trajectory timestamps "
+            "will be null", rule_name, type(base_env).__name__,
+        )
 
     obs, _ = env.reset()
     rows, step = [], 0
@@ -229,8 +234,13 @@ def run_rule(config: dict, agents: Dict[int, object], rule_name: str, rule_fn: C
                 return float(v.flatten()[0]) if v.size else default
             return float(v) if v is not None else default
 
-        cur = getattr(base_env, "current_step", None)
-        ts = base_ts[cur - 1] if (base_ts is not None and cur is not None and 0 <= cur - 1 < len(base_ts)) else None
+        # TRAJ-TS-01: ask the env for the bar it just consumed. The old form
+        # indexed base_ts by `current_step`, an EPISODE counter starting at 0,
+        # while the handler's pointer starts wherever warmup/random_start puts
+        # it — every timestamp was off by that constant (32 bars on the canary
+        # folds). None is correct when unavailable; a wrong timestamp is worse
+        # than a missing one.
+        ts = getattr(base_env, "current_timestamp", None)
 
         row = {
             "step": step,

@@ -135,11 +135,12 @@ def run_gate_backtest(
                 return float(v.flatten()[0]) if v.size else default
             return float(v) if v is not None else default
 
-        # timestamp: pull from env's base-scale timestamps using current_step
-        cur = getattr(base_env, "current_step", None)
-        ts = None
-        if base_ts is not None and cur is not None and 0 <= cur - 1 < len(base_ts):
-            ts = base_ts[cur - 1]
+        # TRAJ-TS-01: ask the env for the bar it just consumed. The old form
+        # indexed base_ts by `current_step`, an EPISODE counter starting at 0,
+        # while the handler's pointer starts wherever warmup/random_start puts
+        # it — every timestamp was off by that constant. None is correct when
+        # unavailable; a wrong timestamp is worse than a missing one.
+        ts = getattr(base_env, "current_timestamp", None)
         rows.append({
             "step": step,
             "timestamp": ts,
