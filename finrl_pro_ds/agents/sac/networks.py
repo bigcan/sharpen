@@ -13,6 +13,7 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 
+from finrl_pro_ds.agents.common.batch_renorm import BatchRenorm1d
 from finrl_pro_ds.agents.common.network_blocks import _CausalConv1dBlock, _tc_align
 
 
@@ -298,6 +299,15 @@ class SACCriticNetwork(nn.Module):
 
     Input: multi-scale obs + action → scalar Q-value
     v6: obs_mode="summary_stats" uses SummaryStatsEncoder (flat MLP).
+
+    CrossQ (`crossq=True`): the Q head becomes a BatchRenorm MLP
+    (BN → [Linear → ReLU → BN] x depth → Linear), which is what makes the
+    target network removable. BN goes in the head only, never the encoder: the
+    encoder normalizes with LayerNorm, which is per-sample and therefore cannot
+    be a source of train/bootstrap distribution mismatch in the first place.
+    Geometry defaults to the baseline critic's (width=fusion_dim, depth=1) so
+    that flipping the flag is a pure mechanism swap; the paper's 2048x2 critic
+    is reachable via crossq_width / crossq_depth.
     """
 
     def __init__(
@@ -309,9 +319,15 @@ class SACCriticNetwork(nn.Module):
         n_scales: int = 3,
         obs_mode: str = "window",
         lob_encoder_config: Optional[dict] = None,
+        crossq: bool = False,
+        crossq_width: Optional[int] = None,
+        crossq_depth: int = 1,
+        bn_momentum: float = 0.01,
+        bn_warmup_steps: int = 100_000,
     ):
         super().__init__()
         self._obs_mode = obs_mode
+        self.is_crossq = crossq
 
         if obs_mode == "summary_stats":
             summary_dim = scale_encoder_config.get("summary_input_dim", 50)
@@ -326,11 +342,29 @@ class SACCriticNetwork(nn.Module):
         tc_q_dim = _tc_align(q_input_dim)
         self._q_pad = tc_q_dim - q_input_dim
 
-        self.q_head = nn.Sequential(
-            nn.Linear(tc_q_dim, fusion_dim),
-            nn.ReLU(),
-            nn.Linear(fusion_dim, 1),
-        )
+        if crossq:
+            if crossq_depth < 1:
+                raise ValueError(f"crossq_depth must be >= 1, got {crossq_depth}")
+            width = _tc_align(crossq_width if crossq_width else fusion_dim)
+            layers: list[nn.Module] = [
+                BatchRenorm1d(tc_q_dim, momentum=bn_momentum, warmup_steps=bn_warmup_steps),
+            ]
+            in_dim = tc_q_dim
+            for _ in range(crossq_depth):
+                layers += [
+                    nn.Linear(in_dim, width),
+                    nn.ReLU(),
+                    BatchRenorm1d(width, momentum=bn_momentum, warmup_steps=bn_warmup_steps),
+                ]
+                in_dim = width
+            layers.append(nn.Linear(in_dim, 1))
+            self.q_head = nn.Sequential(*layers)
+        else:
+            self.q_head = nn.Sequential(
+                nn.Linear(tc_q_dim, fusion_dim),
+                nn.ReLU(),
+                nn.Linear(fusion_dim, 1),
+            )
 
         self._init_weights()
 

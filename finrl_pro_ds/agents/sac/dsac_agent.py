@@ -60,6 +60,21 @@ class DistributionalSACAgent(SACAgent):
         device: str = "cpu",
         **kwargs,
     ):
+        # CrossQ is a scalar-critic algorithm: its joint BatchRenorm pass is
+        # implemented in SACAgent.train_step_mega, which DSAC overrides wholesale
+        # with the quantile path. Enabling both would build BatchRenorm critics
+        # that the DSAC update never uses, and silently train plain DSAC.
+        if isinstance(kwargs.get("crossq"), dict):
+            _crossq_on = bool(kwargs["crossq"].get("enabled", False))
+        else:
+            _crossq_on = bool(kwargs.get("crossq", False))
+        if _crossq_on:
+            raise NotImplementedError(
+                "crossq is not supported by DistributionalSACAgent (agents.sac.distributional). "
+                "CrossQ + quantile critics is an unimplemented combination, not a config error - "
+                "set one or the other.",
+            )
+
         # Store distributional params before super().__init__ builds scalar critics
         self._n_quantiles = n_quantiles
         self._cvar_alpha = cvar_alpha

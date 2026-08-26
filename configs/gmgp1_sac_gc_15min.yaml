@@ -87,6 +87,25 @@ agents:
     gradient_clip: 10.0
     checkpoint_interval: 250000
 
+    # --- CrossQ (opt-in; OFF unless this key is present and enabled) ---------
+    # SAC with the target network deleted, a BatchRenorm Q head, and the
+    # current/next state-action pairs pushed through the critic in one joint
+    # batch (Bhatt et al., ICLR 2024 - arXiv:1902.05605). UTD stays at 1, so
+    # unlike REDQ/DroQ it does not spend the SPS budget.
+    #   `crossq: true` alone = paper defaults with the BASELINE critic geometry,
+    #   i.e. a pure mechanism swap. Set critic_width/critic_depth to test the
+    #   paper's 2048 x 2 critic as a SEPARATE arm - changing both at once makes
+    #   the A/B unreadable.
+    # When on: `tau` is inert (no Polyak update), and `distributional: true` is
+    # rejected (CROSSQ-02). Checkpoints are stamped and will not cross-load.
+    # crossq:
+    #   enabled: true
+    #   critic_width: null        # null -> fusion_dim (paper: 2048)
+    #   critic_depth: 1           # paper: 2
+    #   bn_momentum: 0.01
+    #   bn_warmup_steps: 100000   # gradient steps at r=1/d=0, i.e. plain BatchNorm
+    #   adam_betas: [0.5, 0.999]  # critic only
+
 training:
   total_timesteps: 3000000       # Extended: 1.5M steps at full 2bps fee (was only 500K)
   log_interval: 1000
