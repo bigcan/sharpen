@@ -1484,6 +1484,14 @@ class LiveTradingEngine:
 
         Mirrors SignalGatedWrapper._gate_open() from training. Feature layout:
             idx 0: log_return, 1: atr_norm, 2: parkinson_vol, 7: volume_z
+
+        Parity note (GATE-CAUSAL-01, S553-cont-170): ``features[-1]`` is the last
+        CLOSED bar, which is all live can ever see. Training now gates on the same
+        bar (``handler._ptr - 1``); before that fix the wrapper gated on the
+        not-yet-closed ``_ptr``, so this docstring's "mirrors" claim was false and
+        the two paths traded different bar sets. Do not "align" training back onto
+        the unclosed bar to close a parity gap -- that direction reintroduces the
+        leak.
         """
         if not self._signal_gate_enabled:
             return True
