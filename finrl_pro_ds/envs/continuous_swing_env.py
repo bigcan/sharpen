@@ -620,6 +620,29 @@ class ContinuousSwingEnv(gym.Env):
         return None
 
     @property
+    def current_timestamp(self):
+        """Timestamp of the bar just consumed, or None if unavailable.
+
+        TRAJ-TS-01 (S553-cont-170). Rollout scripts used to stamp trajectories
+        with ``base_timestamps[current_step - 1]``. ``current_step`` is an
+        EPISODE counter that starts at 0 on reset, while the handler's data
+        pointer starts wherever the window (warmup, ``random_start``) puts it —
+        so the two differ by a constant offset and every recorded timestamp was
+        wrong by it (32 bars on the gmgp1-btc canary folds). Metrics were
+        unaffected, but joining a trajectory to price data silently was not.
+
+        Indexing matches ``_get_private_state``'s time encoding: the handler
+        serves the bar at ``_ptr`` and then advances, so the bar just consumed
+        is ``_ptr - 1``. Prefer this over reconstructing the index at the call
+        site — that is what drifted in the first place.
+        """
+        ts = self.timestamps
+        ptr = getattr(self.handler, '_ptr', None) if self.handler else None
+        if ts is None or ptr is None or not (0 < ptr <= len(ts)):
+            return None
+        return ts[ptr - 1]
+
+    @property
     def step_idx(self) -> int:
         """Expose current data pointer for PropFirmWrapper."""
         if self.handler:

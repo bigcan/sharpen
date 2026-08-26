@@ -97,11 +97,18 @@ def load_bars(path: Path, scale_min: int) -> pd.DataFrame:
 def align_trajectory(traj: pd.DataFrame, bars: pd.DataFrame, fee_frac: float):
     """Recover a trajectory's true start index in the bar array (FFT xcorr).
 
-    ``sg1_btc_velotrade_ensemble_eval.py`` stamps trajectory timestamps from
-    ``base_env.current_step`` (an episode counter) rather than the data pointer,
-    so recorded timestamps are offset -- 32 bars on the canary folds.  Per-bar
+    Needed only for trajectories recorded BEFORE the TRAJ-TS-01 fix
+    (S553-cont-170): the rollout scripts stamped timestamps from
+    ``base_env.current_step``, an episode counter, rather than the data pointer,
+    so recorded timestamps were offset -- 32 bars on the canary folds. Per-bar
     asset returns are therefore inverted out of the recorded equity path and
     matched against the real return series; a correct match returns corr ~ 1.0.
+
+    Trajectories written after the fix carry the timestamp of the bar actually
+    priced (``ContinuousSwingEnv.current_timestamp``) and can be joined to price
+    data directly. This function stays because the archived pre-fix artifacts --
+    the canary and X1 WF runs this lab reads -- still need it, and re-running
+    them was never worth the compute.
     """
     pos = traj["position"].values
     pv = traj["portfolio_value"].values
