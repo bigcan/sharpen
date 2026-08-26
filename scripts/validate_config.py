@@ -2398,6 +2398,63 @@ def check_xparam(cfg: dict, r: ValidationResult) -> None:
         r.ok(f"XPARAM {'/'.join(sorted(checked))} pass ({len(checked)} applicable)")
 
 
+def check_crossq(cfg: dict, r: ValidationResult) -> None:
+    """CROSSQ-01..03 — the `agents.sac.crossq` flag (SAC with no target network).
+
+    Silent unless the flag is on. The agent raises on all of these at
+    construction; catching them here costs a second instead of a GPU launch.
+    """
+    if _is_live_inference_config(cfg):
+        return
+    sac_cfg = (cfg.get("agents") or {}).get("sac")
+    if not isinstance(sac_cfg, dict) or "crossq" not in sac_cfg:
+        return
+
+    try:
+        from finrl_pro_ds.agents.sac.sac_agent import normalize_crossq_config
+    except ImportError:
+        r.warn("crossq present but finrl_pro_ds is not importable — run with PYTHONPATH=. to validate it")
+        return
+
+    try:
+        crossq = normalize_crossq_config(sac_cfg["crossq"])
+    except (TypeError, ValueError) as exc:
+        r.fail(f"CROSSQ-01: agents.sac.crossq is malformed — {exc}")
+        return
+    if not crossq["enabled"]:
+        return
+
+    # CROSSQ-02 (CRITICAL) — DSAC overrides the update CrossQ lives in.
+    if sac_cfg.get("distributional"):
+        r.fail(
+            "CROSSQ-02: agents.sac.crossq and agents.sac.distributional are both set — "
+            "CrossQ + quantile critics is unimplemented; the BatchRenorm critics would be "
+            "built and then never used by the DSAC update"
+        )
+
+    # CROSSQ-03 (MEDIUM) — BatchRenorm that never leaves its warmup phase is
+    # just BatchNorm, i.e. the run would not be testing CrossQ at all.
+    total = _dig(cfg, "training.total_timesteps")
+    utd = sac_cfg.get("update_interval", 4)
+    warmup = crossq["bn_warmup_steps"]
+    if isinstance(total, (int, float)) and total > 0 and warmup > 0:
+        grad_steps = total * utd
+        if warmup >= grad_steps:
+            r.warn(
+                f"CROSSQ-03: crossq.bn_warmup_steps ({warmup:,}) >= gradient steps in the run "
+                f"({int(grad_steps):,} = total_timesteps x update_interval) — BatchRenorm never "
+                "leaves its r=1/d=0 phase, so the run measures plain BatchNorm"
+            )
+
+    if sac_cfg.get("tau") is not None:
+        r.warn("crossq is on: agents.sac.tau is inert (no target network, no Polyak update)")
+
+    r.ok(
+        f"CROSSQ enabled (critic_width={crossq['critic_width'] or 'fusion_dim'}, "
+        f"depth={crossq['critic_depth']}, bn_warmup={crossq['bn_warmup_steps']:,})"
+    )
+
+
 def validate(config_path: Path, stage: str, overlays: list[str] | None = None) -> ValidationResult:
     cfg = load_yaml(config_path)
     # Resolve a `base_book:` parent (inheritance) BEFORE the deploy overlays so the universal
@@ -2415,6 +2472,7 @@ def validate(config_path: Path, stage: str, overlays: list[str] | None = None) -
 
     check_no_fee_curriculum(cfg, r)
     check_xparam(cfg, r)
+    check_crossq(cfg, r)
     check_no_hindsight_outside_hpo(cfg, stage, r)
     check_max_leverage_bounds(cfg, r)
     check_sleeve_combiner(cfg, r)
