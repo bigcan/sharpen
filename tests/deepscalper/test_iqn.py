@@ -216,6 +216,72 @@ class TestIQNAgent:
         # All should be the same (eval mode = no noise)
         assert len(set(actions)) == 1, "Deterministic predict should be consistent"
 
+    def test_deterministic_predict_ignores_global_rng_state(self):
+        """The real tripwire for the tau bug.
+
+        Before the fix, predict() drew a fresh tau ~ U(0,1) even when
+        deterministic=True, so on an untrained net (per-action Q-means nearly
+        tied) the argmax flipped with the global RNG state. Reseeding between
+        calls makes that dependence visible instead of leaving it to luck about
+        which RNG state the suite happens to be in.
+        """
+        agent = _make_iqn_agent()
+        micro, private, macro = _random_obs(1)
+
+        actions = []
+        for seed in range(8):
+            torch.manual_seed(seed * 1000 + 17)
+            actions.append(agent.predict(micro, private, macro, deterministic=True)[0])
+
+        assert len(set(actions)) == 1, (
+            "deterministic predict must not depend on global RNG state, got %r" % (actions,)
+        )
+
+    def test_deterministic_tau_is_the_midpoint_grid(self):
+        agent = _make_iqn_agent()
+        tau = agent._deterministic_tau(3)
+
+        assert tau.shape == (3, N_QUANTILES)
+        expected = (torch.arange(N_QUANTILES, dtype=torch.float32) + 0.5) / N_QUANTILES
+        torch.testing.assert_close(tau[0], expected)
+        # Every row identical, strictly inside (0, 1), and symmetric about 0.5 —
+        # the last is what keeps the quadrature unbiased for the mean.
+        torch.testing.assert_close(tau[1], tau[0])
+        assert (tau > 0).all() and (tau < 1).all()
+        assert tau[0].mean().item() == 0.5
+
+    def test_deterministic_tau_grid_is_cached_and_rebuilt_on_change(self):
+        agent = _make_iqn_agent()
+        agent._deterministic_tau(2)
+        cached = agent._eval_tau
+        agent._deterministic_tau(5)
+        assert agent._eval_tau is cached, "grid must be cached, not rebuilt per call"
+
+        agent.num_quantiles = N_QUANTILES + 4
+        rebuilt = agent._deterministic_tau(2)
+        assert rebuilt.shape == (2, N_QUANTILES + 4)
+        assert agent._eval_tau is not cached
+
+    def test_stochastic_predict_still_samples_tau(self, monkeypatch):
+        """Exploration must not be frozen by the fix."""
+        agent = _make_iqn_agent()
+        micro, private, macro = _random_obs(1)
+
+        calls = []
+        real_rand = torch.rand
+
+        def spy(*args, **kwargs):
+            calls.append(args)
+            return real_rand(*args, **kwargs)
+
+        monkeypatch.setattr(torch, "rand", spy)
+
+        agent.predict(micro, private, macro, deterministic=True)
+        assert calls == [], "deterministic predict must not draw tau"
+
+        agent.predict(micro, private, macro, deterministic=False)
+        assert calls, "stochastic predict must still sample tau"
+
     def test_train_step_returns_loss(self):
         agent = _make_iqn_agent()
         _fill_agent_buffer(agent, n=20)

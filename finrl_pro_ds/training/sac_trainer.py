@@ -88,6 +88,7 @@ class SACTrainer:
             checkpoint_interval=sac_cfg.get("checkpoint_interval", 500_000),
             device=device,
             actor_update_freq=sac_cfg.get("actor_update_freq", 2),
+            crossq=sac_cfg.get("crossq"),
         )
 
         if sac_cfg.get("distributional", False):
@@ -116,8 +117,15 @@ class SACTrainer:
         getattr(env, 'num_envs', 1)
         self.update_interval = sac_cfg.get("update_interval", 4)
 
-        # Auto-scale tau for high UTD
-        if self.update_interval > 1:
+        # Auto-scale tau for high UTD. CrossQ has no target network, so tau and
+        # the Polyak update do not exist for it — scaling them would be a no-op
+        # that reads, in the logs, like a knob that is doing something.
+        if getattr(self.agent, "crossq", False):
+            logger.info(
+                f"[CrossQ] target network removed (BatchRenorm critic). "
+                f"tau/Polyak inactive; update_interval={self.update_interval} unchanged.",
+            )
+        elif self.update_interval > 1:
             raw_tau = self.agent.tau
             effective_tau = 1.0 - (1.0 - raw_tau) ** (1.0 / self.update_interval)
             self.agent.tau = effective_tau

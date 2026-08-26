@@ -8,6 +8,7 @@ Interface matches IQN/BDQ contract for pipeline compatibility:
   predict(), train_step(), save(), load(), reset_hidden_state(),
   mask_hidden_state(), decay_epsilon()
 """
+import contextlib
 import copy
 import os
 from typing import NamedTuple, Optional
@@ -19,6 +20,47 @@ import torch.optim as optim
 
 from finrl_pro_ds.agents.common.flat_replay_buffer import FlatReplayBuffer
 from finrl_pro_ds.agents.sac.networks import SACActorNetwork, SACCriticNetwork
+
+# CrossQ defaults (Bhatt et al., ICLR 2024 - arXiv:1902.05605).
+# critic_width/critic_depth default to None/1, i.e. the BASELINE critic geometry,
+# so `crossq: true` on its own is a pure mechanism swap and the A/B measures the
+# mechanism rather than added capacity. The paper's critic is 2048 wide x 2 deep.
+CROSSQ_DEFAULTS: dict = {
+    "enabled": False,
+    "critic_width": None,
+    "critic_depth": 1,
+    "bn_momentum": 0.01,
+    "bn_warmup_steps": 100_000,
+    "adam_betas": (0.5, 0.999),
+}
+
+
+def normalize_crossq_config(value) -> dict:
+    """Normalize the `agents.sac.crossq` config value into a full dict.
+
+    Accepts None / False (disabled), True (enabled with paper defaults), or a
+    dict of overrides carrying an `enabled` key. Unknown keys are rejected
+    rather than ignored - a silently-dropped `bn_warmup_steps` typo would run a
+    different algorithm than the config claims to.
+    """
+    cfg = dict(CROSSQ_DEFAULTS)
+    if value is None or value is False:
+        return cfg
+    if value is True:
+        cfg["enabled"] = True
+        return cfg
+    if not isinstance(value, dict):
+        raise TypeError(f"crossq must be bool/dict/None, got {type(value).__name__}")
+    unknown = set(value) - set(CROSSQ_DEFAULTS)
+    if unknown:
+        raise ValueError(
+            f"unknown crossq config key(s): {sorted(unknown)}. "
+            f"Valid keys: {sorted(CROSSQ_DEFAULTS)}",
+        )
+    cfg.update(value)
+    cfg["enabled"] = bool(cfg["enabled"])
+    cfg["adam_betas"] = tuple(cfg["adam_betas"])
+    return cfg
 
 
 class _UnpackedObs(NamedTuple):
@@ -54,10 +96,14 @@ class SACAgent:
         torch_compile: bool = False,
         checkpoint_interval: int = 500_000,
         device: str = "cpu",
+        crossq: bool | dict | None = None,
         # Pipeline compatibility kwargs
         **kwargs,
     ):
         self.device = torch.device(device)
+        # CrossQ: BatchRenorm critic, no target network, UTD unchanged.
+        self._crossq_cfg = normalize_crossq_config(crossq)
+        self.crossq: bool = self._crossq_cfg["enabled"]
         self.gamma = gamma
         self.tau = tau
         self.batch_size = batch_size
@@ -119,16 +165,30 @@ class SACAgent:
 
         # Build networks
         self.actor = SACActorNetwork(scale_cfg, private_dim, fusion_dim, self._n_scales, action_dim=self._action_dim, obs_mode=self._obs_mode, lob_encoder_config=lob_cfg).to(self.device)
-        self.critic1 = SACCriticNetwork(scale_cfg, private_dim, fusion_dim, action_dim=self._action_dim, n_scales=self._n_scales, obs_mode=self._obs_mode, lob_encoder_config=lob_cfg).to(self.device)
-        self.critic2 = SACCriticNetwork(scale_cfg, private_dim, fusion_dim, action_dim=self._action_dim, n_scales=self._n_scales, obs_mode=self._obs_mode, lob_encoder_config=lob_cfg).to(self.device)
+        _critic_kwargs = dict(
+            action_dim=self._action_dim, n_scales=self._n_scales,
+            obs_mode=self._obs_mode, lob_encoder_config=lob_cfg,
+            crossq=self.crossq,
+            crossq_width=self._crossq_cfg["critic_width"],
+            crossq_depth=self._crossq_cfg["critic_depth"],
+            bn_momentum=self._crossq_cfg["bn_momentum"],
+            bn_warmup_steps=self._crossq_cfg["bn_warmup_steps"],
+        )
+        self.critic1 = SACCriticNetwork(scale_cfg, private_dim, fusion_dim, **_critic_kwargs).to(self.device)
+        self.critic2 = SACCriticNetwork(scale_cfg, private_dim, fusion_dim, **_critic_kwargs).to(self.device)
 
-        # Target critics (Polyak-averaged)
-        self.target_critic1 = copy.deepcopy(self.critic1).to(self.device)
-        self.target_critic2 = copy.deepcopy(self.critic2).to(self.device)
-        for p in self.target_critic1.parameters():
-            p.requires_grad = False
-        for p in self.target_critic2.parameters():
-            p.requires_grad = False
+        # Target critics (Polyak-averaged) - CrossQ has none by construction:
+        # the joint BatchRenorm pass in train_step_mega() is what replaces them.
+        if self.crossq:
+            self.target_critic1 = None
+            self.target_critic2 = None
+        else:
+            self.target_critic1 = copy.deepcopy(self.critic1).to(self.device)
+            self.target_critic2 = copy.deepcopy(self.critic2).to(self.device)
+            for p in self.target_critic1.parameters():
+                p.requires_grad = False
+            for p in self.target_critic2.parameters():
+                p.requires_grad = False
 
         # Entropy coefficient (learnable)
         # FIX R2-AUD-08: Create Parameter directly on target device to preserve
@@ -141,9 +201,12 @@ class SACAgent:
         # Optimizers — OPT-09: fused=True uses single CUDA kernel for param update
         _fused = self.device.type == "cuda"
         self.actor_optimizer = optim.Adam(self.actor.parameters(), lr=lr_actor, fused=_fused)
+        # CrossQ lowers beta1 on the critic (paper: 0.5) - BatchRenorm statistics
+        # move faster than Adam's default momentum can track.
+        _critic_betas = self._crossq_cfg["adam_betas"] if self.crossq else (0.9, 0.999)
         self.critic_optimizer = optim.Adam(
             list(self.critic1.parameters()) + list(self.critic2.parameters()),
-            lr=lr_critic, fused=_fused,
+            lr=lr_critic, fused=_fused, betas=_critic_betas,
         )
         self.alpha_optimizer = optim.Adam([self.log_alpha], lr=lr_alpha, fused=_fused)
 
@@ -205,11 +268,12 @@ class SACAgent:
                 self.actor = torch.compile(self.actor, mode='default')
                 # Training critics: NOT compiled (encode/q_head_forward bypass).
                 # O-A caching provides the main gain (2 fewer encoder passes).
-                self.target_critic1 = torch.compile(self.target_critic1, mode='default')
-                self.target_critic2 = torch.compile(self.target_critic2, mode='default')
+                if not self.crossq:
+                    self.target_critic1 = torch.compile(self.target_critic1, mode='default')
+                    self.target_critic2 = torch.compile(self.target_critic2, mode='default')
                 import logging
                 logging.getLogger(__name__).info(
-                    "[torch.compile] actor + 2 targets (full-model). "
+                    f"[torch.compile] actor{'' if self.crossq else ' + 2 targets'} (full-model). "
                     "Training critics: eager (O-A encode/q_head split). "
                     "max_autotune_gemm=False (BUG-08 workaround)",
                 )
@@ -420,21 +484,27 @@ class SACAgent:
             alpha = self.log_alpha.exp().detach()
 
             # --- Critic update ---
-            # OPT-OA: Encode current state ONCE, reuse features for actor update
-            with torch.no_grad():
-                with amp_ctx:
-                    next_action, next_log_prob = self.actor.sample(next_scale_stack, npriv, lob=next_lob_mb)
-                    target_q1 = self.target_critic1(next_scale_stack, npriv, next_action, lob=next_lob_mb)
-                    target_q2 = self.target_critic2(next_scale_stack, npriv, next_action, lob=next_lob_mb)
-                    target_q = torch.min(target_q1, target_q2) - alpha * next_log_prob
-                    target_value = rewards + (1.0 - dones) * self.gamma * target_q
+            if self.crossq:
+                c1_feat, c2_feat, q1, q2, critic_loss = self._crossq_critic_loss(
+                    scale_stack, next_scale_stack, priv, npriv, lob_mb, next_lob_mb,
+                    actions, rewards, dones, alpha, amp_ctx,
+                )
+            else:
+                # OPT-OA: Encode current state ONCE, reuse features for actor update
+                with torch.no_grad():
+                    with amp_ctx:
+                        next_action, next_log_prob = self.actor.sample(next_scale_stack, npriv, lob=next_lob_mb)
+                        target_q1 = self.target_critic1(next_scale_stack, npriv, next_action, lob=next_lob_mb)
+                        target_q2 = self.target_critic2(next_scale_stack, npriv, next_action, lob=next_lob_mb)
+                        target_q = torch.min(target_q1, target_q2) - alpha * next_log_prob
+                        target_value = rewards + (1.0 - dones) * self.gamma * target_q
 
-            with amp_ctx:
-                c1_feat = self.critic1.encode(scale_stack, priv, lob=lob_mb)
-                c2_feat = self.critic2.encode(scale_stack, priv, lob=lob_mb)
-                q1 = self.critic1.q_head_forward(c1_feat, actions)
-                q2 = self.critic2.q_head_forward(c2_feat, actions)
-                critic_loss = nn.functional.mse_loss(q1, target_value) + nn.functional.mse_loss(q2, target_value)
+                with amp_ctx:
+                    c1_feat = self.critic1.encode(scale_stack, priv, lob=lob_mb)
+                    c2_feat = self.critic2.encode(scale_stack, priv, lob=lob_mb)
+                    q1 = self.critic1.q_head_forward(c1_feat, actions)
+                    q2 = self.critic2.q_head_forward(c2_feat, actions)
+                    critic_loss = nn.functional.mse_loss(q1, target_value) + nn.functional.mse_loss(q2, target_value)
 
             self.critic_optimizer.zero_grad()
             if self.scaler.is_enabled():
@@ -457,8 +527,9 @@ class SACAgent:
                     new_action, log_prob = self.actor.sample(scale_stack, priv, lob=lob_mb)
                     # OPT-OA: Reuse cached encoder features — .detach() prevents
                     # critic encoder gradients from flowing into actor update
-                    q1_new = self.critic1.q_head_forward(c1_feat.detach(), new_action)
-                    q2_new = self.critic2.q_head_forward(c2_feat.detach(), new_action)
+                    with self._crossq_qhead_eval():
+                        q1_new = self.critic1.q_head_forward(c1_feat.detach(), new_action)
+                        q2_new = self.critic2.q_head_forward(c2_feat.detach(), new_action)
                     q_new = torch.min(q1_new, q2_new)
                     actor_loss = (alpha * log_prob - q_new).mean()
 
@@ -488,12 +559,13 @@ class SACAgent:
             # Scaler update (no-op if disabled for BF16)
             self.scaler.update()
 
-            # --- Target Polyak update (fused lerp_) ---
-            with torch.no_grad():
-                for tp, p in zip(self.target_critic1.parameters(), self.critic1.parameters()):
-                    tp.data.lerp_(p.data, self.tau)
-                for tp, p in zip(self.target_critic2.parameters(), self.critic2.parameters()):
-                    tp.data.lerp_(p.data, self.tau)
+            # --- Target Polyak update (fused lerp_) — no targets under CrossQ ---
+            if not self.crossq:
+                with torch.no_grad():
+                    for tp, p in zip(self.target_critic1.parameters(), self.critic1.parameters()):
+                        tp.data.lerp_(p.data, self.tau)
+                    for tp, p in zip(self.target_critic2.parameters(), self.critic2.parameters()):
+                        tp.data.lerp_(p.data, self.tau)
 
             # Extract metrics periodically to avoid .item() CUDA sync overhead.
             if self._train_step_count % 50 == 0:
@@ -509,6 +581,84 @@ class SACAgent:
                 }
 
         return metrics
+
+    def _crossq_critic_loss(
+        self, scale_stack, next_scale_stack, priv, npriv, lob_mb, next_lob_mb,
+        actions, rewards, dones, alpha, amp_ctx,
+    ):
+        """CrossQ critic loss: one joint forward pass, no target network.
+
+        The current and next state-action pairs are concatenated into a SINGLE
+        batch before touching the critic, so every BatchRenorm layer in the Q
+        head sees a 50/50 mixture of both distributions and normalizes them with
+        one shared set of statistics. That is the entire mechanism: a target
+        network is normally required because Q(s', a') is off-distribution
+        relative to the data the critic was fit on, and the joint pass removes
+        that mismatch instead of damping it. Splitting this into two forward
+        passes would silently restore vanilla SAC-without-a-target-network,
+        which diverges - test_crossq_joint_pass_is_not_two_separate_passes
+        exists to catch exactly that refactor.
+
+        The next-state half of the Q output is stop-gradiented into the Bellman
+        target, but gradients still reach that half through the shared batch
+        statistics. That coupling is intended, not a leak.
+
+        Returns:
+            (c1_feat, c2_feat, q1, q2, critic_loss), where the features are the
+            CURRENT-state halves, for OPT-OA reuse in the actor update.
+        """
+        n = scale_stack.shape[0]
+        with amp_ctx:
+            with torch.no_grad():
+                next_action, next_log_prob = self.actor.sample(
+                    next_scale_stack, npriv, lob=next_lob_mb,
+                )
+
+            cat_scale = torch.cat([scale_stack, next_scale_stack], dim=0)
+            cat_priv = torch.cat([priv, npriv], dim=0) if priv is not None else None
+            cat_lob = torch.cat([lob_mb, next_lob_mb], dim=0) if lob_mb is not None else None
+            cat_actions = torch.cat([actions, next_action], dim=0)
+
+            cat_feat1 = self.critic1.encode(cat_scale, cat_priv, lob=cat_lob)
+            cat_feat2 = self.critic2.encode(cat_scale, cat_priv, lob=cat_lob)
+            cat_q1 = self.critic1.q_head_forward(cat_feat1, cat_actions)
+            cat_q2 = self.critic2.q_head_forward(cat_feat2, cat_actions)
+
+            q1, next_q1 = cat_q1[:n], cat_q1[n:]
+            q2, next_q2 = cat_q2[:n], cat_q2[n:]
+
+            target_q = torch.min(next_q1, next_q2).detach() - alpha * next_log_prob
+            target_value = rewards + (1.0 - dones) * self.gamma * target_q
+            critic_loss = (
+                nn.functional.mse_loss(q1, target_value)
+                + nn.functional.mse_loss(q2, target_value)
+            )
+
+        return cat_feat1[:n], cat_feat2[:n], q1, q2, critic_loss
+
+    @contextlib.contextmanager
+    def _crossq_qhead_eval(self):
+        """Run the critics' Q heads in eval mode (no-op unless CrossQ).
+
+        The actor loss scores the POLICY's actions, not the replay batch's. In
+        train mode that would (a) fold the policy's action distribution into the
+        BatchRenorm running statistics, which only the Bellman batch is supposed
+        to define, and (b) make the actor gradient depend on the composition of
+        the minibatch. Eval mode reads the running statistics and updates
+        nothing. Only the Q head carries BatchRenorm; encoder features are the
+        cached OPT-OA ones either way.
+        """
+        if not self.crossq:
+            yield
+            return
+        was1, was2 = self.critic1.q_head.training, self.critic2.q_head.training
+        self.critic1.q_head.eval()
+        self.critic2.q_head.eval()
+        try:
+            yield
+        finally:
+            self.critic1.q_head.train(was1)
+            self.critic2.q_head.train(was2)
 
     def _to_device_pinned(self, arr: np.ndarray, dtype=torch.float32) -> torch.Tensor:
         """Transfer numpy array to GPU via pinned memory for true async DMA.
@@ -639,31 +789,47 @@ class SACAgent:
         actor_sd = self._unwrap_state_dict(self.actor)
         critic1_sd = self._unwrap_state_dict(self.critic1)
         critic2_sd = self._unwrap_state_dict(self.critic2)
-        tc1_sd = self._unwrap_state_dict(self.target_critic1)
-        tc2_sd = self._unwrap_state_dict(self.target_critic2)
 
-        torch.save({
+        payload = {
             "actor": actor_sd,
             "critic1": critic1_sd,
             "critic2": critic2_sd,
-            "target_critic1": tc1_sd,
-            "target_critic2": tc2_sd,
             "log_alpha": self.log_alpha.data,
             "actor_optimizer": self.actor_optimizer.state_dict(),
             "critic_optimizer": self.critic_optimizer.state_dict(),
             "alpha_optimizer": self.alpha_optimizer.state_dict(),
             "step_count": self.step_count,
-        }, path)
+            # Stamped so a CrossQ checkpoint cannot be silently loaded into a
+            # baseline-SAC agent (or vice versa) - the critic geometries differ
+            # and the load would either fail cryptically or, worse, half-succeed.
+            "crossq": self.crossq,
+        }
+        if not self.crossq:
+            payload["target_critic1"] = self._unwrap_state_dict(self.target_critic1)
+            payload["target_critic2"] = self._unwrap_state_dict(self.target_critic2)
+
+        torch.save(payload, path)
 
     def load(self, path: str):
         """Load model state from checkpoint."""
         checkpoint = torch.load(path, map_location=self.device, weights_only=True)
 
+        # Checkpoints written before CrossQ existed carry no stamp and are
+        # baseline SAC by definition.
+        ckpt_crossq = bool(checkpoint.get("crossq", False))
+        if ckpt_crossq != self.crossq:
+            raise ValueError(
+                f"checkpoint {path} was trained with crossq={ckpt_crossq} but this agent "
+                f"was built with crossq={self.crossq}. Set agents.sac.crossq to "
+                f"{str(ckpt_crossq).lower()} in the config used for this run.",
+            )
+
         self._load_state_dict(self.actor, checkpoint["actor"])
         self._load_state_dict(self.critic1, checkpoint["critic1"])
         self._load_state_dict(self.critic2, checkpoint["critic2"])
-        self._load_state_dict(self.target_critic1, checkpoint["target_critic1"])
-        self._load_state_dict(self.target_critic2, checkpoint["target_critic2"])
+        if not self.crossq:
+            self._load_state_dict(self.target_critic1, checkpoint["target_critic1"])
+            self._load_state_dict(self.target_critic2, checkpoint["target_critic2"])
         self.log_alpha.data = checkpoint["log_alpha"]
         self.actor_optimizer.load_state_dict(checkpoint["actor_optimizer"])
         self.critic_optimizer.load_state_dict(checkpoint["critic_optimizer"])
