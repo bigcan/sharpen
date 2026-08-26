@@ -187,7 +187,8 @@ class TestFlatBufferMemory:
             2 * cap * np.prod(MACRO_SHAPE) * 4 +     # macro + next_macro
             2 * cap * np.prod(PRIVATE_SHAPE) * 4 +   # private + next_private
             cap * np.prod(ACTION_SHAPE) * 8 +         # actions (int64)
-            3 * cap * 4                                # rewards, dones, aux (float32)
+            3 * cap * 4 +                              # rewards, dones, aux (float32)
+            cap * 1                                    # RCRP regime codes (int8)
         )
         assert buf.nbytes() == expected
 
