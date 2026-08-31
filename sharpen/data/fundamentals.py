@@ -110,7 +110,7 @@ def _live_transport(user_agent: str | None = None, *, rate_per_sec: float = 8.0)
     if not ua:
         raise RuntimeError(
             "SEC EDGAR requires a descriptive User-Agent. Set SEC_EDGAR_UA "
-            "(e.g. 'FinRL-Pro-DS research you@example.com') or pass user_agent=/transport=.")
+            "(e.g. 'Sharpen research you@example.com') or pass user_agent=/transport=.")
     min_gap = 1.0 / rate_per_sec
     state = {"last": 0.0}
 

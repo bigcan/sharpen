@@ -152,7 +152,7 @@ class EdgarConnector:
         if not self._user_agent:
             raise RuntimeError(
                 "EdgarConnector live fetch requires a descriptive User-Agent (SEC policy). Set "
-                "SEC_EDGAR_UA (e.g. 'FinRL-Pro-DS research you@example.com') or pass user_agent=. "
+                "SEC_EDGAR_UA (e.g. 'Sharpen research you@example.com') or pass user_agent=. "
                 "For offline/test use, inject a `transport` callable instead.")
         return _default_transport_factory(self._user_agent)
 

@@ -49,7 +49,7 @@ logger = logging.getLogger(__name__)
 
 _BASE = "https://www.twse.com.tw/rwd/zh/fund/T86"
 _LICENSE = "TWSE (Taiwan Stock Exchange) — public data, keyless"
-_USER_AGENT = "Mozilla/5.0 (FinRL-Pro-DS research; contact via project owner)"
+_USER_AGENT = "Mozilla/5.0 (Sharpen research; contact via project owner)"
 
 # The 10-ETF panel universe (configs/taiwan_cross_asset.yaml) — the default discover() scope. A
 # caller may pass a different `tickers` tuple to widen/narrow it; the quality gate + DataScout
