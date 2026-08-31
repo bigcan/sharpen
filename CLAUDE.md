@@ -38,7 +38,7 @@ python scripts/auto_collect_checkpoints.py [--hours N | --run_id ID | --all_inst
 **WandB:** entity=`bigcan-chiwin-technology`, project=`FinRL-Pro-DS`. Helpers at `.agents/skills/wandb-primary/scripts/wandb_helpers.py` (tracked; also mirrored at `skills/wandb-primary/`. Do **not** point this at `.claude/skills/` — `.claude/` is gitignored, so that path exists only in the main checkout and breaks in worktrees).
 **Always pass `metric_keys=` explicitly.** HPO: `_debug/eval_profit_factor`, `_research/sharpe_minute`. Backtest: `Profit_Factor_Daily`, `Sharpe_Ratio`, `Sortino_Ratio`, `Total_Return`, `Max_Drawdown`.
 
-**Boundary:** Only modify `finrl_pro_ds/`, `scripts/`, `configs/`, `tests/`, `docs/`. Never touch `FinRLPodracer/` or `Podracer/`.
+**Boundary:** Only modify `finrl_pro_ds/`, `scripts/`, `configs/`, `tests/`, `docs/`.
 Project tree, stack versions, and per-file notes: `docs/claude_md_reference.md` (read on demand — do not restate here).
 
 ## Envs (summary)
@@ -110,7 +110,6 @@ Configs vary by pipeline. **Do NOT invent keys — read a reference config first
 
 ## Anti-Patterns (NEVER DO)
 
-- Never import from `FinRLPodracer/` or `Podracer/`
 - Never normalize across train/val/test splits (LEAK-1)
 - Never set `hindsight_weight > 0` in backtest configs (BUG-03)
 - Never guess config keys — read a reference YAML first
