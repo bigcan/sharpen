@@ -40,9 +40,9 @@ import pandas as pd
 ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT))
 
-from finrl_pro_ds.data import sp500_pit_panel as pit  # noqa: E402
-from finrl_pro_ds.portfolio.long_only import PortfolioConfig, backtest  # noqa: E402
-from finrl_pro_ds.signals.library import ballast as bs  # noqa: E402
+from sharpen.data import sp500_pit_panel as pit  # noqa: E402
+from sharpen.portfolio.long_only import PortfolioConfig, backtest  # noqa: E402
+from sharpen.signals.library import ballast as bs  # noqa: E402
 
 log = logging.getLogger("ballast_exit")
 OUT = ROOT / "results" / "ballast_v1"

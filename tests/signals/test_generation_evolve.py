@@ -12,10 +12,10 @@ from __future__ import annotations
 import numpy as np
 import pandas as pd
 
-from finrl_pro_ds.signals.features import Panel
-from finrl_pro_ds.signals.generation.evolve import evolve
-from finrl_pro_ds.signals.generation.fitness import FitnessConfig
-from finrl_pro_ds.signals.library._alpha_formulas import FORMULAS
+from sharpen.signals.features import Panel
+from sharpen.signals.generation.evolve import evolve
+from sharpen.signals.generation.fitness import FitnessConfig
+from sharpen.signals.library._alpha_formulas import FORMULAS
 
 T, N = 320, 12
 _SEEDS = [FORMULAS[1], FORMULAS[3], FORMULAS[6], FORMULAS[12]]
@@ -82,9 +82,9 @@ def test_seed_formulas_have_no_uneval_token() -> None:
     """GP5-04: every warm-start seed parses + round-trips cleanly — none carries a token outside the
     grammar's eval inputs (the `cap` class). Seed 56 (uses `cap`) is SKIP'd and not in SEED_NUMS, and
     grammar.INPUTS excludes `cap`, so no genome can introduce it; this locks that."""
-    from finrl_pro_ds.signals.generation.grammar import parse, to_formula
-    from finrl_pro_ds.signals.library._alpha_formulas import FORMULAS
-    from finrl_pro_ds.signals.library.alphas101 import SKIP
+    from sharpen.signals.generation.grammar import parse, to_formula
+    from sharpen.signals.library._alpha_formulas import FORMULAS
+    from sharpen.signals.library.alphas101 import SKIP
     seed_nums = (1, 3, 4, 6, 9, 12, 14, 19, 33, 53)      # mirrors generate_alphas.SEED_NUMS
     for n in seed_nums:
         assert n not in SKIP
@@ -103,7 +103,7 @@ def test_fitness_exception_culls_genome_not_crash_run(monkeypatch) -> None:
     file-drawer N, fitness=-inf), it does NOT crash the whole evolve run. This guards the first
     full --mode real run, where a real-data genome surfaced an exception the synthetic calibration
     never produced — combination_fitness is called outside the per-genome try in score()."""
-    import finrl_pro_ds.signals.generation.evolve as ev
+    import sharpen.signals.generation.evolve as ev
 
     def _boom(*_a, **_k):
         raise ValueError("synthetic fitness blow-up")

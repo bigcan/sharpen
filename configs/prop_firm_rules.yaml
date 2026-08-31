@@ -2,7 +2,7 @@
 # PROP-FIRM CHALLENGE RULE SETS — consumed by the challenge simulator
 # ============================================================================
 # Rule sets for the prop-firm P(pass) Monte-Carlo simulator
-# (finrl_pro_ds/prop/challenge_simulator.py + scripts/research/run_challenge_simulator.py).
+# (sharpen/prop/challenge_simulator.py + scripts/research/run_challenge_simulator.py).
 #
 # ✅ VERIFIED 2026-07-02 against each firm's CURRENT official rules pages (re-verify before any
 # real attempt — prop firms change rules). Sources:

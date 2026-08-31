@@ -3,8 +3,8 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from finrl_pro_ds.crucible.manifest import RunManifest
-from finrl_pro_ds.crucible.version import CRUCIBLE_VERSION
+from sharpen.crucible.manifest import RunManifest
+from sharpen.crucible.version import CRUCIBLE_VERSION
 
 
 def _manifest() -> RunManifest:

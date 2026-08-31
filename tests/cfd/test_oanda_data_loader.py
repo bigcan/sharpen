@@ -14,7 +14,7 @@ import httpx
 import pandas as pd
 import pytest
 
-from finrl_pro_ds.cfd.data.oanda_data_loader import (
+from sharpen.cfd.data.oanda_data_loader import (
     OandaDataLoader,
     _resample_ohlcv,
     _parse_datetime,

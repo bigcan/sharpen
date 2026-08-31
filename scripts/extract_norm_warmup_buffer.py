@@ -32,8 +32,8 @@ import yaml
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 
-from finrl_pro_ds.data.multiscale_handler import _resample_ohlcv  # noqa: E402
-from finrl_pro_ds.data.splitter import RollingWindowSplitter  # noqa: E402
+from sharpen.data.multiscale_handler import _resample_ohlcv  # noqa: E402
+from sharpen.data.splitter import RollingWindowSplitter  # noqa: E402
 
 logging.basicConfig(level=logging.INFO,
                     format="%(asctime)s [%(levelname)s] %(message)s",

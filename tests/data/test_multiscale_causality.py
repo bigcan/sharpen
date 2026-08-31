@@ -25,7 +25,7 @@ from __future__ import annotations
 import numpy as np
 import pandas as pd
 
-from finrl_pro_ds.data.multiscale_handler import MultiScaleOHLCVHandler
+from sharpen.data.multiscale_handler import MultiScaleOHLCVHandler
 
 
 def _write_synth_parquet(path) -> None:

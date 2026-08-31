@@ -4,13 +4,13 @@ from __future__ import annotations
 import numpy as np
 import pandas as pd
 
-from finrl_pro_ds.data.taiwan_panel_loader import (
+from sharpen.data.taiwan_panel_loader import (
     _apply_causal_total_return,
     load_taiwan_panel,
     load_taiwan_universe,
 )
-from finrl_pro_ds.signals.eval_harness import assert_causal
-from finrl_pro_ds.signals.generation import DslSignal
+from sharpen.signals.eval_harness import assert_causal
+from sharpen.signals.generation import DslSignal
 
 _TICKERS = ["0050", "0056", "00679B", "00635U"]
 _CLASSES = {"0050": "tw_equity", "0056": "tw_equity", "00679B": "bond", "00635U": "commodity"}

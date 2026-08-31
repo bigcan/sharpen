@@ -72,7 +72,7 @@ def _build_engine(
     close: float = 100.0,
 ):
     """Wire engine with deps short-circuited; obs HL/close configurable."""
-    from finrl_pro_ds.crypto.live.live_engine import LiveTradingEngine
+    from sharpen.crypto.live.live_engine import LiveTradingEngine
 
     monkeypatch.setenv("STRATEGY_NAME", "test-engine-intrabar-dd")
     monkeypatch.setenv("METRICS_PORT", "0")

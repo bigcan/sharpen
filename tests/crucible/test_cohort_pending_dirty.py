@@ -14,8 +14,8 @@ from __future__ import annotations
 
 import pytest
 
-from finrl_pro_ds.crucible.ledger import TrialLedger, TrialRecord
-from finrl_pro_ds.crucible.orchestrator.substrate import OrchestratorStore, substrate_dirty
+from sharpen.crucible.ledger import TrialLedger, TrialRecord
+from sharpen.crucible.orchestrator.substrate import OrchestratorStore, substrate_dirty
 
 
 # ------------------------------------------------------------------ the dirty leg ----------------
@@ -149,8 +149,8 @@ def test_empty_pool_is_empty_not_an_error(ledger) -> None:
 def test_cohort_config_key_is_none_when_the_gate_is_disabled() -> None:
     """A disabled cohort can never mark a substrate dirty — otherwise turning the gate off would
     still perturb tick decisions, breaking the 'disabled = byte-identical' invariant."""
-    from finrl_pro_ds.crucible.orchestrator.orchestrator import _cohort_config_key
-    from finrl_pro_ds.signals.generation.cohort import CohortConfig
+    from sharpen.crucible.orchestrator.orchestrator import _cohort_config_key
+    from sharpen.signals.generation.cohort import CohortConfig
 
     class _Sub:
         cohort_cfg = CohortConfig(

@@ -35,8 +35,8 @@ from __future__ import annotations
 import numpy as np
 import pandas as pd
 
-from finrl_pro_ds.data.multiscale_handler import MultiScaleOHLCVHandler
-from finrl_pro_ds.envs.continuous_swing_env import ContinuousSwingEnv
+from sharpen.data.multiscale_handler import MultiScaleOHLCVHandler
+from sharpen.envs.continuous_swing_env import ContinuousSwingEnv
 
 # Mirrors the gmgp1-btc / sg1-btc V7 octave; the earn-timing under test is
 # scale-agnostic (it lives in ContinuousSwingEnv.step), but using a real config's

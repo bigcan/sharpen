@@ -13,14 +13,14 @@ from __future__ import annotations
 
 import numpy as np
 
-from finrl_pro_ds.crypto.eval.statistics import (
+from sharpen.crypto.eval.statistics import (
     deflated_sharpe_ratio,
     excess_kurtosis,
     skewness,
 )
-from finrl_pro_ds.signals.features import Panel
-from finrl_pro_ds.signals.generation.evolve import _overlay_returns
-from finrl_pro_ds.signals.generation.fitness import (
+from sharpen.signals.features import Panel
+from sharpen.signals.generation.evolve import _overlay_returns
+from sharpen.signals.generation.fitness import (
     FitnessConfig,
     _ar1_effective_n,
     _combined_book,

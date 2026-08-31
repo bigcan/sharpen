@@ -19,7 +19,7 @@ import numpy as np
 import pandas as pd
 import pytest
 
-from finrl_pro_ds.crucible import (
+from sharpen.crucible import (
     OrchestratorStore,
     Substrate,
     TickBudget,
@@ -27,13 +27,13 @@ from finrl_pro_ds.crucible import (
     TrialRecord,
     run_orchestrator_tick,
 )
-from finrl_pro_ds.crucible.agentic import HypothesisAuthor, LibrarySeedProposer, LlmProposer
-from finrl_pro_ds.crucible.agentic.llm_proposer import _render_context
-from finrl_pro_ds.crucible.agentic.proposer import HypothesisProposal, ProposalContext
-from finrl_pro_ds.crucible.orchestrator.orchestrator import _feature_slot_bars, _mechanism_nonce
-from finrl_pro_ds.crucible.orchestrator.substrate import PreparedSubstrate
-from finrl_pro_ds.signals.features import Panel, make_synthetic_panel
-from finrl_pro_ds.signals.generation.fitness import FitnessConfig
+from sharpen.crucible.agentic import HypothesisAuthor, LibrarySeedProposer, LlmProposer
+from sharpen.crucible.agentic.llm_proposer import _render_context
+from sharpen.crucible.agentic.proposer import HypothesisProposal, ProposalContext
+from sharpen.crucible.orchestrator.orchestrator import _feature_slot_bars, _mechanism_nonce
+from sharpen.crucible.orchestrator.substrate import PreparedSubstrate
+from sharpen.signals.features import Panel, make_synthetic_panel
+from sharpen.signals.generation.fitness import FitnessConfig
 
 _TS = "2026-07-06T00:00:00+00:00"
 _FORBIDDEN_VALUES = ("secret prior", "0.42", "3.1", "2.2", "PROMISING", "NO_GO")

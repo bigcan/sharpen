@@ -13,13 +13,13 @@ from unittest.mock import MagicMock
 
 import numpy as np
 
-from finrl_pro_ds.envs.augmented_wrapper import (
+from sharpen.envs.augmented_wrapper import (
     _OFI_INDICES,
     _SPREAD_IDX,
     _VOL_INDICES,
     AugmentedDataWrapper,
 )
-from finrl_pro_ds.envs.deep_scalper_env import DeepScalperEnv
+from sharpen.envs.deep_scalper_env import DeepScalperEnv
 
 
 def _make_step_data(mid=50000.0, spread_bps=2.0):

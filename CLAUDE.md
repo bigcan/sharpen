@@ -4,9 +4,9 @@ Detailed reference: `docs/claude_md_reference.md` (project map, env contracts, s
 
 ## Project Brief
 
-Quant strategy R&D platform + **Crucible** systematic alpha-mining platform (`crucible-v9.0`, `finrl_pro_ds/crucible/`). **Direction: linear core first; RL only as a thin overlay behind a beat-linear-OOS gate.** Single-asset directional RL is falsified (GMGP1-BTC clean de-leaked re-baseline, 2026-07-20). The only validated edge is cross-asset **TSMOM**, net SR ~0.60. If RL is used, **SAC only** — IQN/BDQ/PPO code is present but none is profitable; propose alternatives with evidence.
+Quant strategy R&D platform + **Crucible** systematic alpha-mining platform (`crucible-v9.0`, `sharpen/crucible/`). **Direction: linear core first; RL only as a thin overlay behind a beat-linear-OOS gate.** Single-asset directional RL is falsified (GMGP1-BTC clean de-leaked re-baseline, 2026-07-20). The only validated edge is cross-asset **TSMOM**, net SR ~0.60. If RL is used, **SAC only** — IQN/BDQ/PPO code is present but none is profitable; propose alternatives with evidence.
 **Ultimate goal:** build profitable trading strategies for live markets, net of fees — RL is the primary research focus; linear (TSMOM/TAILWIND-style) is an equally valid path, use whatever provably works. **Crucible**'s own goal is continuous, systematic discovery of alphas in financial markets, feeding both RL and linear strategies. Milestone: pass FTMO + Velotrade prop-firm challenges as proof-of-capital.
-**Active:** TAILWIND (`tailwind-v1` — TSMOM + BAB as crash hedge) · CRUCIBLE falsification filter (`finrl_pro_ds/crucible/`, `finrl_pro_ds/signals/`) · Crucible ICAIF paper (deadline **2026-08-02**) · gmgp1-gold/xauusd ensembles on paper · GMGP1 SAC Gold 15m (RL, paper).
+**Active:** TAILWIND (`tailwind-v1` — TSMOM + BAB as crash hedge) · CRUCIBLE falsification filter (`sharpen/crucible/`, `sharpen/signals/`) · Crucible ICAIF paper (deadline **2026-08-02**) · gmgp1-gold/xauusd ensembles on paper · GMGP1 SAC Gold 15m (RL, paper).
 **Closed — do not re-propose without new evidence:** Market Making LOB (S442) · Sync-1H · Funding-Arb standalone · PRISM · AlphaSeek · options-as-alpha · liquid large-cap X-sec.
 Prediction-market research (Polymarket) spun off 2026-07-05 to its own repo: [`Chiwin-Technology/polymarket-updown-research`](https://github.com/Chiwin-Technology/polymarket-updown-research) — no longer present here.
 State: `.agent/memory/core.md` (loaded at boot). R&D log: `randd_log.md`. Full NO-GO ledger: auto-memory `MEMORY.md` — **check it before proposing any strategy.**
@@ -38,7 +38,7 @@ python scripts/auto_collect_checkpoints.py [--hours N | --run_id ID | --all_inst
 **WandB:** entity=`bigcan-chiwin-technology`, project=`FinRL-Pro-DS`. Helpers at `.agents/skills/wandb-primary/scripts/wandb_helpers.py` (tracked; also mirrored at `skills/wandb-primary/`. Do **not** point this at `.claude/skills/` — `.claude/` is gitignored, so that path exists only in the main checkout and breaks in worktrees).
 **Always pass `metric_keys=` explicitly.** HPO: `_debug/eval_profit_factor`, `_research/sharpe_minute`. Backtest: `Profit_Factor_Daily`, `Sharpe_Ratio`, `Sortino_Ratio`, `Total_Return`, `Max_Drawdown`.
 
-**Boundary:** Only modify `finrl_pro_ds/`, `scripts/`, `configs/`, `tests/`, `docs/`.
+**Boundary:** Only modify `sharpen/`, `scripts/`, `configs/`, `tests/`, `docs/`.
 Project tree, stack versions, and per-file notes: `docs/claude_md_reference.md` (read on demand — do not restate here).
 
 ## Envs (summary)
@@ -55,7 +55,7 @@ Project tree, stack versions, and per-file notes: `docs/claude_md_reference.md` 
 
 ## Alpha-Mining Platform (Crucible)
 
-`finrl_pro_ds/crucible/` (`crucible-v9.0`) — continuous agentic alpha-discovery funnel sitting on top of `finrl_pro_ds/signals/` (DSL + T0-T5 deflated evaluation funnel). Falsification-first: ACQUIRE (free data connectors; see reference doc) → HYPOTHESIZE (agent proposes pre-registered specs, blind to verdicts) → MINE → DEFLATE → COMBINE + forward-incubate in a lockbox before any human Tier-2 audit. P0–P5 roadmap shipped; zero PROMISING survivors have cleared the lockbox yet.
+`sharpen/crucible/` (`crucible-v9.0`) — continuous agentic alpha-discovery funnel sitting on top of `sharpen/signals/` (DSL + T0-T5 deflated evaluation funnel). Falsification-first: ACQUIRE (free data connectors; see reference doc) → HYPOTHESIZE (agent proposes pre-registered specs, blind to verdicts) → MINE → DEFLATE → COMBINE + forward-incubate in a lockbox before any human Tier-2 audit. P0–P5 roadmap shipped; zero PROMISING survivors have cleared the lockbox yet.
 
 Run: `python scripts/research/crucible_orchestrator.py --mode {synthetic|real} --nights N` (continuous nightly ticks) or `crucible_hypothesis_loop.py` (single manual cycle). Gates: `configs/crucible_cohort.gates.yaml`, `configs/crucible_lockbox.gates.yaml` (never hardcode thresholds — same rule as training gates). Design spec: `docs/research/crucible_agentic_discovery_spec.md`. Full architecture + CLI reference: `docs/claude_md_reference.md`.
 

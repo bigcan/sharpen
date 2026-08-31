@@ -61,9 +61,9 @@ if str(PROJECT_ROOT) not in sys.path:
 
 import yaml  # noqa: E402
 
-from finrl_pro_ds.crypto.data import deribit_options_loader as dol  # noqa: E402
-from finrl_pro_ds.crypto.data import options_array_builder as oab  # noqa: E402
-from finrl_pro_ds.crypto.envs.options_vol_harvest_env import OptionsVolHarvestEnv  # noqa: E402
+from sharpen.crypto.data import deribit_options_loader as dol  # noqa: E402
+from sharpen.crypto.data import options_array_builder as oab  # noqa: E402
+from sharpen.crypto.envs.options_vol_harvest_env import OptionsVolHarvestEnv  # noqa: E402
 
 logger = logging.getLogger("options_vol_pipeline")
 

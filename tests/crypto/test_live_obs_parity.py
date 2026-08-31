@@ -14,8 +14,8 @@ from datetime import datetime, timezone
 import numpy as np
 import pandas as pd
 
-from finrl_pro_ds.crypto.live.live_obs_builder import LiveObsBuilder
-from finrl_pro_ds.data.multiscale_handler import (
+from sharpen.crypto.live.live_obs_builder import LiveObsBuilder
+from sharpen.data.multiscale_handler import (
     MultiScaleOHLCVHandler,
 )
 

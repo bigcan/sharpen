@@ -1,4 +1,4 @@
-# DeepScalper (FinRL-Pro_DS) — Gemini Instructional Context
+# Sharpen — Gemini Instructional Context
 
 This document provides foundational mandates and technical specifications for Gemini CLI when working on the **DeepScalper** project.
 

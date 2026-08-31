@@ -1,7 +1,7 @@
 # Crucible — deep design + implementation audit (2026-07-29)
 
 **Scope:** the whole Crucible discovery machine on `July2026` @ `af32b797`, system version `crucible-v5.0`
-(`finrl_pro_ds/crucible/**`, `finrl_pro_ds/signals/**`, `scripts/research/crucible_*.py`,
+(`sharpen/crucible/**`, `sharpen/signals/**`, `scripts/research/crucible_*.py`,
 `configs/crucible_*.gates.yaml`), plus the lifetime run record in
 `results/crucible_orchestrator/**`.
 
@@ -36,7 +36,7 @@ Read directly from `results/crucible_orchestrator/**/{trial_ledger,orchestrator,
 ### 1.1 Per-leg pass rates on the 170 scored candidates
 
 `combination_fitness(...).passes_gate` is a 6-way AND
-(`finrl_pro_ds/signals/generation/fitness.py:396`).
+(`sharpen/signals/generation/fitness.py:396`).
 
 | Leg | Threshold | Observed range | **Pass** |
 |---|---|---|---|
@@ -228,7 +228,7 @@ corrected contract and a false discovery once the seals are dropped.
 
 ## 4. The fix that already exists and is wired to nothing
 
-`finrl_pro_ds/crucible/corrected_contract.py` implements exactly the right replacement:
+`sharpen/crucible/corrected_contract.py` implements exactly the right replacement:
 
 - **Significance:** the **Jobson–Korkie–Memmel** Sharpe-difference z on the full panel
   (`_sharpe_diff_z`, Memmel 2003 paired variance). This is the correct statistic — it tests
@@ -442,7 +442,7 @@ originally stated.
 
 ### U4 — Give the search a memory  *(SHIPPED — `crucible-v10.0`, 2026-07-30)*
 
-*Implemented as `finrl_pro_ds/crucible/search_memory.py`. The first bullet below was implemented in a
+*Implemented as `sharpen/crucible/search_memory.py`. The first bullet below was implemented in a
 DIFFERENT form than proposed, deliberately: writing `NO_GO` on any decisive rejection would kill families
 off tests that had no power to falsify anything (at MDE 1.4 vs a 0.10 floor, that is every test today).
 Instead a rejection is classified `DECISIVE` / `UNDERPOWERED` in its own nullable ledger column — the

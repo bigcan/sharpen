@@ -9,7 +9,7 @@
 In this repo `ppo_gae` = standard PPO with Generalized Advantage Estimation (the Stable-Baselines3 `PPO`, used only in the Sync-1H crypto pipeline). "PPO-GAE is not an advanced variant — GAE is PPO's default advantage estimator" (`.agent/artifacts/ppo_research.md`). The legacy in-repo PPO (`agents/ppo_scalper`) is **Discrete(6)-only** and incompatible with gmgp1-btc's V7 `ContinuousSwingEnv` (`Box(-1,1)`). So this required a new **continuous PPO** on the V7 contract.
 
 ## 2. Apples-to-apples design
-A new module `finrl_pro_ds/agents/ppo_continuous/` was built so the **only** changed variable vs SAC is the RL algorithm:
+A new module `sharpen/agents/ppo_continuous/` was built so the **only** changed variable vs SAC is the RL algorithm:
 - **Actor = `SACActorNetwork` verbatim** (same `MultiScaleEncoder`, same tanh-squashed diagonal Gaussian over `Box(-1,1)`) → architecture-identical policy to SAC.
 - **Critic = state-value `V(s)`** on a separate `MultiScaleEncoder` (standard PPO; no twin-Q, no action input).
 - Same de-leaked + cost-corrected data (`btc_usdt_1min_bybit.parquet`, taker 5.5 bps + slippage 5 bps), same V7 env, same encoder geometry, same backtest engine / PF math, same 4 WF OOS windows the SAC verdict used.
@@ -60,6 +60,6 @@ Best PPO (lr 3e-4, ent 0.01): WF median PF **0.9934**, test 1.014. Per-window de
 **No escalation** to full HPO+WF (gate not met). **Do not** add PPO to the active agent set for directional single-asset BTC. The strategic conclusion is unchanged: directional single-asset multiscale on BTC has no edge; the path forward remains the relative-value/TSMOM book, not a new RL algorithm on the same dead signal.
 
 ## 7. Artifacts
-- Code: `finrl_pro_ds/agents/ppo_continuous/`, `finrl_pro_ds/training/ppo_continuous_trainer.py`, `scripts/research/ppo_ge_gmgp1_btc_screen.py`, `configs/gmgp1_btc_ppoge_screen.yaml`, `tests/ppo_continuous/test_ppo_continuous.py`
+- Code: `sharpen/agents/ppo_continuous/`, `sharpen/training/ppo_continuous_trainer.py`, `scripts/research/ppo_ge_gmgp1_btc_screen.py`, `configs/gmgp1_btc_ppoge_screen.yaml`, `tests/ppo_continuous/test_ppo_continuous.py`
 - Results: `results/ppo_ge_gmgp1_btc/ppoge_gmgp1_btc_{A,B,C,D}_*.json` (4 configs)
 - SAC baseline: `results/gmgp1_btc_canary_costcorr_wf/verdict.json`

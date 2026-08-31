@@ -27,7 +27,7 @@ class TestAlphaSeekReplayBuffer:
     """Test GPU replay buffer round-trip and shapes."""
 
     def _make_buffer(self, max_size=100, num_seqs=4, state_dim=10, action_dim=1):
-        from finrl_pro_ds.alphaseek.replay_buffer import AlphaSeekReplayBuffer
+        from sharpen.alphaseek.replay_buffer import AlphaSeekReplayBuffer
 
         return AlphaSeekReplayBuffer(
             max_size=max_size,
@@ -94,7 +94,7 @@ class TestAlphaSeekReplayBuffer:
 
 class TestAlphaSeekAgentConfig:
     def test_from_dict(self):
-        from finrl_pro_ds.alphaseek.agents import AlphaSeekAgentConfig
+        from sharpen.alphaseek.agents import AlphaSeekAgentConfig
 
         cfg = AlphaSeekAgentConfig.from_dict({
             "learning_rate": 1e-5,
@@ -106,13 +106,13 @@ class TestAlphaSeekAgentConfig:
         assert cfg.gamma == 0.99
 
     def test_from_dict_list_net_dims(self):
-        from finrl_pro_ds.alphaseek.agents import AlphaSeekAgentConfig
+        from sharpen.alphaseek.agents import AlphaSeekAgentConfig
 
         cfg = AlphaSeekAgentConfig.from_dict({"net_dims": [256, 256]})
         assert cfg.net_dims == (256, 256)
 
     def test_defaults(self):
-        from finrl_pro_ds.alphaseek.agents import AlphaSeekAgentConfig
+        from sharpen.alphaseek.agents import AlphaSeekAgentConfig
 
         cfg = AlphaSeekAgentConfig()
         assert cfg.state_dim == 10
@@ -128,7 +128,7 @@ class TestAlphaSeekAgents:
     """Test agent construction and forward pass with synthetic data."""
 
     def _make_agent(self, agent_cls_name="DoubleDQN", num_envs=4):
-        from finrl_pro_ds.alphaseek.agents import AGENT_MAP, AlphaSeekAgentConfig
+        from sharpen.alphaseek.agents import AGENT_MAP, AlphaSeekAgentConfig
 
         agent_class = AGENT_MAP[agent_cls_name]
         cfg = AlphaSeekAgentConfig(
@@ -208,12 +208,12 @@ class TestAlphaSeekTrainer:
     """Integration tests with real LOB data. Small configs for speed."""
 
     def _make_trainer(self, agent_name="DoubleDQN", num_sims=4):
-        from finrl_pro_ds.alphaseek.agents import AGENT_MAP
-        from finrl_pro_ds.alphaseek.lob_trade_simulator import (
+        from sharpen.alphaseek.agents import AGENT_MAP
+        from sharpen.alphaseek.lob_trade_simulator import (
             EvalLOBTradeSimulator,
             LOBTradeSimulator,
         )
-        from finrl_pro_ds.alphaseek.trainer import AlphaSeekTrainer
+        from sharpen.alphaseek.trainer import AlphaSeekTrainer
 
         agent_class = AGENT_MAP[agent_name]
         train_sim = LOBTradeSimulator(
@@ -288,7 +288,7 @@ class TestSegmentFilter:
     """Test LOBTradeSimulator segment_filter and get_segment_info."""
 
     def test_get_segment_info(self):
-        from finrl_pro_ds.alphaseek.lob_trade_simulator import LOBTradeSimulator
+        from sharpen.alphaseek.lob_trade_simulator import LOBTradeSimulator
 
         info = LOBTradeSimulator.get_segment_info(LOB_PARQUET)
         assert "segment_id" in info.columns
@@ -297,7 +297,7 @@ class TestSegmentFilter:
         assert len(info) > 0
 
     def test_segment_filter_reduces_data(self):
-        from finrl_pro_ds.alphaseek.lob_trade_simulator import LOBTradeSimulator
+        from sharpen.alphaseek.lob_trade_simulator import LOBTradeSimulator
 
         info = LOBTradeSimulator.get_segment_info(LOB_PARQUET)
         all_segs = info["segment_id"].tolist()

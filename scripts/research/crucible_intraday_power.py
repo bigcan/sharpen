@@ -55,14 +55,14 @@ from scripts.research.crucible_calibration import (  # noqa: E402
     _planted_panel,
     load_calib,
 )
-from finrl_pro_ds.crucible.corrected_contract import (  # noqa: E402
+from sharpen.crucible.corrected_contract import (  # noqa: E402
     CorrectedConfig,
     corrected_contract_fitness,
     fresh_lord_level,
 )
-from finrl_pro_ds.crucible.orchestrator.substrate import _power_holdout_bars  # noqa: E402
-from finrl_pro_ds.signals.generation.evolve import _overlay_returns  # noqa: E402
-from finrl_pro_ds.signals.generation.fitness import _combined_book, combination_fitness  # noqa: E402
+from sharpen.crucible.orchestrator.substrate import _power_holdout_bars  # noqa: E402
+from sharpen.signals.generation.evolve import _overlay_returns  # noqa: E402
+from sharpen.signals.generation.fitness import _combined_book, combination_fitness  # noqa: E402
 
 log = logging.getLogger("crucible_intraday_power")
 

@@ -3,7 +3,7 @@
 import numpy as np
 import pandas as pd
 
-from finrl_pro_ds.alphaseek.feature_engine import (
+from sharpen.alphaseek.feature_engine import (
     N_DEPTH_LEVELS,
     AlphaSeekFeatureEngine,
     _ema_zscore_tanh,

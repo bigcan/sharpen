@@ -10,7 +10,7 @@ from __future__ import annotations
 import numpy as np
 import pytest
 
-from finrl_pro_ds.crucible.data import (
+from sharpen.crucible.data import (
     CftcCotConnector,
     FredConnector,
     SeriesRef,
@@ -18,8 +18,8 @@ from finrl_pro_ds.crucible.data import (
     build_feature_slots,
     is_valid_terminal,
 )
-from finrl_pro_ds.signals.features import Panel
-from finrl_pro_ds.signals.generation.dsl_signal import eval_on_panel
+from sharpen.signals.features import Panel
+from sharpen.signals.generation.dsl_signal import eval_on_panel
 
 # Business-day bar calendar spanning the fixtures.
 BARS = np.array([f"2024-01-{d:02d}" for d in (2, 3, 4, 5, 8, 9, 10, 11, 12)], dtype="datetime64[ns]")

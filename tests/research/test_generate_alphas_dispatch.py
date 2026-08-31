@@ -12,9 +12,9 @@ from types import SimpleNamespace
 
 import numpy as np
 
-import finrl_pro_ds.data.cross_asset_panel_loader as cpl
-import finrl_pro_ds.data.taiwan_panel_loader as tpl
-import finrl_pro_ds.signals.generation.base_sleeves as bs
+import sharpen.data.cross_asset_panel_loader as cpl
+import sharpen.data.taiwan_panel_loader as tpl
+import sharpen.signals.generation.base_sleeves as bs
 import scripts.research.generate_alphas as ga
 
 ROOT = Path(__file__).resolve().parents[2]

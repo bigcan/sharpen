@@ -22,8 +22,8 @@ import numpy as np
 import pandas as pd
 import pytest
 
-from finrl_pro_ds.data.multiscale_handler import MultiScaleOHLCVHandler
-from finrl_pro_ds.envs.continuous_swing_env import ContinuousSwingEnv
+from sharpen.data.multiscale_handler import MultiScaleOHLCVHandler
+from sharpen.envs.continuous_swing_env import ContinuousSwingEnv
 
 _SCALES = [15, 60, 240]
 _WINDOW = 30

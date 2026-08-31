@@ -44,7 +44,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 import xsec_momentum_falsification as mom  # noqa: E402
 
-from finrl_pro_ds.features import defensive_signals as dfs  # noqa: E402
+from sharpen.features import defensive_signals as dfs  # noqa: E402
 
 logger = logging.getLogger("tailwind_sizing_null_lab")
 

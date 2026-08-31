@@ -13,7 +13,7 @@ from math import comb
 
 import numpy as np
 
-from finrl_pro_ds.signals import (
+from sharpen.signals import (
     Gates,
     SignalSpec,
     bh_fdr,
@@ -22,8 +22,8 @@ from finrl_pro_ds.signals import (
     evaluate_batch,
     to_json,
 )
-from finrl_pro_ds.signals.eval_harness import _contiguous_runs, tier3_5_cpcv
-from finrl_pro_ds.signals.features import Panel
+from sharpen.signals.eval_harness import _contiguous_runs, tier3_5_cpcv
+from sharpen.signals.features import Panel
 
 
 # ----------------------------------------------------- shared fixtures ----
@@ -183,7 +183,7 @@ def test_cpcv_matches_reference_purge_implementation() -> None:
     fails — locking the production code, not just the invariant."""
     from itertools import combinations
 
-    from finrl_pro_ds.signals.eval_harness import _ann_sharpe, _ls_weights, _neutralized_eff
+    from sharpen.signals.eval_harness import _ann_sharpe, _ls_weights, _neutralized_eff
 
     panel = _momentum_panel(t=420, n=30)
     h, emb, G, k = 3, 4, 6, 2

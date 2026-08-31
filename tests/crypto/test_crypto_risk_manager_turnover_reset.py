@@ -32,7 +32,7 @@ from datetime import datetime, timedelta, timezone
 import numpy as np
 import pytest
 
-from finrl_pro_ds.crypto.mlops.crypto_risk_manager import (
+from sharpen.crypto.mlops.crypto_risk_manager import (
     CryptoRiskConfig,
     CryptoRiskManager,
 )

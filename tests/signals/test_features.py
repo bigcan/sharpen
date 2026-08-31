@@ -5,8 +5,8 @@ import dataclasses
 
 import numpy as np
 
-from finrl_pro_ds.signals import cross_sectional_ic
-from finrl_pro_ds.signals.features import (
+from sharpen.signals import cross_sectional_ic
+from sharpen.signals.features import (
     make_synthetic_panel,
     neutralize,
     ohlc_violations,

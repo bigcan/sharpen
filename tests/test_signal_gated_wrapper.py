@@ -158,21 +158,21 @@ class TestSignalGatedWrapper:
     """Tests for the SignalGatedWrapper."""
 
     def test_wrapper_creates_successfully(self, env, gate_config):
-        from finrl_pro_ds.envs.signal_gated_wrapper import SignalGatedWrapper
+        from sharpen.envs.signal_gated_wrapper import SignalGatedWrapper
         wrapped = SignalGatedWrapper(env, gate_config)
         assert wrapped is not None
         assert wrapped.action_space == env.action_space
         assert wrapped.observation_space == env.observation_space
 
     def test_reset_returns_valid_obs(self, env, gate_config):
-        from finrl_pro_ds.envs.signal_gated_wrapper import SignalGatedWrapper
+        from sharpen.envs.signal_gated_wrapper import SignalGatedWrapper
         wrapped = SignalGatedWrapper(env, gate_config)
         obs, info = wrapped.reset()
         assert isinstance(obs, dict)
         assert "scale_0" in obs or "private" in obs
 
     def test_step_returns_valid_output(self, env, gate_config):
-        from finrl_pro_ds.envs.signal_gated_wrapper import SignalGatedWrapper
+        from sharpen.envs.signal_gated_wrapper import SignalGatedWrapper
         wrapped = SignalGatedWrapper(env, gate_config)
         wrapped.reset()
         action = np.array([0.5], dtype=np.float32)
@@ -184,7 +184,7 @@ class TestSignalGatedWrapper:
 
     def test_gate_skips_bars(self, env, gate_config):
         """Verify that the wrapper skips some bars (gate_skipped_bars > 0)."""
-        from finrl_pro_ds.envs.signal_gated_wrapper import SignalGatedWrapper
+        from sharpen.envs.signal_gated_wrapper import SignalGatedWrapper
         wrapped = SignalGatedWrapper(env, gate_config)
         wrapped.reset()
 
@@ -201,7 +201,7 @@ class TestSignalGatedWrapper:
 
     def test_max_hold_bars_respected(self, env, gate_config):
         """Gate should force open after max_hold_bars consecutive skips."""
-        from finrl_pro_ds.envs.signal_gated_wrapper import SignalGatedWrapper
+        from sharpen.envs.signal_gated_wrapper import SignalGatedWrapper
 
         # Set very high thresholds so gate is almost always closed
         gate_config["atr_threshold"] = 100.0
@@ -220,7 +220,7 @@ class TestSignalGatedWrapper:
 
     def test_reward_accumulation(self, env, gate_config):
         """Accumulated reward should equal sum of individual bar rewards."""
-        from finrl_pro_ds.envs.signal_gated_wrapper import SignalGatedWrapper
+        from sharpen.envs.signal_gated_wrapper import SignalGatedWrapper
         gate_config["normalize_accumulated_reward"] = False
 
         wrapped = SignalGatedWrapper(env, gate_config)
@@ -236,7 +236,7 @@ class TestSignalGatedWrapper:
 
     def test_normalize_reward(self, env, gate_config):
         """When normalize=True, reward is divided by (1 + skipped)."""
-        from finrl_pro_ds.envs.signal_gated_wrapper import SignalGatedWrapper
+        from sharpen.envs.signal_gated_wrapper import SignalGatedWrapper
 
         # Run once without normalization
         gate_config["normalize_accumulated_reward"] = False
@@ -262,7 +262,7 @@ class TestSignalGatedWrapper:
 
     def test_obs_shape_unchanged(self, env, gate_config):
         """Observation shapes should not change after wrapping."""
-        from finrl_pro_ds.envs.signal_gated_wrapper import SignalGatedWrapper
+        from sharpen.envs.signal_gated_wrapper import SignalGatedWrapper
         wrapped = SignalGatedWrapper(env, gate_config)
 
         obs_raw, _ = env.reset()
@@ -275,7 +275,7 @@ class TestSignalGatedWrapper:
 
     def test_episode_termination_propagated(self, env, gate_config):
         """Wrapper should propagate terminated/truncated from inner env."""
-        from finrl_pro_ds.envs.signal_gated_wrapper import SignalGatedWrapper
+        from sharpen.envs.signal_gated_wrapper import SignalGatedWrapper
         wrapped = SignalGatedWrapper(env, gate_config)
         wrapped.reset()
 
@@ -292,7 +292,7 @@ class TestSignalGatedWrapper:
 
     def test_hold_action_no_trade(self, env, gate_config):
         """During hold bars, position should not change (deadband catches delta=0)."""
-        from finrl_pro_ds.envs.signal_gated_wrapper import SignalGatedWrapper
+        from sharpen.envs.signal_gated_wrapper import SignalGatedWrapper
 
         # Use high thresholds to force gate closed
         gate_config["atr_threshold"] = 100.0
@@ -314,7 +314,7 @@ class TestSignalGatedWrapper:
 
     def test_passthrough_without_features(self, gate_config):
         """Without handler features, wrapper should be a passthrough."""
-        from finrl_pro_ds.envs.signal_gated_wrapper import SignalGatedWrapper
+        from sharpen.envs.signal_gated_wrapper import SignalGatedWrapper
 
         # Create env normally, then sabotage the wrapper's cached features
         handler = MockHandler(n_bars=200)
@@ -333,7 +333,7 @@ class TestSignalGatedWrapper:
 
     def test_info_augmentation(self, env, gate_config):
         """Info dict should contain gate statistics."""
-        from finrl_pro_ds.envs.signal_gated_wrapper import SignalGatedWrapper
+        from sharpen.envs.signal_gated_wrapper import SignalGatedWrapper
         wrapped = SignalGatedWrapper(env, gate_config)
         wrapped.reset()
 
@@ -347,7 +347,7 @@ class TestSignalGatedWrapper:
 
     def test_gate_modes(self, env):
         """Each gate mode should work without errors."""
-        from finrl_pro_ds.envs.signal_gated_wrapper import SignalGatedWrapper
+        from sharpen.envs.signal_gated_wrapper import SignalGatedWrapper
 
         for mode in ["composite", "atr", "parkinson", "volume", "return"]:
             config = {
@@ -366,7 +366,7 @@ class TestSignalGatedWrapper:
 
     def test_multiple_episodes(self, env, gate_config):
         """Wrapper should handle multiple reset/step cycles."""
-        from finrl_pro_ds.envs.signal_gated_wrapper import SignalGatedWrapper
+        from sharpen.envs.signal_gated_wrapper import SignalGatedWrapper
         wrapped = SignalGatedWrapper(env, gate_config)
 
         for episode in range(3):
@@ -447,7 +447,7 @@ class TestGateTraded01:
 
     def test_trade_on_decision_bar_survives_hold_bars(self, handler):
         """A trade on the decision bar must not be erased by later hold bars."""
-        from finrl_pro_ds.envs.signal_gated_wrapper import SignalGatedWrapper
+        from sharpen.envs.signal_gated_wrapper import SignalGatedWrapper
 
         env = _ScriptedTradeEnv(handler, traded_script=[True] + [False] * 20)
         wrapped = SignalGatedWrapper(env, self._closed_gate_config(max_hold=5))
@@ -467,7 +467,7 @@ class TestGateTraded01:
         The inner env force-flattens regardless of the hold action it is handed,
         so holds are not guaranteed trade-free.
         """
-        from finrl_pro_ds.envs.signal_gated_wrapper import SignalGatedWrapper
+        from sharpen.envs.signal_gated_wrapper import SignalGatedWrapper
 
         env = _ScriptedTradeEnv(handler, traded_script=[False, False, True] + [False] * 20)
         wrapped = SignalGatedWrapper(env, self._closed_gate_config(max_hold=5))
@@ -488,7 +488,7 @@ class TestGateTraded01:
         property of the MOCK, not of the contract -- see
         `test_inner_trades_counts_bars_not_trades`.
         """
-        from finrl_pro_ds.envs.signal_gated_wrapper import SignalGatedWrapper
+        from sharpen.envs.signal_gated_wrapper import SignalGatedWrapper
 
         rng = np.random.RandomState(7)
         script = (rng.rand(400) < 0.35).tolist()
@@ -522,7 +522,7 @@ class TestGateTraded01:
         so a single bar can log up to three trades while `traded` is one bool.
         Pinning this stops the bar count being mistaken for a trade count.
         """
-        from finrl_pro_ds.envs.signal_gated_wrapper import SignalGatedWrapper
+        from sharpen.envs.signal_gated_wrapper import SignalGatedWrapper
 
         env = _ScriptedTradeEnv(handler, traded_script=[True] + [False] * 20)
         env.trades_per_traded_bar = 2      # e.g. deadband move + forced flat
@@ -535,7 +535,7 @@ class TestGateTraded01:
 
     def test_untraded_outer_step_stays_false(self, handler):
         """No trade anywhere in the aggregate must still report False."""
-        from finrl_pro_ds.envs.signal_gated_wrapper import SignalGatedWrapper
+        from sharpen.envs.signal_gated_wrapper import SignalGatedWrapper
 
         env = _ScriptedTradeEnv(handler, traded_script=[False] * 30)
         wrapped = SignalGatedWrapper(env, self._closed_gate_config(max_hold=5))
@@ -624,7 +624,7 @@ class TestGateCausal01:
         }
 
     def _run_to_gate_open(self):
-        from finrl_pro_ds.envs.signal_gated_wrapper import SignalGatedWrapper
+        from sharpen.envs.signal_gated_wrapper import SignalGatedWrapper
 
         h = _PtrHandler(spike_at=self.SPIKE)
         env = _RecordingEnv(h)
@@ -667,7 +667,7 @@ class TestGateCausal01:
         they were off by one and the live strategy traded a different bar set
         than its own backtest.
         """
-        from finrl_pro_ds.envs.signal_gated_wrapper import SignalGatedWrapper
+        from sharpen.envs.signal_gated_wrapper import SignalGatedWrapper
 
         h = _PtrHandler(spike_at=self.SPIKE)
         env = _RecordingEnv(h)

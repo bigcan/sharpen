@@ -27,12 +27,12 @@ from sklearn.ensemble import (  # noqa: E402
 )
 from sklearn.metrics import roc_auc_score  # noqa: E402
 
-from finrl_pro_ds.data.feature_engineering import (  # noqa: E402
+from sharpen.data.feature_engineering import (  # noqa: E402
     MACRO_FEATURE_COLS,
     MICRO_FEATURE_COLS,
     DeepScalperFeatureEngineer,
 )
-from finrl_pro_ds.data.parquet_handler import ParquetDataHandler  # noqa: E402
+from sharpen.data.parquet_handler import ParquetDataHandler  # noqa: E402
 
 # ── Feature subsets ──
 FEV3_NAMES = {

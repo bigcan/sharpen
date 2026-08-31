@@ -5,7 +5,7 @@ Last updated: 2026-06-30
 
 This document instructs AI coding agents working in this repository. It defines persona, workflow, guardrails, quality gates, technique templates, and ready‑to‑run macros tailored to the FinRL Pro scaffold built atop FinRL Podracer.
 
-> **Canonical project state** lives in `CLAUDE.md` (Project Brief) and `.agent/memory/core.md`. Active direction: cross-asset TSMOM (sole live edge) and **Crucible** (`finrl_pro_ds/crucible/`, `crucible-v2.8` — continuous agentic alpha-mining, built on the `finrl_pro_ds/signals/` DSL/eval funnel). Sync-1H and Funding-Arb are **retired/shelved**, not active. (The Polymarket prediction-market research thread has moved to its own repo, `Chiwin-Technology/polymarket-updown-research`.) Treat `CLAUDE.md` + `core.md` as authoritative over this guide.
+> **Canonical project state** lives in `CLAUDE.md` (Project Brief) and `.agent/memory/core.md`. Active direction: cross-asset TSMOM (sole live edge) and **Crucible** (`sharpen/crucible/`, `crucible-v2.8` — continuous agentic alpha-mining, built on the `sharpen/signals/` DSL/eval funnel). Sync-1H and Funding-Arb are **retired/shelved**, not active. (The Polymarket prediction-market research thread has moved to its own repo, `Chiwin-Technology/polymarket-updown-research`.) Treat `CLAUDE.md` + `core.md` as authoritative over this guide.
 
 ## 0. Prime Directive
 
@@ -21,7 +21,7 @@ This document instructs AI coding agents working in this repository. It defines 
 ## Scope & Extension Boundary
 
 - Only modify code under the FinRL Pro extension boundary:
-  - Allowed: `finrl_pro_ds/**`, `tests/**`, `docs/**`, `configs/**`, `README.md`
+  - Allowed: `sharpen/**`, `tests/**`, `docs/**`, `configs/**`, `README.md`
   - Do not modify upstream code: `FinRLPodracer/**`, `Podracer/**`
 - Keep dependencies and Python versions aligned with `pyproject.toml` (Python 3.11+).
 
@@ -31,7 +31,7 @@ This document instructs AI coding agents working in this repository. It defines 
 - Break work into 3–7 clear steps; use the CLI plan tool when non-trivial.
 
 2) Draft
-- Implement changes under `finrl_pro_ds/**` with minimal, targeted diffs.
+- Implement changes under `sharpen/**` with minimal, targeted diffs.
 
 3) Verify (Chain‑of‑Verification; COV)
 - Self-check logic, IO, config paths, and risk/reporting hooks.
@@ -40,7 +40,7 @@ This document instructs AI coding agents working in this repository. It defines 
 - Challenge assumptions: data leakage, non-PIT features, risk breaches, missing reproducibility metadata, noisy metrics.
 
 5) Test
-- Lint: `ruff check finrl_pro_ds`
+- Lint: `ruff check sharpen`
 - Unit/integration: `pytest`
 
 6) Commit
@@ -53,12 +53,12 @@ This document instructs AI coding agents working in this repository. It defines 
   ```bash
   python -m venv .venv && source .venv/bin/activate
   pip install -e .[dev]
-  cp conf/finrl_pro_ds.env.example conf/finrl_pro_ds.env
-  set -a; source conf/finrl_pro_ds.env; set +a
+  cp conf/sharpen.env.example conf/sharpen.env
+  set -a; source conf/sharpen.env; set +a
   ```
 - Lint & test:
   ```bash
-  ruff check finrl_pro_ds && mypy finrl_pro_ds --ignore-missing-imports && pytest
+  ruff check sharpen && mypy sharpen --ignore-missing-imports && pytest
   ```
 - CLI utilities:
   ```bash
@@ -80,7 +80,7 @@ This document instructs AI coding agents working in this repository. It defines 
 
 ## Quality Gates & Training Protocol v2 (Mandatory)
 
-- Extension boundary: No changes outside `finrl_pro_ds/**`, `scripts/`, `configs/`, `tests/`, `docs/`.
+- Extension boundary: No changes outside `sharpen/**`, `scripts/`, `configs/`, `tests/`, `docs/`.
 - Training Protocol v2: All training work MUST follow the staged protocol in `docs/protocol_v2.md` (6 stages: data-prep → hpo → l1-multiseed → walk-forward (+stress) → recent-oos (+compliance) → paper-deploy). Bare `run_full_pipeline.py` without `--stage` is a v2 violation.
 - Reproducibility: Fingerprints persisted; config/dataset hashes present. Off-policy resume requires upstream `outputs.replay_buffer`.
 - Risk: Uses `RiskControlPolicy`; no silent breaches; alerts/logs emitted.
@@ -105,7 +105,7 @@ This document instructs AI coding agents working in this repository. It defines 
 
 - Data: Enforce Point‑in‑Time indexing; embargo LLM-derived features to avoid leakage
 - Rewards: Keep drawdown/transaction cost/slippage penalties configurable
-- Risk: Validate against `finrl_pro_ds/configs/risk_profiles.yaml` via `load_risk_profile`
+- Risk: Validate against `sharpen/configs/risk_profiles.yaml` via `load_risk_profile`
 - Metrics: Favor Sortino/Calmar; provide variance vs. baseline with confidence markers
 
 ## Prompting Technique Templates (10)
@@ -198,7 +198,7 @@ Verify: IO | Configs | Risk | Tests
 
 - “Risk Gate”
 ```text
-Load profile: load_risk_profile(Path("finrl_pro_ds/configs/risk_profiles.yaml"), "default")
+Load profile: load_risk_profile(Path("sharpen/configs/risk_profiles.yaml"), "default")
 Check: capital_at_risk, max_drawdown, leverage → policy.evaluate(...)
 ```
 

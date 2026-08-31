@@ -11,7 +11,7 @@ from __future__ import annotations
 import numpy as np
 import pandas as pd
 
-from finrl_pro_ds.signals.generation.fitness import (
+from sharpen.signals.generation.fitness import (
     FitnessConfig,
     combination_fitness,
 )
@@ -131,7 +131,7 @@ def _long_base() -> dict[str, np.ndarray]:
 def _shipped_cfg() -> FitnessConfig:
     from pathlib import Path
 
-    from finrl_pro_ds.signals.generation.config import load_generation_config
+    from sharpen.signals.generation.config import load_generation_config
     root = Path(__file__).resolve().parents[2]
     cfg, _ = load_generation_config(root / "configs" / "signal_eval.gates.yaml")
     return cfg
@@ -216,7 +216,7 @@ def test_fragility_gate_median_and_frac_wired() -> None:
 def test_dsr_monotone_in_trials_and_observed() -> None:
     """GP7-08: the deflated Sharpe is monotone — stricter with more trials, looser with a higher
     observed Sharpe. Locks the DSR primitive's two key directions (a sign/inequality flip fails)."""
-    from finrl_pro_ds.crypto.eval.statistics import deflated_sharpe_ratio
+    from sharpen.crypto.eval.statistics import deflated_sharpe_ratio
     pool = (0.02 + 0.01 * np.random.default_rng(1).standard_normal(300)).tolist()
     kw = dict(n_obs=1000, skew=0.0, excess_kurt=0.0, periods_per_year=1)
     d_few = deflated_sharpe_ratio(0.06, pool, n_trials=10, **kw)
@@ -246,7 +246,7 @@ def test_cpcv_right_seam_purged() -> None:
     """GP4-05: the right-seam purge (purge_horizon=1) drops boundary indices whose forward return
     reaches into a train group. Each purged path is a strict subset of the un-purged path, and at
     least one index is removed overall. Fails if the right purge is reverted to none."""
-    from finrl_pro_ds.signals.generation.fitness import _cpcv_index_paths
+    from sharpen.signals.generation.fitness import _cpcv_index_paths
     k_len, n_groups, k_test, embargo = 120, 6, 2, 5
     no_purge = _cpcv_index_paths(k_len, n_groups, k_test, embargo, 0)
     purged = _cpcv_index_paths(k_len, n_groups, k_test, embargo, 1)
@@ -280,7 +280,7 @@ def test_gate_discriminates_collinear_and_noise_in_same_regime() -> None:
 # marginal-t/DSR gate legs), letting book-clones own the elite pool. The marginal-t GATE still rejects
 # them, so no verdict is wrong — but the SEARCH wastes its budget breeding clones. The gate-consistent
 # fitness / variance-floor fix is NEXT-2 (a CRU-1 gate-semantics change); this only documents the bug.
-from finrl_pro_ds.signals.generation.fitness import _combined_book  # noqa: E402
+from sharpen.signals.generation.fitness import _combined_book  # noqa: E402
 import pytest  # noqa: E402
 
 

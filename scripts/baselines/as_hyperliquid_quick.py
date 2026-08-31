@@ -24,8 +24,8 @@ import pandas as pd
 ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT))
 
-from finrl_pro_ds.data.fill_model import PriceCrossFillModel
-from finrl_pro_ds.analytics.pyfolio_analyzer import PyfolioAnalyzer
+from sharpen.data.fill_model import PriceCrossFillModel
+from sharpen.analytics.pyfolio_analyzer import PyfolioAnalyzer
 
 
 GAMMAS = [0.01, 0.1, 1.0]

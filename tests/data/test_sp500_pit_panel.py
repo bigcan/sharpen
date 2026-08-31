@@ -10,7 +10,7 @@ import numpy as np
 import pandas as pd
 import pytest
 
-from finrl_pro_ds.data import sp500_pit_panel as pit
+from sharpen.data import sp500_pit_panel as pit
 
 
 # --------------------------------------------------------------------------- #

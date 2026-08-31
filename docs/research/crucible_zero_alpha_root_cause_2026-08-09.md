@@ -53,8 +53,8 @@ Every `orchestrator.db` and `trial_ledger.db` on disk (9 stores):
 ### The binding statistic has never come within 30% of firing
 
 The ledger's `dsr` / `delta_sr_oos` / `marginal_hlz_t` columns are **train-split diagnostics**, not the
-decision — [`loop.py:248-253`](finrl_pro_ds/crucible/agentic/loop.py:248) says so explicitly, and
-[`ledger.py:154`](finrl_pro_ds/crucible/ledger.py:154) documents `delta_sr_oos` as "TRAIN-split CPCV
+decision — [`loop.py:248-253`](sharpen/crucible/agentic/loop.py:248) says so explicitly, and
+[`ledger.py:154`](sharpen/crucible/ledger.py:154) documents `delta_sr_oos` as "TRAIN-split CPCV
 mean ΔSR … **not out-of-sample**". The gate is decided by `corrected_t` in the holdout validation
 block. Pooling every holdout score on disk (n=18 from leg forensics, plus the 8 `us_equity` seeds):
 
@@ -81,7 +81,7 @@ rejects a third of candidates and is not inert. The problem was never a broken e
 
 ### 2.1 Derivation
 
-From [`corrected_contract.py:123-153`](finrl_pro_ds/crucible/corrected_contract.py:123), the
+From [`corrected_contract.py:123-153`](sharpen/crucible/corrected_contract.py:123), the
 Jobson–Korkie–Memmel z is
 
 ```
@@ -170,7 +170,7 @@ evidentiary weight than they appear to.
 
 ### 2.5 One thing checked and *cleared*
 
-[`corrected_contract.py:128-130`](finrl_pro_ds/crucible/corrected_contract.py:128) justifies the design
+[`corrected_contract.py:128-130`](sharpen/crucible/corrected_contract.py:128) justifies the design
 with "ρ≈0.99 … so the MARGINAL comparison is precise." Measured ρ in production is **0.800** (range
 0.506–0.823), and 0.867 in my synthetic — the docstring is simply wrong, because a 3–5 sleeve base book
 necessarily gives a new candidate a large weight. I tested whether this is a power leak: **it is not.**
@@ -183,10 +183,10 @@ is a documentation error, not a defect. Worth correcting; not worth re-litigatin
 
 Even a perfectly powered machine would struggle with what is actually being searched.
 
-* **Terminals are price and volume only.** [`grammar.py:65`](finrl_pro_ds/signals/generation/grammar.py:65):
+* **Terminals are price and volume only.** [`grammar.py:65`](sharpen/signals/generation/grammar.py:65):
   `open, high, low, close, volume, returns, vwap, adv20, adv30, adv60`. Ten OHLCV-derived series.
 * **The default seed bank is 8 formulas.** `_CS_SEED_BANK` in
-  [`proposer.py`](finrl_pro_ds/crucible/agentic/proposer.py) carries 8 entries (1 skipped) drawn from
+  [`proposer.py`](sharpen/crucible/agentic/proposer.py) carries 8 entries (1 skipped) drawn from
   WorldQuant's 101 Alphas — public since 2015, and the single most heavily mined formula set in
   quantitative finance. 92 of the 101 remain unused.
 * **39% of the holdout budget was spent on statistical duplicates.** Because the book is
@@ -204,7 +204,7 @@ Even a perfectly powered machine would struggle with what is actually being sear
   and liquidity proxy.
 * **Alt-data can only act as market timing.** The overlay path collapses the cross-section to one scalar
   per day, so a non-price dataset yields `T` observations instead of `T×N`
-  ([`grammar.py:93-113`](finrl_pro_ds/signals/generation/grammar.py:93) documents this and the partial
+  ([`grammar.py:93-113`](sharpen/signals/generation/grammar.py:93) documents this and the partial
   U3 repair). Notably, the only PROMISING ever recorded in this project came through a per-name
   cross-sectional path — **not** through the miner.
 
@@ -218,7 +218,7 @@ Verified in the ledger, and consistent with the last two sessions' findings:
   dedup matched on `candidate_hash` alone, so unscored rows became permanent dedup keys — a 5-week
   livelock in which ticks reported `promising=0 status=OK exit 0` while accepting 0/8 proposals.
 * **On `us_equity`, 8/8 pre-registered seeds were culled by the train pre-filter**
-  ([`evolve.py:262-285`](finrl_pro_ds/signals/generation/evolve.py:262)), so the binding holdout gate
+  ([`evolve.py:262-285`](sharpen/signals/generation/evolve.py:262)), so the binding holdout gate
   adjudicated zero hypotheses while 8 LORD++ tests were charged. `promising=0` was vacuous. (Re-scoring
   the 8 through the real gate gives 0/8 anyway — best t 0.442 — so nothing is retracted.)
 * **`rejection_class` is NULL on all 559 rows.** The killed-families learning loop has **never fired in
@@ -352,7 +352,7 @@ re-gating on the floor, which is the defect this change removed.
 
 ### ⭐ Finding 5 — that gate is UNREACHABLE: a third instance of the project's signature defect
 
-[`cohort_eval.py:320`](finrl_pro_ds/signals/generation/cohort_eval.py:320):
+[`cohort_eval.py:320`](sharpen/signals/generation/cohort_eval.py:320):
 
 ```python
 if not ev.passes_analytic_floor:
@@ -360,7 +360,7 @@ if not ev.passes_analytic_floor:
 mc = mc_null_pvalue(...)                                                        # line 327 — never reached
 ```
 
-`passes_analytic_floor` ([`cohort.py:441-444`](finrl_pro_ds/signals/generation/cohort.py:441)) requires
+`passes_analytic_floor` ([`cohort.py:441-444`](sharpen/signals/generation/cohort.py:441)) requires
 `dsr_book >= promising_dsr (0.90)` **and** `cohort_hlz_t >= cohort_hlz_t_min (3.0)` — **the same two
 seals that pass 0/170 across the lifetime record.** It is documented as a "CHEAP PRE-FILTER — NOT the
 binding gate" in three separate places, but structurally it is an absolute gate.
@@ -434,7 +434,7 @@ cannot run there**, and this is structural rather than a configuration slip.
 * `build_us_equity_panel()` returns **0 feature slots** (measured, not inferred).
 * The `us_equity` branch of `crucible_orchestrator.py` (≈L218-230) never calls
   `bridge_altdata_feature_slots` — unlike the `cross_asset` and `taiwan` branches, which do.
-* [`loop.py:329-331`](finrl_pro_ds/crucible/agentic/loop.py:329) feeds the cohort **only overlay
+* [`loop.py:329-331`](sharpen/crucible/agentic/loop.py:329) feeds the cohort **only overlay
   specs**: `overlay_formulas = {... if pr.spec.candidate_type == "overlay"}; if not overlay_formulas:
   return [], {}`.
 

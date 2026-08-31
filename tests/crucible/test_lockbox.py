@@ -14,7 +14,7 @@ import numpy as np
 import pandas as pd
 import pytest
 
-from finrl_pro_ds.crucible import (
+from sharpen.crucible import (
     ForwardEvidence,
     IncubationCriterion,
     Lockbox,
@@ -29,13 +29,13 @@ from finrl_pro_ds.crucible import (
     run_orchestrator_tick,
     updated_card,
 )
-from finrl_pro_ds.crucible.agentic.card import DiscoveryCard
-from finrl_pro_ds.crucible.lockbox.lockbox import LockboxEntry, advance
-from finrl_pro_ds.crucible.orchestrator.substrate import PreparedSubstrate
-from finrl_pro_ds.signals.features import Panel
-from finrl_pro_ds.signals.generation.fitness import _CAND, FitnessConfig, _combined_book
-from finrl_pro_ds.signals.generation.evolve import _overlay_returns
-from finrl_pro_ds.signals.eval_harness import _ann_sharpe
+from sharpen.crucible.agentic.card import DiscoveryCard
+from sharpen.crucible.lockbox.lockbox import LockboxEntry, advance
+from sharpen.crucible.orchestrator.substrate import PreparedSubstrate
+from sharpen.signals.features import Panel
+from sharpen.signals.generation.fitness import _CAND, FitnessConfig, _combined_book
+from sharpen.signals.generation.evolve import _overlay_returns
+from sharpen.signals.eval_harness import _ann_sharpe
 
 GATES = "configs/signal_eval.gates.yaml"
 LOCKBOX_GATES = "configs/crucible_lockbox.gates.yaml"
@@ -86,7 +86,7 @@ def _make_card(proposal_ts: str, chash: str = "cand-abc") -> DiscoveryCard:
 
 def test_forward_mask_strictly_excludes_pre_proposal_bars() -> None:
     """Only bars STRICTLY after proposal_ts are in the forward window — the CR-8 boundary."""
-    from finrl_pro_ds.crucible.lockbox.incubation import forward_mask
+    from sharpen.crucible.lockbox.incubation import forward_mask
     _, ts = _base(300)
     p_idx = 200
     proposal = _iso(float(ts[p_idx]))
@@ -98,7 +98,7 @@ def test_forward_mask_strictly_excludes_pre_proposal_bars() -> None:
 
 def test_forward_mask_monotonic_shrink_as_proposal_moves_later() -> None:
     """A later proposal_ts yields a strictly smaller forward window (never re-includes an earlier bar)."""
-    from finrl_pro_ds.crucible.lockbox.incubation import forward_mask
+    from sharpen.crucible.lockbox.incubation import forward_mask
     _, ts = _base(300)
     counts = [int(forward_mask(ts, _iso(float(ts[p]))).sum()) for p in (100, 150, 200, 250)]
     assert counts == sorted(counts, reverse=True)        # strictly non-increasing as proposal moves later
@@ -107,7 +107,7 @@ def test_forward_mask_monotonic_shrink_as_proposal_moves_later() -> None:
 
 def test_forward_mask_accepts_datetime64_and_epoch_axes() -> None:
     """The mask handles both a datetime64 panel axis and a numeric epoch-seconds axis identically."""
-    from finrl_pro_ds.crucible.lockbox.incubation import forward_mask
+    from sharpen.crucible.lockbox.incubation import forward_mask
     _, ts = _base(120)
     proposal = _iso(float(ts[60]))
     dt = pd.to_datetime(ts, unit="s").values.astype("datetime64[ns]")
@@ -125,7 +125,7 @@ def _forward_evidence(panel, base, ts, proposal, cfg):
 def test_forward_evidence_measures_only_forward_marginal_sharpe() -> None:
     """White-box: forward_evidence returns exactly the annualized Sharpe of the marginal book stream
     (b_aug − b_base) restricted to bars strictly after proposal_ts — no pre-proposal bar contributes."""
-    from finrl_pro_ds.crucible.lockbox.incubation import forward_mask
+    from sharpen.crucible.lockbox.incubation import forward_mask
     T = 260
     panel, (base, ts) = _panel(T), _base(T)
     cfg = FitnessConfig(embargo=10)
@@ -274,7 +274,7 @@ def test_incubate_active_isolates_poison_and_counts(tmp_path, monkeypatch) -> No
     poison-pill formula on a drifted panel instead of crashing every future tick for the substrate."""
     from types import SimpleNamespace
 
-    from finrl_pro_ds.crucible.orchestrator import orchestrator as orch
+    from sharpen.crucible.orchestrator import orchestrator as orch
     lb = Lockbox(tmp_path / "lb.db")
     lb._write(_entry(candidate_hash="boom"))          # active_entries orders by hash: boom < stall
     lb._write(_entry(candidate_hash="stall"))

@@ -12,8 +12,8 @@ import json
 import numpy as np
 import pytest
 
-from finrl_pro_ds.crucible.data import assert_asof_join_causal, validate_series
-from finrl_pro_ds.crucible.data.taifex_positioning import TaifexPositioningConnector
+from sharpen.crucible.data import assert_asof_join_causal, validate_series
+from sharpen.crucible.data.taifex_positioning import TaifexPositioningConnector
 
 _BARS = np.arange(np.datetime64("2026-06-01"), np.datetime64("2026-07-15"),
                   np.timedelta64(1, "D")).astype("datetime64[ns]")

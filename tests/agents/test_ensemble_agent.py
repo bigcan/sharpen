@@ -5,7 +5,7 @@ import numpy as np
 import pytest
 import torch
 
-from finrl_pro_ds.agents.sac.ensemble_agent import (
+from sharpen.agents.sac.ensemble_agent import (
     EnsembleAgent,
     _agreement,
     _make_pf_weighted,

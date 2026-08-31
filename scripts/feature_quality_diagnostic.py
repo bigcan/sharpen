@@ -31,7 +31,7 @@ import torch
 import yaml
 
 sys.path.insert(0, os.getcwd())
-from finrl_pro_ds.agents.sac.sac_agent import SACAgent
+from sharpen.agents.sac.sac_agent import SACAgent
 from scripts.run_full_pipeline import make_env
 
 logging.basicConfig(

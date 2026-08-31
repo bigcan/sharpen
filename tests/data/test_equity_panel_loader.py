@@ -4,8 +4,8 @@ from __future__ import annotations
 import numpy as np
 import pandas as pd
 
-from finrl_pro_ds.data.equity_panel_loader import load_sp500_panel
-from finrl_pro_ds.signals.features import ohlc_violations
+from sharpen.data.equity_panel_loader import load_sp500_panel
+from sharpen.signals.features import ohlc_violations
 
 
 def _fake_fetch(assets, start, end):

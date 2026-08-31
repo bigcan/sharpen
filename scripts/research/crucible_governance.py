@@ -25,13 +25,13 @@ ROOT = Path(__file__).resolve().parents[2]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
-from finrl_pro_ds.crucible.governance import (  # noqa: E402
+from sharpen.crucible.governance import (  # noqa: E402
     FileNotifier,
     GovernanceStore,
     card_from_dir,
     scan_and_handoff,
 )
-from finrl_pro_ds.crucible.lockbox.lockbox import Lockbox  # noqa: E402
+from sharpen.crucible.lockbox.lockbox import Lockbox  # noqa: E402
 
 log = logging.getLogger("crucible_governance")
 

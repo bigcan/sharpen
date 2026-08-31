@@ -13,9 +13,9 @@ import pandas as pd
 ROOT = r"C:\FinRL\FinRL-Pro_DS"
 sys.path.insert(0, ROOT)
 
-from finrl_pro_ds.crypto.data import deribit_options_loader as dol
-from finrl_pro_ds.crypto.data import options_array_builder as oab
-from finrl_pro_ds.crypto.options_pricing import (
+from sharpen.crypto.data import deribit_options_loader as dol
+from sharpen.crypto.data import options_array_builder as oab
+from sharpen.crypto.options_pricing import (
     straddle_price, straddle_delta, straddle_vega, ncdf,
 )
 

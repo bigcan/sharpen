@@ -73,7 +73,7 @@ of-costs premium — not a 2019-2025 fluke.
   statistic is the skew/kurtosis-adjusted **PSR ≥ 0.95** (Bailey & López de Prado 2012),
   plus a circular block-bootstrap p(SR≤0) < 0.05 and the same economic gates as stage 1.
 - **Combined 2002-2025:** still carries the stage-1 search ⇒ **DSR deflated at the original
-  N=50** (BLdP 2014, canonical implementation `finrl_pro_ds/crypto/eval/statistics.py`).
+  N=50** (BLdP 2014, canonical implementation `sharpen/crypto/eval/statistics.py`).
   The extension adds observations, not trials.
 - Power check (from stage-1 moments, before extension data): per-cycle SR 0.183, skew −1.17,
   ex-kurt 1.93 ⇒ at n=160 the PSR bar needs per-cycle SR ≳ 0.14 (≈0.49 annualized); if the

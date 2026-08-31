@@ -8,7 +8,7 @@ from __future__ import annotations
 
 import numpy as np
 
-from finrl_pro_ds.signals import (
+from sharpen.signals import (
     bh_fdr,
     block_bootstrap_mean,
     cross_sectional_ic,

@@ -19,7 +19,7 @@
 #
 # Kept as a SEPARATE file so the H=2 record — every existing us_equity verdict — stays byte-identical
 # and reproducible.
-# Substrate = `finrl_pro_ds/crucible/data/us_equity_panel.py`, wired as `panel: us_equity`. Separate
+# Substrate = `sharpen/crucible/data/us_equity_panel.py`, wired as `panel: us_equity`. Separate
 # FILE per ADR-1/CRU-1 so `configs/signal_eval.gates.yaml` keeps its bytes and the frozen gates_hash.
 #
 # ---------------------------------------------------------------------------------------------

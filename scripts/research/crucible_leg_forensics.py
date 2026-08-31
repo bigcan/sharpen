@@ -39,12 +39,12 @@ import numpy as np
 ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT))
 
-from finrl_pro_ds.crucible.corrected_contract import (  # noqa: E402
+from sharpen.crucible.corrected_contract import (  # noqa: E402
     CorrectedConfig,
     corrected_contract_fitness,
     fresh_lord_level,
 )
-from finrl_pro_ds.signals.generation.config import (  # noqa: E402
+from sharpen.signals.generation.config import (  # noqa: E402
     load_generation_config,
     load_generation_meta,
 )
@@ -55,18 +55,18 @@ def build_substrate(cfg, ek, meta):
     panel_kind = meta["panel"]
     base_hold = meta.get("base_hold_horizon") or ek["hold_horizon"]
     if panel_kind == "cross_asset":
-        from finrl_pro_ds.data.cross_asset_panel_loader import load_cross_asset_panel
-        from finrl_pro_ds.signals.generation.base_sleeves import production_base_sleeves
+        from sharpen.data.cross_asset_panel_loader import load_cross_asset_panel
+        from sharpen.signals.generation.base_sleeves import production_base_sleeves
         panel = load_cross_asset_panel(
             "2007-01-01", config_path=ROOT / "configs" / "cross_asset_momentum.yaml")
         base, _ = production_base_sleeves(
             panel, hold_horizon=int(base_hold), cost_bps=ek["cost_bps"], return_components=True)
     else:
-        from finrl_pro_ds.crucible.data.intraday_panel import (
+        from sharpen.crucible.data.intraday_panel import (
             build_fx_majors_panel,
             build_intraday_panel,
         )
-        from finrl_pro_ds.signals.generation.base_sleeves import intraday_base_sleeves
+        from sharpen.signals.generation.base_sleeves import intraday_base_sleeves
         panel = (build_fx_majors_panel() if panel_kind == "intraday_fx"
                  else build_intraday_panel())
         base, _ = intraday_base_sleeves(
@@ -101,7 +101,7 @@ def main() -> int:
     print(f"thresholds: t_min {cc.t_min}, lord {lord:.5f}, uplift_min {cfg.min_combination_uplift}, "
           f"max_base_corr {cfg.max_base_corr}\n")
 
-    from finrl_pro_ds.signals.generation.evolve import _candidate_returns
+    from sharpen.signals.generation.evolve import _candidate_returns
 
     print(f"{'type':<16}{'z':>8}{'p':>9}{'dSR':>8}{'rho':>7}  "
           f"{'t':>2}{'L':>2}{'U':>2}{'F':>2}{'C':>2}  formula")

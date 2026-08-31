@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from finrl_pro_ds.monitoring.kill_file import (
+from sharpen.monitoring.kill_file import (
     REASON_AGREEMENT_DECAY_CRIT,
     REASON_DRIFT_CRIT,
     REASON_LEGACY,

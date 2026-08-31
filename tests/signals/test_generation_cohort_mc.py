@@ -17,19 +17,19 @@ from __future__ import annotations
 import numpy as np
 import pytest
 
-from finrl_pro_ds.signals.eval_harness import _ann_sharpe
-from finrl_pro_ds.signals.generation.cohort import (
+from sharpen.signals.eval_harness import _ann_sharpe
+from sharpen.signals.generation.cohort import (
     CohortConfig,
     _with_redundancy,
     greedy_decorrelated_admission,
     standalone_sharpe_scores,
 )
-from finrl_pro_ds.signals.generation.cohort_mc import (
+from sharpen.signals.generation.cohort_mc import (
     auto_block_length,
     mc_null_pvalue,
     stationary_bootstrap_indices,
 )
-from finrl_pro_ds.signals.generation.fitness import (
+from sharpen.signals.generation.fitness import (
     FitnessConfig,
     _combined_book,
     _per_period_sharpe,

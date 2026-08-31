@@ -18,8 +18,8 @@ import numpy as np
 import pandas as pd
 import pytest
 
-from finrl_pro_ds.data import cross_asset_loader as loader
-from finrl_pro_ds.features import cross_asset_signals as cas
+from sharpen.data import cross_asset_loader as loader
+from sharpen.features import cross_asset_signals as cas
 
 ROOT = Path(__file__).resolve().parents[2]
 ANN = 252

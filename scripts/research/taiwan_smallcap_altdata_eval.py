@@ -2,7 +2,7 @@
 
 Pre-registration: ``docs/research/taiwan_smallcap_altdata_probes_preregistration_2026-07-15.md``.
 Reads the step-1 tidy parquets + the step-2 ``membership.parquet``, builds a
-:class:`finrl_pro_ds.signals.Panel` over the cap-rank 51-250 small/mid band with the THREE
+:class:`sharpen.signals.Panel` over the cap-rank 51-250 small/mid band with the THREE
 alt-data channels injected as causally as-of-aligned ``feature_slots`` (CR-9), and runs the three
 pre-registered signals through the existing deflated 6-tier funnel (``evaluate_batch``) under the
 parallel-pathway gates (``configs/taiwan_smallcap_altdata.gates.yaml``).
@@ -36,8 +36,8 @@ ROOT = Path(__file__).resolve().parents[2]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
-from finrl_pro_ds.crucible.data import taiwan_smallcap_panel as tsp  # noqa: E402
-from finrl_pro_ds.signals import (  # noqa: E402
+from sharpen.crucible.data import taiwan_smallcap_panel as tsp  # noqa: E402
+from sharpen.signals import (  # noqa: E402
     Gates,
     Multiplicity,
     Panel,
@@ -46,7 +46,7 @@ from finrl_pro_ds.signals import (  # noqa: E402
     to_markdown,
     write_scorecard,
 )
-from finrl_pro_ds.signals.spec import SignalSpec  # noqa: E402
+from sharpen.signals.spec import SignalSpec  # noqa: E402
 
 # The panel builder and its causal-alignment helpers moved into the library
 # (crucible/data/taiwan_smallcap_panel.py) when `taiwan_smallcap` was wired as a Crucible substrate,

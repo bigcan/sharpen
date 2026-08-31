@@ -47,7 +47,7 @@ from scripts import sg1_arm_gate_backtest as _sg1_arm  # noqa: E402
 from scripts import sg1_xauusd_ensemble_eval as _sg1_ens  # noqa: E402
 from functools import partial  # noqa: E402
 
-from finrl_pro_ds.config_utils import _prep_backtest_config as _shared_prep  # noqa: E402
+from sharpen.config_utils import _prep_backtest_config as _shared_prep  # noqa: E402
 
 # --- profit-target override -------------------------------------------------
 # Shared `_prep_backtest_config` defaults to `profit_target_pct=10.0` (1000%
@@ -241,7 +241,7 @@ def run_stress(config_path: str, checkpoint_path: str, seed: int,
 
     # Probe supported keys against the continuous swing env source.
     env_source_path = Path(__file__).resolve().parent.parent / \
-        "finrl_pro_ds" / "envs" / "continuous_swing_env.py"
+        "sharpen" / "envs" / "continuous_swing_env.py"
     env_source = env_source_path.read_text(encoding="utf-8") if env_source_path.exists() else ""
 
     def _key_supported(key: str) -> bool:

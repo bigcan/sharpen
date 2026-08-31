@@ -9,10 +9,10 @@ from __future__ import annotations
 
 import pytest
 
-from finrl_pro_ds.crucible import TrialLedger, TrialRecord
-from finrl_pro_ds.crucible.agentic import HypothesisAuthor, LlmProposer
-from finrl_pro_ds.crucible.agentic.llm_proposer import _PROMPT_TEMPLATE_HASH
-from finrl_pro_ds.crucible.agentic.proposer import Proposer
+from sharpen.crucible import TrialLedger, TrialRecord
+from sharpen.crucible.agentic import HypothesisAuthor, LlmProposer
+from sharpen.crucible.agentic.llm_proposer import _PROMPT_TEMPLATE_HASH
+from sharpen.crucible.agentic.proposer import Proposer
 
 _TS = "2026-07-04T00:00:00+00:00"
 # Same forbidden-field sentinel set test_hypothesis_loop.py uses for the CR-1 moat.
@@ -117,8 +117,8 @@ def test_scorer_still_cannot_receive_llm_output_rationale() -> None:
     proposer implementation changes the scorer's signature."""
     import inspect
 
-    from finrl_pro_ds.signals.generation.evolve import evolve
-    from finrl_pro_ds.signals.generation.fitness import combination_fitness
+    from sharpen.signals.generation.evolve import evolve
+    from sharpen.signals.generation.fitness import combination_fitness
 
     for fn in (evolve, combination_fitness):
         params = set(inspect.signature(fn).parameters)
@@ -288,7 +288,7 @@ def test_default_transport_surfaces_http_error_body(monkeypatch) -> None:
     import io
     import urllib.error
 
-    from finrl_pro_ds.crucible.agentic.llm_proposer import _default_transport
+    from sharpen.crucible.agentic.llm_proposer import _default_transport
 
     body_json = b'{"type":"error","error":{"message":"Your credit balance is too low"}}'
 
@@ -309,7 +309,7 @@ def test_context_rendering_uses_only_context_fields() -> None:
     accepts only a context) — this test locks that signature so a future edit can't quietly widen it."""
     import inspect
 
-    from finrl_pro_ds.crucible.agentic.llm_proposer import _render_context
+    from sharpen.crucible.agentic.llm_proposer import _render_context
 
     params = list(inspect.signature(_render_context).parameters)
     assert params == ["context"]

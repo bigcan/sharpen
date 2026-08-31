@@ -48,8 +48,8 @@ import yaml
 
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
 
-from finrl_pro_ds.hpo.env_factory import make_env  # noqa: E402
-from finrl_pro_ds.data.splitter import RollingWindowSplitter  # noqa: E402
+from sharpen.hpo.env_factory import make_env  # noqa: E402
+from sharpen.data.splitter import RollingWindowSplitter  # noqa: E402
 from scripts.sg1_arm_gate_backtest import (  # noqa: E402
     _build_sac_agent,
     _prep_backtest_config,
@@ -423,7 +423,7 @@ def run_wf_ensemble(wf_config_path: str, gates_path: str, device: str,
     # from the GRADED rule's per-fold trajectories and gate it (stress_dd_buffer_pp /
     # stress_leverage_max). A real breach flips OVERALL; an early-terminated fold
     # flags INCOMPLETE_NEEDS_REROLLOUT (never silently passed).
-    from finrl_pro_ds.eval.fixed_lot_stress import compute_stress_subreport  # lazy
+    from sharpen.eval.fixed_lot_stress import compute_stress_subreport  # lazy
     gates_block = gates_cfg.get("gates", {}) or {}
     # Grade the SAME rule _evaluate_gates graded (single source of truth:
     # verdict["graded_rule"] = chosen_rule or top-level gates_cfg["aggregation_rule"]),

@@ -9,9 +9,9 @@ from __future__ import annotations
 
 import numpy as np
 
-from finrl_pro_ds.crucible import DataCatalog
-from finrl_pro_ds.crucible.agentic import DataScout
-from finrl_pro_ds.crucible.data import (
+from sharpen.crucible import DataCatalog
+from sharpen.crucible.agentic import DataScout
+from sharpen.crucible.data import (
     EdgarConnector,
     GdeltConnector,
     Provenance,
