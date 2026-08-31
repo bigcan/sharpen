@@ -36,22 +36,22 @@ import numpy as np
 ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT))
 
-from finrl_pro_ds.crucible.corrected_contract import (  # noqa: E402
+from sharpen.crucible.corrected_contract import (  # noqa: E402
     CorrectedConfig,
     corrected_contract_fitness,
     fresh_lord_level,
 )
-from finrl_pro_ds.crucible.data.us_equity_panel import build_us_equity_panel  # noqa: E402
-from finrl_pro_ds.signals.eval_harness import _ann_sharpe, _ls_weights  # noqa: E402
-from finrl_pro_ds.signals.generation.base_sleeves import (  # noqa: E402
+from sharpen.crucible.data.us_equity_panel import build_us_equity_panel  # noqa: E402
+from sharpen.signals.eval_harness import _ann_sharpe, _ls_weights  # noqa: E402
+from sharpen.signals.generation.base_sleeves import (  # noqa: E402
     _book_from_target_weights,
     us_equity_base_sleeves,
 )
-from finrl_pro_ds.signals.generation.config import (  # noqa: E402
+from sharpen.signals.generation.config import (  # noqa: E402
     load_generation_config,
     load_generation_meta,
 )
-from finrl_pro_ds.signals.generation.evolve import _panel_market_returns  # noqa: E402
+from sharpen.signals.generation.evolve import _panel_market_returns  # noqa: E402
 
 
 def _null_candidate(panel, rng, *, hold_horizon, cost_bps, ls_min_names, fwd):

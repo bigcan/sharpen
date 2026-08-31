@@ -3,7 +3,7 @@
 Usage
 -----
     python scripts/research/eval_signals.py --batch demo01 \
-        [--registry finrl_pro_ds.signals.library.demo] \
+        [--registry sharpen.signals.library.demo] \
         [--panel synthetic[:T,N] | parquet:PATH | sharadar] \
         [--gates configs/signal_eval.gates.yaml] [--out results/signal_eval/<batch>]
 
@@ -30,7 +30,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT))  # runnable uninstalled, from any CWD
 
-from finrl_pro_ds.signals import (  # noqa: E402  (after sys.path bootstrap)
+from sharpen.signals import (  # noqa: E402  (after sys.path bootstrap)
     Gates,
     HypothesisLedger,
     Multiplicity,
@@ -40,7 +40,7 @@ from finrl_pro_ds.signals import (  # noqa: E402  (after sys.path bootstrap)
     to_markdown,
     write_scorecard,
 )
-from finrl_pro_ds.signals.features import Panel  # noqa: E402
+from sharpen.signals.features import Panel  # noqa: E402
 DEFAULT_GATES = ROOT / "configs" / "signal_eval.gates.yaml"
 
 
@@ -55,7 +55,7 @@ def build_panel(spec: str) -> Panel:
         return make_synthetic_panel(T=t, N=n, seed=0)
     if spec.startswith("sp500"):
         # sp500 | sp500:2015-01-01 | sp500:2015-01-01:2026-06-01 | sp500:2015-01-01::120
-        from finrl_pro_ds.data.equity_panel_loader import load_sp500_panel
+        from sharpen.data.equity_panel_loader import load_sp500_panel
         parts = spec.split(":")[1:]
         start = parts[0] if len(parts) > 0 and parts[0] else "2010-01-01"
         end = parts[1] if len(parts) > 1 and parts[1] else None
@@ -72,7 +72,7 @@ def build_panel(spec: str) -> Panel:
 def main(argv: list[str] | None = None):
     ap = argparse.ArgumentParser(description="Evaluate + rank candidate signals.")
     ap.add_argument("--batch", required=True, help="batch name (output subdir)")
-    ap.add_argument("--registry", default="finrl_pro_ds.signals.library.demo",
+    ap.add_argument("--registry", default="sharpen.signals.library.demo",
                     help="module exposing SIGNALS: list[Signal]")
     ap.add_argument("--panel", default="synthetic", help="synthetic[:T,N] | parquet:PATH | sharadar")
     ap.add_argument("--gates", default=None, help="gates YAML (default: configs/signal_eval.gates.yaml)")

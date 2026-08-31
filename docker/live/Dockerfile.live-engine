@@ -63,7 +63,7 @@ COPY docker/live/prism_sdk/ /tmp/prism_sdk/
 RUN pip install /tmp/prism_sdk/ && rm -rf /tmp/prism_sdk/
 
 # ---- Application layer ----
-COPY finrl_pro_ds /app/finrl_pro_ds
+COPY sharpen /app/sharpen
 COPY scripts /app/scripts
 COPY configs /app/configs
 # v2.2 §8.2 live-monitoring baselines (seed_report.json + ensemble_report.json
@@ -72,7 +72,7 @@ COPY configs /app/configs
 COPY baselines /app/baselines
 # v2.3 atomic-swap bundles (ensemble_v{N}.tar.gz + .sha256 per workstream).
 # Baked so a strategy swap = one image rebuild + container bounce; the
-# swap-approval handshake (finrl_pro_ds.live.swap_handshake) gates the load
+# swap-approval handshake (sharpen.live.swap_handshake) gates the load
 # against the operator's last-bundle sentinel.
 COPY bundles /app/bundles
 # sg1-xauusd VS v2 Phase 2 fold7 ensemble ckpts (S543, 2026-05-20). Baked

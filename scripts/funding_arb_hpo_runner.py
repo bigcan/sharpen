@@ -39,7 +39,7 @@ import pandas as pd
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(PROJECT_ROOT))
 
-from finrl_pro_ds.crypto.data.crypto_array_builder import (  # noqa: E402
+from sharpen.crypto.data.crypto_array_builder import (  # noqa: E402
     build_funding_arb_arrays,
 )
 from scripts.funding_arb_runner import (  # noqa: E402
@@ -155,7 +155,7 @@ def _make_dsac_agent(env, config: dict, agent_params: dict, dsac_params: dict):
     config — which is the OPT regression wl7ir7ia exhibited (SPS=50).
     """
     import torch
-    from finrl_pro_ds.agents.sac.dsac_agent import DistributionalSACAgent
+    from sharpen.agents.sac.dsac_agent import DistributionalSACAgent
 
     obs_dim = env.observation_space.shape[0]
     action_dim = env.action_space.shape[0]
@@ -347,7 +347,7 @@ def hpo_objective(
     - ``"calmar"``: Calmar ratio (annualized return / max drawdown).
     - ``"sortino"``: Sortino ratio.
     """
-    from finrl_pro_ds.crypto.eval.statistics import calmar_ratio, sortino_ratio
+    from sharpen.crypto.eval.statistics import calmar_ratio, sortino_ratio
 
     hpo_cfg = config.get("hpo", {})
     objective_name = hpo_cfg.get("objective", "total_return")
@@ -831,7 +831,7 @@ def main():
     try:
         import wandb
         if not os.environ.get("WANDB_DISABLED"):
-            from finrl_pro_ds.utils.naming import generate_run_name
+            from sharpen.utils.naming import generate_run_name
             run_name = args.run_name or generate_run_name(args.config or "funding_arb_hpo")
             is_dist = config.get("agents", {}).get("sac", {}).get("distributional", False)
             agent_tag = "dsac" if is_dist else "sac"

@@ -28,7 +28,7 @@ sys.path.append(os.getcwd())
 PROJECT_ROOT = Path(os.getcwd())
 DEPLOY_EXCLUDES = [
     'mlruns', 'logs', 'wandb', 'results', 'checkpoints', '.git', '.venv', 'venv', '__pycache__',
-    'market_data.parquet', 'btc_lob_jan2023.parquet', 'finrl_pro_ds.egg-info', # Exclude massive data & stale metadata
+    'market_data.parquet', 'btc_lob_jan2023.parquet', 'sharpen.egg-info', 'finrl_pro_ds.egg-info', # Exclude massive data & stale metadata
     'hpo.db', 'hpo.db-journal', # Exclude local HPO state to prevent overwriting remote clean start
     # Training deploys never read these — they bloated the package to ~201MB and
     # were timing out the SFTP upload (EOFError) to the gpuhub link. bundles/ =
@@ -57,11 +57,11 @@ def _resolve_with_overlays(base_path: Path, overlay_specs: list) -> Path:
     resolved config *relative to PROJECT_ROOT* (so the remote script sees
     the same path after unzip).
 
-    Merge semantics live in :func:`finrl_pro_ds.config_utils.apply_overlays`
+    Merge semantics live in :func:`sharpen.config_utils.apply_overlays`
     so the live runners (run_live_ctrader / etc.) apply the same allowlist
     enforcement at container boot.
     """
-    from finrl_pro_ds.config_utils import apply_overlays
+    from sharpen.config_utils import apply_overlays
 
     with base_path.open("r", encoding="utf-8") as f:
         base_cfg = yaml.safe_load(f) or {}
@@ -187,7 +187,7 @@ def deploy(args):
     # per-seed uniqueness to avoid concurrent processes clobbering
     # checkpoints/<run_name>/ when they share a second-level timestamp).
     # Fallback: derive from config filename.
-    from finrl_pro_ds.utils.naming import generate_run_name, validate_run_name
+    from sharpen.utils.naming import generate_run_name, validate_run_name
     if args.run_name:
         validate_run_name(args.run_name, raise_on_fail=True)
         full_run_name = args.run_name
@@ -312,13 +312,13 @@ def deploy(args):
         f"{'rm -f hpo.db* && echo STEP: WIPE HPO DB' if args.fresh_hpo else 'echo STEP: RETAIN HPO DB'}",
         "echo 'STEP: UNINSTALL'",
         # CRITICAL: Clean everything to avoid stale deps
-        "/root/miniconda3/bin/pip uninstall finrl-pro-ds -y || true",
-        "rm -rf finrl_pro_ds.egg-info build dist",
+        "/root/miniconda3/bin/pip uninstall sharpen finrl-pro-ds -y || true",
+        "rm -rf sharpen.egg-info finrl_pro_ds.egg-info build dist",
         "echo 'STEP: UNZIP'",
         f"unzip -o {zip_name}",
         f"rm -f {zip_name}",
-        # Verify setup.py content
-        "grep -C 2 'install_requires' setup.py || echo 'setup.py missing'",
+        # Verify packaging metadata arrived (pyproject is the sole source since setup.py was removed)
+        "grep -C 2 'dependencies' pyproject.toml || echo 'WARN: pyproject.toml missing'",
         "echo 'STEP: INSTALL REQS'",
         # Base Image is PyTorch 2.8.0 + CUDA 12.8
         "/root/miniconda3/bin/pip install -q --upgrade -r requirements.txt",

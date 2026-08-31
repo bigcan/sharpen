@@ -26,11 +26,11 @@ import numpy as np
 print(f'NumPy: {np.__version__}')
 
 print('Test 5: feature engineering import')
-from finrl_pro_ds.data.feature_engineering import FeatureEngineer
+from sharpen.data.feature_engineering import FeatureEngineer
 print('OK')
 
 print('Test 6: ParquetDataHandler')
-from finrl_pro_ds.data.parquet_handler import ParquetDataHandler
+from sharpen.data.parquet_handler import ParquetDataHandler
 handler = ParquetDataHandler(
     'data/processed/btc_2025_full_year_5min.parquet',
     ticker='BTCUSDT',
@@ -40,7 +40,7 @@ handler = ParquetDataHandler(
 print(f'Handler OK: {len(handler.data)} rows')
 
 print('Test 7: env creation')
-from finrl_pro_ds.envs.deep_scalper_env import DeepScalperEnv
+from sharpen.envs.deep_scalper_env import DeepScalperEnv
 cfg = {
     'margin_requirement': 0.05,
     'initial_balance': 100000,

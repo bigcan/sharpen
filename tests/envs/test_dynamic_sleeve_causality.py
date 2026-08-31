@@ -12,7 +12,7 @@ from __future__ import annotations
 import numpy as np
 import pandas as pd
 
-from finrl_pro_ds.envs.allocator_factory import dynamic_sleeve_alphas
+from sharpen.envs.allocator_factory import dynamic_sleeve_alphas
 
 
 def _two_return_series(T=780, seed=5):

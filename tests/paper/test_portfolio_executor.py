@@ -17,8 +17,8 @@ import numpy as np
 import pandas as pd
 import pytest
 
-from finrl_pro_ds.crypto.data.options_array_builder import OptionsPanels
-from finrl_pro_ds.paper import (
+from sharpen.crypto.data.options_array_builder import OptionsPanels
+from sharpen.paper import (
     PortfolioExecutor,
     TwoSleeveExecutor,
     evaluate_paper_soak_gates,

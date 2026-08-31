@@ -21,7 +21,7 @@ import pandas as pd
 ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT))
 
-from finrl_pro_ds.data import fundamentals as fnd  # noqa: E402
+from sharpen.data import fundamentals as fnd  # noqa: E402
 
 OUT = ROOT / "results" / "ballast_v1"
 PANEL = ROOT / "data" / "raw" / "equity_panel" / "_ballast_pit_1996.pkl"

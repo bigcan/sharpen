@@ -18,7 +18,7 @@ import numpy as np
 # S495-cont: crypto-specific PropFirmWrapper retired in favour of the
 # unified PropFirmWrapperV7 adapter (which handles flat Box + Dict obs).
 # Tests preserved to guarantee flat-Box behaviour parity.
-from finrl_pro_ds.envs.prop_firm_wrapper import PropFirmWrapperV7 as PropFirmWrapper
+from sharpen.envs.prop_firm_wrapper import PropFirmWrapperV7 as PropFirmWrapper
 
 
 # ---------------------------------------------------------------------------

@@ -16,12 +16,12 @@ c.connect(
 )
 
 local_path = os.path.join(os.path.dirname(__file__), "..",
-    "finrl_pro_ds", "training", "ppo_trainer.py")
+    "sharpen", "training", "ppo_trainer.py")
 local_path = os.path.abspath(local_path)
 
 targets = [
-    "/workspace/DeepScalper/finrl_pro_ds/training/ppo_trainer.py",
-    "/workspace/DeepScalper_BDQ/finrl_pro_ds/training/ppo_trainer.py",
+    "/workspace/DeepScalper/sharpen/training/ppo_trainer.py",
+    "/workspace/DeepScalper_BDQ/sharpen/training/ppo_trainer.py",
 ]
 
 sftp = c.open_sftp()

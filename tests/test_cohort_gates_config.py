@@ -12,8 +12,8 @@ from pathlib import Path
 import pytest
 import yaml
 
-from finrl_pro_ds.crucible.version import gates_hash
-from finrl_pro_ds.signals.generation.config import (
+from sharpen.crucible.version import gates_hash
+from sharpen.signals.generation.config import (
     load_cohort_config,
     load_generation_config,
 )

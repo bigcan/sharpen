@@ -3,13 +3,13 @@ from __future__ import annotations
 
 import numpy as np
 
-from finrl_pro_ds.signals import Gates, SignalSpec, evaluate_signal, make_synthetic_panel
-from finrl_pro_ds.signals.eval_harness import (
+from sharpen.signals import Gates, SignalSpec, evaluate_signal, make_synthetic_panel
+from sharpen.signals.eval_harness import (
     assert_causal,
     tier0_hygiene,
     tier1_gross_power,
 )
-from finrl_pro_ds.signals.features import Panel
+from sharpen.signals.features import Panel
 
 
 # ---- candidate signals (implement the Signal protocol) ----------------------

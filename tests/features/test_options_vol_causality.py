@@ -13,7 +13,7 @@ import types
 import numpy as np
 import pandas as pd
 
-from finrl_pro_ds.crypto.features import options_vol_features as ovf
+from sharpen.crypto.features import options_vol_features as ovf
 
 
 def _make_raw(n: int = 220, seed: int = 7):

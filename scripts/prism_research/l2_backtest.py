@@ -29,7 +29,7 @@ from scipy import stats
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(PROJECT_ROOT))
 
-from finrl_pro_ds.agents.sac.sac_agent import SACAgent
+from sharpen.agents.sac.sac_agent import SACAgent
 
 logging.basicConfig(
     level=logging.INFO,

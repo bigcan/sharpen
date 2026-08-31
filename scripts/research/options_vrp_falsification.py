@@ -38,10 +38,10 @@ from pathlib import Path
 import numpy as np
 import yaml
 
-from finrl_pro_ds.crypto.data import deribit_options_loader as dol
-from finrl_pro_ds.crypto.data import options_array_builder as oab
-from finrl_pro_ds.crypto.options_pricing import bs_self_test as _bs_selftest, ncdf
-from finrl_pro_ds.crypto.options_vrp_sim import (
+from sharpen.crypto.data import deribit_options_loader as dol
+from sharpen.crypto.data import options_array_builder as oab
+from sharpen.crypto.options_pricing import bs_self_test as _bs_selftest, ncdf
+from sharpen.crypto.options_vrp_sim import (
     ANN,
     SimConfig,
     returns_from_pnl as _returns_from_pnl,

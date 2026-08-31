@@ -49,7 +49,7 @@ import pandas as pd
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-from finrl_pro_ds.reporting import (  # noqa: E402
+from sharpen.reporting import (  # noqa: E402
     DEFAULT_PHASE_SPECS,
     compute_challenge_target_hit_rates,
     compute_eval_distribution,

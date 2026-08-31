@@ -24,7 +24,7 @@ ROOT = Path(__file__).resolve().parents[2]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
-from finrl_pro_ds.crypto.eval.statistics import block_bootstrap_sharpe_ci  # noqa: E402
+from sharpen.crypto.eval.statistics import block_bootstrap_sharpe_ci  # noqa: E402
 
 OOS_COMMODITY = ["IAU", "SGOL", "SIVR", "PPLT", "PALL", "GSG", "DJP", "USCI", "PDBC",
                  "UNG", "BNO", "UGA", "CORN", "WEAT", "SOYB", "CPER"]

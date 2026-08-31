@@ -38,8 +38,8 @@ import pandas as pd
 ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT))
 
-from finrl_pro_ds.data import cross_asset_loader as cal  # noqa: E402
-from finrl_pro_ds.signals.features import Panel  # noqa: E402
+from sharpen.data import cross_asset_loader as cal  # noqa: E402
+from sharpen.signals.features import Panel  # noqa: E402
 
 MEMBERS = ROOT / "data" / "raw" / "equity_panel" / "sp500_pit_members.csv"
 OUTDIR = ROOT / "data" / "raw" / "equity_panel"

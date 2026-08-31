@@ -20,7 +20,7 @@ import sys
 
 import numpy as np
 
-from finrl_pro_ds.crypto.envs.multi_exchange_arb_env import (
+from sharpen.crypto.envs.multi_exchange_arb_env import (
     EnvConfig,
     MultiExchangeArbEnv,
 )

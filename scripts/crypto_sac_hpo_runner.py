@@ -37,11 +37,11 @@ import yaml  # noqa: E402
 
 import torch  # noqa: E402
 import wandb  # noqa: E402
-from finrl_pro_ds.crypto.data.multiscale_crypto_handler import (  # noqa: E402
+from sharpen.crypto.data.multiscale_crypto_handler import (  # noqa: E402
     MultiScaleCryptoHandler,
 )
-from finrl_pro_ds.crypto.envs.crypto_perp_swing_env import CryptoPerpSwingEnv  # noqa: E402
-from finrl_pro_ds.training.sac_trainer import SACTrainer  # noqa: E402
+from sharpen.crypto.envs.crypto_perp_swing_env import CryptoPerpSwingEnv  # noqa: E402
+from sharpen.training.sac_trainer import SACTrainer  # noqa: E402
 
 logger = logging.getLogger(__name__)
 

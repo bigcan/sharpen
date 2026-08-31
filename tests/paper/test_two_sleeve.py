@@ -14,12 +14,12 @@ from __future__ import annotations
 import numpy as np
 import pytest
 
-from finrl_pro_ds.envs.allocator_factory import (
+from sharpen.envs.allocator_factory import (
     combine_sleeve_weights,
     linear_core_trajectory,
     risk_parity_alphas,
 )
-from finrl_pro_ds.paper import (
+from sharpen.paper import (
     ParityHarness,
     TwoSleeveExecutor,
     evaluate_paper_soak_gates,

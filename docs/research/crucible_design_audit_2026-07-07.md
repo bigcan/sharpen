@@ -1,6 +1,6 @@
 # Crucible Design Audit — Tier-2 Full-Platform Review
 
-**Date:** 2026-07-07 · **System:** `crucible-v2.8` (`finrl_pro_ds/crucible/` + `finrl_pro_ds/signals/`) · **Auditor:** Claude Fable 5 (session 553-cont-123)
+**Date:** 2026-07-07 · **System:** `crucible-v2.8` (`sharpen/crucible/` + `sharpen/signals/`) · **Auditor:** Claude Fable 5 (session 553-cont-123)
 **Mode:** READ-ONLY — no repository code changed (this report is the only new file; one inert 0-byte artifact noted in §8).
 **Method:** Tier-2 finder+skeptic architecture adapted to the discovery lifecycle, 11 pillars. Statistical-core pillars (C4 gates, C5 FDR, C10 power, C11 SOTA) audited inline by the main session with direct evidence; code-sweep pillars (C1 data/PIT, C2 substrate, C3 DSL/search, C6 proposer, C7 ledger/moat, C8 lockbox, C9 orchestrator/ops) by 7 bounded finder agents, adjudicated by the main session (verification column per finding: ✓✓ = independently re-verified by the adjudicator this session; ✓ = finder evidence with direct code/DB citations; ? = interpretive claim needing a measurement).
 **Evidence basis:** source at commit `0d997172` (branch `July2026`); run state `results/crucible_orchestrator/{real,taiwan_manual,taiwan_v2}/` (sqlite: trial_ledger.db, orchestrator.db, catalog.db, lockbox.db); calibration artifacts `results/crucible_calibration/*.json` (2026-07-06/07); gates `configs/signal_eval.gates.yaml`, `configs/crucible_{cohort,lockbox,calibration}.gates.yaml`.

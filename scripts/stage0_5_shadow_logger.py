@@ -181,7 +181,7 @@ async def _connect_exchange(mode: str):
         # options ccxt also hits spot-wallet (sapi/v1/capital/config/getall)
         # and cross-margin (sapi/v1/margin/allPairs) endpoints which a
         # read-only key without spot/margin scope cannot reach. Same pattern
-        # used in finrl_pro_ds/crypto/data/crypto_loader.py:86.
+        # used in sharpen/crypto/data/crypto_loader.py:86.
         "options": {
             "defaultType": "swap",
             "defaultSettle": "USDT",

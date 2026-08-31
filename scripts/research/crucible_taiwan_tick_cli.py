@@ -48,7 +48,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT))
 
-from finrl_pro_ds.crucible.agentic import llm_proposer as _llm  # noqa: E402
+from sharpen.crucible.agentic import llm_proposer as _llm  # noqa: E402
 
 _CLI = shutil.which("claude") or r"~\.local\bin\claude"
 _CHILD_CWD = tempfile.gettempdir()  # neutral dir: no project CLAUDE.md / FinRL auto-memory

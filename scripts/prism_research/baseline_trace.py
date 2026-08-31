@@ -28,8 +28,8 @@ import yaml
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(PROJECT_ROOT))
 
-from finrl_pro_ds.agents.sac.sac_agent import SACAgent
-from finrl_pro_ds.analytics.pyfolio_analyzer import PyfolioAnalyzer
+from sharpen.agents.sac.sac_agent import SACAgent
+from sharpen.analytics.pyfolio_analyzer import PyfolioAnalyzer
 
 logging.basicConfig(
     level=logging.INFO,

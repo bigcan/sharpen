@@ -45,7 +45,7 @@ ROOT = Path(__file__).resolve().parents[1]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
-from finrl_pro_ds.eval.sensitivity_audit import (  # noqa: E402
+from sharpen.eval.sensitivity_audit import (  # noqa: E402
     PF_XCHECK_DIVERGENCE_HALT,
     PF_XCHECK_REPORT_ONLY,
     CellResult,

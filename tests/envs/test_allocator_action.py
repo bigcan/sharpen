@@ -9,8 +9,8 @@ from __future__ import annotations
 import numpy as np
 import pandas as pd
 
-from finrl_pro_ds.envs.multi_asset_allocator_env import MultiAssetAllocatorEnv
-from finrl_pro_ds.features import cross_asset_signals as cas
+from sharpen.envs.multi_asset_allocator_env import MultiAssetAllocatorEnv
+from sharpen.features import cross_asset_signals as cas
 
 from .conftest import build_arrays, synthetic_prices
 

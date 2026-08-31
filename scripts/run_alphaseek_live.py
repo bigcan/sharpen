@@ -39,8 +39,8 @@ def load_config(config_path: str) -> dict:
 
 
 async def main(args):
-    from finrl_pro_ds.alphaseek.live_engine import AlphaSeekLiveEngine
-    from finrl_pro_ds.alphaseek.model_registry import ModelRegistry
+    from sharpen.alphaseek.live_engine import AlphaSeekLiveEngine
+    from sharpen.alphaseek.model_registry import ModelRegistry
 
     config = load_config(args.config)
 
@@ -91,13 +91,13 @@ async def main(args):
     sb_type = sb_cfg.get("type", "mock")
 
     if sb_type == "mock" or args.dry_run:
-        from finrl_pro_ds.alphaseek._mock_state_builder import MockStateBuilder
+        from sharpen.alphaseek._mock_state_builder import MockStateBuilder
         state_builder = MockStateBuilder(device=device)
         logging.info("Using MockStateBuilder (dry-run / mock mode)")
     elif sb_type == "live":
-        from finrl_pro_ds.alphaseek.feature_engine import AlphaSeekFeatureEngine
-        from finrl_pro_ds.alphaseek.lob_feed import BybitLOBFeed
-        from finrl_pro_ds.alphaseek.state_builder import AlphaSeekStateBuilder
+        from sharpen.alphaseek.feature_engine import AlphaSeekFeatureEngine
+        from sharpen.alphaseek.lob_feed import BybitLOBFeed
+        from sharpen.alphaseek.state_builder import AlphaSeekStateBuilder
 
         feat_cfg = sb_cfg.get("features", {})
         feature_engine = AlphaSeekFeatureEngine(
@@ -142,7 +142,7 @@ async def main(args):
 
     # --- Broker ---
     if not args.dry_run:
-        from finrl_pro_ds.crypto.execution.exchange_perp_broker import (
+        from sharpen.crypto.execution.exchange_perp_broker import (
             ExchangePerpBroker,
         )
         broker = ExchangePerpBroker(

@@ -29,10 +29,10 @@ logger = logging.getLogger(__name__)
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
 
-from finrl_pro_ds.agents.sac.sac_agent import SACAgent
-from finrl_pro_ds.data.multiscale_handler import MultiScaleOHLCVHandler
-from finrl_pro_ds.envs.continuous_swing_env import ContinuousSwingEnv
-from finrl_pro_ds.envs.signal_gated_wrapper import SignalGatedWrapper
+from sharpen.agents.sac.sac_agent import SACAgent
+from sharpen.data.multiscale_handler import MultiScaleOHLCVHandler
+from sharpen.envs.continuous_swing_env import ContinuousSwingEnv
+from sharpen.envs.signal_gated_wrapper import SignalGatedWrapper
 
 
 def load_config(path: str) -> dict:

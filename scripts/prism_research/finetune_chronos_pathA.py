@@ -5,7 +5,7 @@ comparison. Two reasons this is a NEW project-side script rather than an edit to
 SAFFS `scripts/finetune_chronos.py`:
 
   1. SAFFS is outside this repo's editable boundary (CLAUDE.md: only
-     finrl_pro_ds/scripts/configs/tests/docs).
+     sharpen/scripts/configs/tests/docs).
   2. The SAFFS script is BTC-hardcoded and, more importantly, drives the model via a
      hand-rolled HF `Trainer` whose `model(context=, future_target=)` call predates the
      installed `chronos-forecasting` (the same signature drift that broke

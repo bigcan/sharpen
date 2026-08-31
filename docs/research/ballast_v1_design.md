@@ -45,7 +45,7 @@ A 500-name action head is the wrong shape for SAC anyway — it is high-dimensio
 the index reconstitutes, and it forces the agent to relearn cross-sectional ranking that a
 deterministic, already-audited signal library computes exactly. So:
 
-- **Stock selection is deterministic**, from `finrl_pro_ds/signals/` (causal, T0-tripwired, audited).
+- **Stock selection is deterministic**, from `sharpen/signals/` (causal, T0-tripwired, audited).
 - **RL controls the meta-parameters of portfolio construction** — a ~10-dimensional continuous action.
   This is a control problem RL is actually suited to: state-dependent, path-dependent, with a
   turnover/signal tradeoff no static linear rule can express.
@@ -140,7 +140,7 @@ much* it is wrong, which is the most valuable thing free data can buy here.
 
 ### 2.3 Fundamentals — PIT-correct connector exists; coverage starts ~2009 on free data
 
-`finrl_pro_ds/crucible/data/edgar.py` is a real, tested, PIT-correct SEC XBRL connector: it reads
+`sharpen/crucible/data/edgar.py` is a real, tested, PIT-correct SEC XBRL connector: it reads
 `data.sec.gov/api/xbrl/companyconcept`, carries both the fiscal period `end` and the **`filed`** date,
 uses `release_timestamp = filed + 1 calendar day` (C1-02, closing the after-close same-day look-ahead),
 and replays amendments as revisions through `quality_gate.asof_join`. Keyless; needs `SEC_EDGAR_UA`
@@ -180,7 +180,7 @@ regime is a state the agent has seen rather than a distribution shift at deploym
 
 ### 2.4 Panel contract
 
-Reuse `finrl_pro_ds.signals.features.Panel` unchanged — `(dates, tickers, o,h,l,c,v, active, adv,
+Reuse `sharpen.signals.features.Panel` unchanged — `(dates, tickers, o,h,l,c,v, active, adv,
 sector_id, meta)`. `active[t,i]` = PIT member **and** priced **and** passes a liquidity floor. All
 OHLCV passes `scripts/clean_ohlcv.py` (DATA-CLEAN). `meta.survivorship_free` and
 `meta.unpriceable_dropped` are stamped and **printed in every result artifact** — no result is quoted
@@ -191,7 +191,7 @@ without them.
 ## 3. Layer 1 — deterministic per-name scoring (the linear core)
 
 Six sleeves, each computed causally, then winsorized → cross-sectional z-score → **GICS
-sector-neutralized** → size-neutralized. All reuse `finrl_pro_ds/signals/features.py` primitives.
+sector-neutralized** → size-neutralized. All reuse `sharpen/signals/features.py` primitives.
 
 | # | Sleeve | Inputs | Data | Rationale |
 |---|---|---|---|---|
@@ -253,7 +253,7 @@ r_t = (log R_port,t − log R_spx,t)                 # active return: the object
     − ν · max(0, DD_t − DD_spx,t)                  # asymmetric: only penalize being WORSE than SPY
 ```
 
-Wrapped in the existing `DSRCalculator` (`finrl_pro_ds/envs/dsr.py`) applied to the **active** return
+Wrapped in the existing `DSRCalculator` (`sharpen/envs/dsr.py`) applied to the **active** return
 series, so the shaped objective is a differential *information* ratio. λ, μ, ν are HPO'd once and then
 **locked** (BUG-01). `hindsight_weight = 0.0` in every backtest config (BUG-03).
 
@@ -263,7 +263,7 @@ deliver and what a return-only reward would never find.
 
 ### Env
 
-New class `finrl_pro_ds/envs/sp500_core_allocator_env.py`, generalizing `MultiAssetAllocatorEnv`
+New class `sharpen/envs/sp500_core_allocator_env.py`, generalizing `MultiAssetAllocatorEnv`
 (reuse its fixed-entry-notional PnL, cost stack, gross-cap — SHORT-ACCT-safe paths kept verbatim; the
 short leg is simply unreachable at `w ≥ 0`). Raw numpy dict returns preserved. **Do not modify
 `MultiAssetAllocatorEnv`** — TAILWIND depends on it.
@@ -364,9 +364,9 @@ project.
 
 | Phase | Deliverable | Gate to exit | GPU |
 |---|---|---|---|
-| **P0** | PIT panel builder `finrl_pro_ds/data/sp500_pit_panel.py` (membership + delisting-complete prices + DATA-CLEAN + manifest) | panel meta stamps coverage; unpriceable fraction measured and **acceptable** | no |
+| **P0** | PIT panel builder `sharpen/data/sp500_pit_panel.py` (membership + delisting-complete prices + DATA-CLEAN + manifest) | panel meta stamps coverage; unpriceable fraction measured and **acceptable** | no |
 | **P1** | `FundamentalProvider` (`edgar` + `sharadar` backends), availability masks, as-of join | PIT negative test: no feature at `t` uses a filing with `filed + 1d > t` (LEAK-2) | no |
-| **P2** | Six sleeves in `finrl_pro_ds/signals/library/ballast.py` + frozen linear core backtest | T0 causality tripwire green; core beats SPY Sharpe on **validation** (if the linear core cannot, RL will not either — cheap early kill) | no |
+| **P2** | Six sleeves in `sharpen/signals/library/ballast.py` + frozen linear core backtest | T0 causality tripwire green; core beats SPY Sharpe on **validation** (if the linear core cannot, RL will not either — cheap early kill) | no |
 | **P3** | `Sp500CoreAllocatorEnv` + portfolio construction layer + config + `validate_config` branch | **keystone baseline-parity ±0.05**; negative tests for LEAK-1/LEAK-2; long-only invariant test | no |
 | **P4** | SAC/TQC integration, HPO, walk-forward | Protocol-v2 manifests PASS at each stage | yes |
 | **P5** | Ensemble build, pruning, disagreement gate + ablation | validation IR beats single best member | yes |

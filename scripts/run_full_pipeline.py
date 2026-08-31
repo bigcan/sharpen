@@ -22,14 +22,14 @@ import wandb
 
 # Project imports
 sys.path.append(os.getcwd())
-from finrl_pro_ds.agents.deepscalper.bdq_agent import DeepScalperBDQ
-from finrl_pro_ds.logging import init_wandb, is_consolidated
-from finrl_pro_ds.agents.ppo_scalper.ppo_agent import PPOAgent
-from finrl_pro_ds.analytics.pyfolio_analyzer import PyfolioAnalyzer
-from finrl_pro_ds.data.parquet_handler import ParquetDataHandler
-from finrl_pro_ds.training.deepscalper_trainer import DeepScalperTrainer
-from finrl_pro_ds.training.ppo_trainer import PPOTrainer
-from finrl_pro_ds.utils.naming import generate_run_name, validate_run_name
+from sharpen.agents.deepscalper.bdq_agent import DeepScalperBDQ
+from sharpen.logging import init_wandb, is_consolidated
+from sharpen.agents.ppo_scalper.ppo_agent import PPOAgent
+from sharpen.analytics.pyfolio_analyzer import PyfolioAnalyzer
+from sharpen.data.parquet_handler import ParquetDataHandler
+from sharpen.training.deepscalper_trainer import DeepScalperTrainer
+from sharpen.training.ppo_trainer import PPOTrainer
+from sharpen.utils.naming import generate_run_name, validate_run_name
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger("DeepScalperPipeline")
@@ -43,35 +43,35 @@ def load_config(path):
         return yaml.safe_load(f)
 
 
-from finrl_pro_ds.config_utils import deep_merge as _deep_merge  # noqa: E402
+from sharpen.config_utils import deep_merge as _deep_merge  # noqa: E402
 
 
 def merge_configs(base, overrides):
     """Deep merge dictionaries (legacy signature: mutates ``base`` in place).
 
-    Thin wrapper around ``finrl_pro_ds.config_utils.deep_merge``; retained for
+    Thin wrapper around ``sharpen.config_utils.deep_merge``; retained for
     backward compatibility with scripts that expect in-place mutation.
     """
     return _deep_merge(base, overrides, _mutate=True)
 
 
-# _parse_frequency_to_minutes moved to finrl_pro_ds.hpo.objective (imported above)
+# _parse_frequency_to_minutes moved to sharpen.hpo.objective (imported above)
 
 
 # ============================================================================
-# ENVIRONMENT FACTORY — delegated to finrl_pro_ds.hpo.env_factory
+# ENVIRONMENT FACTORY — delegated to sharpen.hpo.env_factory
 # ============================================================================
-from finrl_pro_ds.hpo.env_factory import create_vector_env, make_env  # noqa: E402
+from sharpen.hpo.env_factory import create_vector_env, make_env  # noqa: E402
 
 
 # ============================================================================
 # PHASE 1: HYPERPARAMETER OPTIMIZATION
 # ============================================================================
-# Evaluation & correlation analysis — delegated to finrl_pro_ds.hpo
-from finrl_pro_ds.hpo.evaluate import analyze_hpo_correlation as _analyze_hpo_correlation  # noqa: E402
-from finrl_pro_ds.hpo.objective import _parse_frequency_to_minutes  # noqa: E402
-from finrl_pro_ds.hpo.objective import make_objective  # noqa: E402
-from finrl_pro_ds.hpo.sampler import create_sampler  # noqa: E402
+# Evaluation & correlation analysis — delegated to sharpen.hpo
+from sharpen.hpo.evaluate import analyze_hpo_correlation as _analyze_hpo_correlation  # noqa: E402
+from sharpen.hpo.objective import _parse_frequency_to_minutes  # noqa: E402
+from sharpen.hpo.objective import make_objective  # noqa: E402
+from sharpen.hpo.sampler import create_sampler  # noqa: E402
 
 
 
@@ -160,7 +160,7 @@ def run_hpo(base_config, n_trials, steps_per_trial, device, agent_type="bdq"):
 
     trial_records = []  # Per-trial data for post-HPO correlation analysis
 
-    # Objective function now lives in finrl_pro_ds.hpo.objective (shared with distributed HPO)
+    # Objective function now lives in sharpen.hpo.objective (shared with distributed HPO)
     objective = make_objective(base_config, steps_per_trial, agent_type, device, trial_records)
 
 
@@ -328,7 +328,7 @@ def run_training(config, run_name, device, agent_type="bdq", warm_start=None):
 
         # Train — dispatch based on agent type
         if agent_type == "sac":
-            from finrl_pro_ds.training.sac_trainer import SACTrainer
+            from sharpen.training.sac_trainer import SACTrainer
             trainer = SACTrainer(env, config, device=device, run_name=run_name)
         elif agent_type == "ppo":
             trainer = PPOTrainer(env, config, device=device, run_name=run_name)
@@ -494,7 +494,7 @@ def run_backtest(config, checkpoint_path, device, start_date=None, end_date=None
 
         # Dispatch agent creation based on type
         if agent_type == "sac":
-            from finrl_pro_ds.agents.sac.sac_agent import SACAgent
+            from sharpen.agents.sac.sac_agent import SACAgent
             sac_cfg = config.get("agents", {}).get("sac", {})
             agent = SACAgent(
                 network_config=network_config,
@@ -520,7 +520,7 @@ def run_backtest(config, checkpoint_path, device, start_date=None, end_date=None
                 device=device,
             )
         elif agent_type == "iqn":
-            from finrl_pro_ds.agents.deepscalper.iqn_agent import IQNAgent
+            from sharpen.agents.deepscalper.iqn_agent import IQNAgent
             iqn_cfg = config.get("agents", {}).get("iqn", {})
             agent = IQNAgent(
                 network_config=network_config,

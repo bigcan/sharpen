@@ -14,8 +14,8 @@ from __future__ import annotations
 
 import numpy as np
 
-from finrl_pro_ds.signals import Gates, SignalSpec
-from finrl_pro_ds.signals.eval_harness import (
+from sharpen.signals import Gates, SignalSpec
+from sharpen.signals.eval_harness import (
     Capturability,
     CostResult,
     Deflation,
@@ -25,8 +25,8 @@ from finrl_pro_ds.signals.eval_harness import (
     Robustness,
     tier3_robustness,
 )
-from finrl_pro_ds.signals.features import Panel
-from finrl_pro_ds.signals.scorecard import SignalScorecard, _finalize
+from sharpen.signals.features import Panel
+from sharpen.signals.scorecard import SignalScorecard, _finalize
 
 
 class Trail:

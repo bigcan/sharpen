@@ -26,7 +26,7 @@ from pathlib import Path
 import pandas as pd
 import pytest
 
-from finrl_pro_ds.crypto import options_pricing as op
+from sharpen.crypto import options_pricing as op
 
 _ROOT = Path(__file__).resolve().parents[2]
 
@@ -400,9 +400,9 @@ def test_tripwire_future_does_not_affect_past_cycle():
 # SLOW — refactor parity + the USDC-contamination regression (needs cached chain)
 # ---------------------------------------------------------------------------
 def _btc_sharpe(kind, cfg):
-    from finrl_pro_ds.crypto.data import deribit_options_loader as dol
-    from finrl_pro_ds.crypto.data import tardis_options_chain_loader as tcl
-    from finrl_pro_ds.crypto.features import options_vol_features as ovf
+    from sharpen.crypto.data import deribit_options_loader as dol
+    from sharpen.crypto.data import tardis_options_chain_loader as tcl
+    from sharpen.crypto.features import options_vol_features as ovf
     raw = dol.load({"universe": {"assets": ["BTC", "ETH"]}})
     chain = tcl.load_chain_snapshots("2021-04", "2026-06")
     chain["snapshot_date"] = pd.to_datetime(chain["snapshot_date"], utc=True)

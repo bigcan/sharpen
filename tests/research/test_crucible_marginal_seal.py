@@ -11,7 +11,7 @@ from __future__ import annotations
 import numpy as np
 
 import scripts.research.crucible_marginal_seal as seal
-from finrl_pro_ds.signals.generation.fitness import FitnessConfig
+from sharpen.signals.generation.fitness import FitnessConfig
 
 _CFG = FitnessConfig(embargo=10)
 _K = 900

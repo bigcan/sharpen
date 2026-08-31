@@ -10,10 +10,10 @@ from __future__ import annotations
 
 import numpy as np
 
-from finrl_pro_ds.envs.allocator_factory import linear_core_weights, make_allocator_env, monthly_rebal_conviction
-from finrl_pro_ds.envs.multi_asset_allocator_env import MultiAssetAllocatorEnv
-from finrl_pro_ds.paper.fill_engine import SimFillEngine
-from finrl_pro_ds.paper.paper_state import PaperState, generate_orders
+from sharpen.envs.allocator_factory import linear_core_weights, make_allocator_env, monthly_rebal_conviction
+from sharpen.envs.multi_asset_allocator_env import MultiAssetAllocatorEnv
+from sharpen.paper.fill_engine import SimFillEngine
+from sharpen.paper.paper_state import PaperState, generate_orders
 
 from .conftest import allocator_arrays
 

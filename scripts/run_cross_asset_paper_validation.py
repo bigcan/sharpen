@@ -2,7 +2,7 @@
 """Cross-asset 2-sleeve paper-executor validation (rung-1 forward-path parity + soak gates).
 
 Exercises the momentum + rates-carry fund-of-funds paper executor
-(:class:`finrl_pro_ds.paper.TwoSleeveExecutor`) END-TO-END on real data and emits the
+(:class:`sharpen.paper.TwoSleeveExecutor`) END-TO-END on real data and emits the
 pre-registered ``paper_soak`` verdict. This is the runner for the **load-bearing
 forward-path check** (``run_independent_recompute``) that the rung-1 Tier-2 audit named
 as the step-4 gate before any paper-CAPITAL promotion — and the validation the parked
@@ -37,11 +37,11 @@ from typing import Mapping
 
 import yaml
 
-from finrl_pro_ds.data.cross_asset_loader import (
+from sharpen.data.cross_asset_loader import (
     build_two_sleeve_arrays,
     load_two_sleeve_data,
 )
-from finrl_pro_ds.paper import (
+from sharpen.paper import (
     TwoSleeveExecutor,
     evaluate_paper_soak_gates,
     serialize_verdict,

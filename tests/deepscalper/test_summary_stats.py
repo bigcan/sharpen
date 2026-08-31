@@ -9,12 +9,12 @@ Verifies that:
 import numpy as np
 import torch
 
-from finrl_pro_ds.agents.sac.networks import (
+from sharpen.agents.sac.networks import (
     SACActorNetwork,
     SACCriticNetwork,
     SummaryStatsEncoder,
 )
-from finrl_pro_ds.data.multiscale_handler import MultiScaleOHLCVHandler
+from sharpen.data.multiscale_handler import MultiScaleOHLCVHandler
 
 
 class TestSummaryStatsEncoder:

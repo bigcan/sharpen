@@ -61,8 +61,8 @@ import numpy as np
 ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT))
 
-from finrl_pro_ds.crucible.corrected_contract import _sharpe_diff_z  # noqa: E402
-from finrl_pro_ds.signals.eval_harness import _ann_sharpe  # noqa: E402
+from sharpen.crucible.corrected_contract import _sharpe_diff_z  # noqa: E402
+from sharpen.signals.eval_harness import _ann_sharpe  # noqa: E402
 
 # The two sampling conventions under test, at a MATCHED calendar span.
 DAILY_PPY = 252.0

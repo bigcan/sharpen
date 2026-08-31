@@ -15,8 +15,8 @@ from __future__ import annotations
 import numpy as np
 import pytest
 
-from finrl_pro_ds.paper import AllocatorBookSleeve, SleeveContext, SleeveStream, TwoSleeveExecutor
-from finrl_pro_ds.paper.two_sleeve import _allocator_sleeve_names
+from sharpen.paper import AllocatorBookSleeve, SleeveContext, SleeveStream, TwoSleeveExecutor
+from sharpen.paper.two_sleeve import _allocator_sleeve_names
 
 
 def _lookahead_fn(arrays, t):

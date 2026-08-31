@@ -29,8 +29,8 @@ ROOT = Path(__file__).resolve().parents[3]
 sys.path.insert(0, str(ROOT))
 sys.path.insert(0, str(Path(__file__).parent))
 
-from finrl_pro_ds.data.cross_asset_loader import build_allocator_arrays, load_cross_asset_data  # noqa: E402
-from finrl_pro_ds.envs.allocator_factory import (  # noqa: E402
+from sharpen.data.cross_asset_loader import build_allocator_arrays, load_cross_asset_data  # noqa: E402
+from sharpen.envs.allocator_factory import (  # noqa: E402
     evaluate_linear_core, monthly_rebal_conviction,
 )
 from fable_oracle import backtest_weights  # noqa: E402

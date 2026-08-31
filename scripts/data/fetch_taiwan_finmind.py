@@ -4,7 +4,7 @@ Step one of the "less-liquid-market" thesis test (S553-cont, research artifact
 ``.agent/artifacts/taiwan_market_data_sourcing_research_s553.md``). Pulls FREE-tier
 FinMind daily bars for TWSE/TPEx stocks and TAIFEX futures, runs the canonical
 DATA-CLEAN, and writes a v2 manifest whose ``status`` is EARNED from the stale-print
-scan — mirroring :mod:`finrl_pro_ds.data.cross_asset_loader` so downstream gates and
+scan — mirroring :mod:`sharpen.data.cross_asset_loader` so downstream gates and
 ``protocol_v2`` treat Taiwan data identically to ETF/crypto data.
 
 Why the HTTP REST route (not the FinMind SDK): the endpoint + dataset names are the

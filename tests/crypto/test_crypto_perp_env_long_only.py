@@ -11,7 +11,7 @@ from __future__ import annotations
 
 import numpy as np
 
-from finrl_pro_ds.crypto.envs.crypto_perp_env import CryptoPerpEnv
+from sharpen.crypto.envs.crypto_perp_env import CryptoPerpEnv
 
 # ---------------------------------------------------------------------------
 # Fixtures

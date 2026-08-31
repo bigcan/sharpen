@@ -39,7 +39,7 @@ import numpy as np
 import pandas as pd
 import pytest
 
-from finrl_pro_ds.crucible import (
+from sharpen.crucible import (
     IncubationCriterion,
     Lockbox,
     OrchestratorStore,
@@ -48,13 +48,13 @@ from finrl_pro_ds.crucible import (
     card_from_dir,
     run_orchestrator_tick,
 )
-from finrl_pro_ds.crucible.agentic.card import DiscoveryCard
-from finrl_pro_ds.crucible.agentic.cohort_card import card_from_verdict
-from finrl_pro_ds.crucible.orchestrator.substrate import PreparedSubstrate
-from finrl_pro_ds.signals.features import Panel
-from finrl_pro_ds.signals.generation.cohort import CohortConfig
-from finrl_pro_ds.signals.generation.cohort_eval import CohortVerdict, pool_content_hash
-from finrl_pro_ds.signals.generation.fitness import FitnessConfig
+from sharpen.crucible.agentic.card import DiscoveryCard
+from sharpen.crucible.agentic.cohort_card import card_from_verdict
+from sharpen.crucible.orchestrator.substrate import PreparedSubstrate
+from sharpen.signals.features import Panel
+from sharpen.signals.generation.cohort import CohortConfig
+from sharpen.signals.generation.cohort_eval import CohortVerdict, pool_content_hash
+from sharpen.signals.generation.fitness import FitnessConfig
 
 GATES = "configs/signal_eval.gates.yaml"
 TICK_TS = "2026-07-04T00:00:00+00:00"
@@ -148,7 +148,7 @@ def promising_cohort_run(tmp_path_factory):
     lb.enroll(seed_card, crit, substrate_id="syn_cohort_lb", tick_ts=TICK_TS)
     sub = _cohort_lockbox_substrate(tmp, lb, crit)
     store = OrchestratorStore(tmp / "orch.db")
-    with mock.patch("finrl_pro_ds.crucible.agentic.loop.evaluate_cohort", _force_promising_verdict):
+    with mock.patch("sharpen.crucible.agentic.loop.evaluate_cohort", _force_promising_verdict):
         res = run_orchestrator_tick(substrates=[sub], store=store, gates_path=GATES,
                                     tick_ts=TICK_TS, out_dir=tmp / "out")
     return res.outcomes[0], lb

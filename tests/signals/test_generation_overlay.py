@@ -17,14 +17,14 @@ import numpy as np
 import pandas as pd
 import pytest
 
-from finrl_pro_ds.signals.features import Panel
-from finrl_pro_ds.signals.generation.dsl_signal import eval_on_panel
-from finrl_pro_ds.signals.generation.evolve import (
+from sharpen.signals.features import Panel
+from sharpen.signals.generation.dsl_signal import eval_on_panel
+from sharpen.signals.generation.evolve import (
     _candidate_returns,
     _overlay_returns,
     evolve,
 )
-from finrl_pro_ds.signals.generation.fitness import FitnessConfig, _combined_book
+from sharpen.signals.generation.fitness import FitnessConfig, _combined_book
 
 T, N = 320, 12
 _CFG = FitnessConfig(embargo=10)
@@ -105,7 +105,7 @@ def test_overlay_reaches_stage4_combination_fitness() -> None:
     """(C) The overlay stream is scored by combination_fitness UNCHANGED (aug = base ∪ {_CAND}):
     it reaches Stage-4 CPCV scoring (n_paths == C(6,2) == 15) with a finite delta_sr_oos and a real
     FitnessResult — not culled as degenerate."""
-    from finrl_pro_ds.signals.generation.fitness import combination_fitness
+    from sharpen.signals.generation.fitness import combination_fitness
 
     panel, s = _overlay_panel()
     base, ts = _base_and_ts(s)
@@ -192,7 +192,7 @@ def test_reserved_feature_slot_name_rejected() -> None:
 def test_overlay_evolve_uses_feature_slot_terminals() -> None:
     """The CR-9 terminal registry threads feature slots into the generator: a genome may reference
     'macro:regime'. A fast structural check that available_terminals includes the slot."""
-    from finrl_pro_ds.signals.generation.grammar import INPUTS, available_terminals
+    from sharpen.signals.generation.grammar import INPUTS, available_terminals
 
     panel, _s = _overlay_panel()
     terms = available_terminals(panel)

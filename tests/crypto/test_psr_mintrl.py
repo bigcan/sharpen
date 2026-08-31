@@ -11,7 +11,7 @@ from math import erf, sqrt
 
 import numpy as np
 
-from finrl_pro_ds.crypto.eval.statistics import (
+from sharpen.crypto.eval.statistics import (
     excess_kurtosis,
     min_track_record_length,
     probabilistic_sharpe_ratio,

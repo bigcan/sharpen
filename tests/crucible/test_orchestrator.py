@@ -16,7 +16,7 @@ import numpy as np
 import pandas as pd
 import pytest
 
-from finrl_pro_ds.crucible import (
+from sharpen.crucible import (
     CRUCIBLE_VERSION,
     OnlineFDR,
     OrchestratorStore,
@@ -27,11 +27,11 @@ from finrl_pro_ds.crucible import (
     run_orchestrator_tick,
     substrate_dirty,
 )
-from finrl_pro_ds.crucible.orchestrator.burst import GPUHUB_1, GPUHUB_2, LOCAL
-from finrl_pro_ds.crucible.orchestrator.fdr import gamma
-from finrl_pro_ds.crucible.orchestrator.substrate import PreparedSubstrate
-from finrl_pro_ds.signals.features import Panel
-from finrl_pro_ds.signals.generation.fitness import FitnessConfig
+from sharpen.crucible.orchestrator.burst import GPUHUB_1, GPUHUB_2, LOCAL
+from sharpen.crucible.orchestrator.fdr import gamma
+from sharpen.crucible.orchestrator.substrate import PreparedSubstrate
+from sharpen.signals.features import Panel
+from sharpen.signals.generation.fitness import FitnessConfig
 
 GATES = "configs/signal_eval.gates.yaml"
 _EK = dict(rng_seed=7, pop_size=16, n_generations=2, hold_horizon=21, cost_bps=0.001,
@@ -323,7 +323,7 @@ def test_tick_record_persists_the_holdout_denominator(tmp_path) -> None:
     never 0) and must round-trip on a fresh write."""
     import sqlite3
 
-    from finrl_pro_ds.crucible.orchestrator.substrate import TickRecord
+    from sharpen.crucible.orchestrator.substrate import TickRecord
 
     db = tmp_path / "orch.db"
     conn = sqlite3.connect(str(db))       # the REAL pre-v12 schema, minus n_holdout_tested only
@@ -362,7 +362,7 @@ def test_power_guard_refuses_underpowered_mine(tmp_path) -> None:
     would have caught the 504-bar flagship (mined at implied MDE ≈ 4.45)."""
     from dataclasses import replace
 
-    from finrl_pro_ds.crucible.orchestrator.substrate import PowerGuard, stamp_substrate_power
+    from sharpen.crucible.orchestrator.substrate import PowerGuard, stamp_substrate_power
     sweep = {"mde_sweep": {"rows": [{"holdout_bars": 189, "mde_realized_delta_sr": 3.63},
                                     {"holdout_bars": 1011, "mde_realized_delta_sr": 1.40}]}}
     sub = _make_substrate(tmp_path, "syn", {"extra_slot": False})

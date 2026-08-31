@@ -17,10 +17,10 @@ from __future__ import annotations
 import numpy as np
 import pytest
 
-from finrl_pro_ds.crucible.agentic import loop as loop_mod
-from finrl_pro_ds.crucible.agentic.hypothesis import PreRegisteredSpec
-from finrl_pro_ds.signals.generation.cohort import CohortConfig
-from finrl_pro_ds.signals.spec import SignalSpec
+from sharpen.crucible.agentic import loop as loop_mod
+from sharpen.crucible.agentic.hypothesis import PreRegisteredSpec
+from sharpen.signals.generation.cohort import CohortConfig
+from sharpen.signals.spec import SignalSpec
 
 _MC = {"enabled": True, "n_reps": 8, "alpha_cohort": 0.05, "block_length": 21}
 
@@ -141,7 +141,7 @@ def test_shipped_gates_file_admits_cross_sectional() -> None:
     unreachable cohort floor). Read from the file, never asserted from the code default."""
     from pathlib import Path
 
-    from finrl_pro_ds.signals.generation.config import load_cohort_config
+    from sharpen.signals.generation.config import load_cohort_config
 
     root = Path(__file__).resolve().parents[2]
     ccfg, mc = load_cohort_config(root / "configs" / "signal_eval.gates.yaml",

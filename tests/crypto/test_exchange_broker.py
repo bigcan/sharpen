@@ -8,7 +8,7 @@ import numpy as np
 import pytest
 import pytest_asyncio
 
-from finrl_pro_ds.crypto.execution.exchange_perp_broker import (
+from sharpen.crypto.execution.exchange_perp_broker import (
     _FEE_TABLE,
     ExchangePerpBroker,
     OrderResult,

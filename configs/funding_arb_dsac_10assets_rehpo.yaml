@@ -20,8 +20,8 @@
 #       eager-FP32 regardless of config, which is the SPS=50 root cause.
 #
 # Distributed HPO path wired S485 (option A — `make_objective` dispatch):
-#   - `finrl_pro_ds/hpo/objective.py` routes `environment.type: funding_arb`
-#     to `finrl_pro_ds/hpo/funding_arb_objective.py`.
+#   - `sharpen/hpo/objective.py` routes `environment.type: funding_arb`
+#     to `sharpen/hpo/funding_arb_objective.py`.
 #   - Distributed stack (coordinator → worker → make_objective) now runs
 #     funding-arb DSAC unmodified. `--agent_type sac` (default) is correct;
 #     `distributional: true` below drives DSAC behavior inside the objective.

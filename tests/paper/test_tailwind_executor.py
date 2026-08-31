@@ -14,7 +14,7 @@ import pandas as pd
 import pytest
 import yaml
 
-from finrl_pro_ds.paper import TwoSleeveExecutor, evaluate_paper_soak_gates
+from sharpen.paper import TwoSleeveExecutor, evaluate_paper_soak_gates
 
 ROOT = Path(__file__).resolve().parents[2]
 ANN = 252

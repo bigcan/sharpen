@@ -31,12 +31,12 @@ warnings.filterwarnings("ignore", category=RuntimeWarning)
 ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT))
 
-from finrl_pro_ds.crypto.eval.statistics import (  # noqa: E402
+from sharpen.crypto.eval.statistics import (  # noqa: E402
     deflated_sharpe_ratio, probabilistic_sharpe_ratio, skewness, excess_kurtosis)
-from finrl_pro_ds.data.equity_panel_loader import load_sp500_panel  # noqa: E402
-from finrl_pro_ds.signals.eval_harness import _ls_weights, compute_scores  # noqa: E402
-from finrl_pro_ds.signals.features import Panel  # noqa: E402
-from finrl_pro_ds.signals.library.alphas101 import SIGNALS as ALPHAS  # noqa: E402
+from sharpen.data.equity_panel_loader import load_sp500_panel  # noqa: E402
+from sharpen.signals.eval_harness import _ls_weights, compute_scores  # noqa: E402
+from sharpen.signals.features import Panel  # noqa: E402
+from sharpen.signals.library.alphas101 import SIGNALS as ALPHAS  # noqa: E402
 
 GATE = ROOT / "results" / "signal_eval" / "xlg_megacap_gate"
 MCAP = ROOT / "data" / "raw" / "equity_panel" / "sp500_mktcap_rank.csv"

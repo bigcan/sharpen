@@ -22,8 +22,8 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 import signal_lead_distress_filter as R  # noqa: E402
 import signal_momentum_confirmed as M  # noqa: E402
-from finrl_pro_ds.signals import Gates  # noqa: E402
-from finrl_pro_ds.signals.eval_harness import tier2_capturability  # noqa: E402
+from sharpen.signals import Gates  # noqa: E402
+from sharpen.signals.eval_harness import tier2_capturability  # noqa: E402
 
 OOS, EVAL = np.datetime64("2021-01-01"), np.datetime64("2015-01-01")
 OUT = ROOT / "results" / "signal_eval" / "momentum_confirmed"

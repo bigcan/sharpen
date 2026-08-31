@@ -93,7 +93,7 @@ network:
   window_size: 30
 
 # Placeholder HPs — geometric midpoints of the broad search space defined in
-# finrl_pro_ds/hpo/objective.py:132-144. narrow_mode: false means these are NOT used
+# sharpen/hpo/objective.py:132-144. narrow_mode: false means these are NOT used
 # as priors by the HPO sampler (every dim resampled per trial). Prior T34 anchors were
 # stripped S489-cont. to avoid confusing this block with an enqueued seed (see header).
 # Non-HPO'd keys (batch_size, buffer_size, learning_starts, update_interval,

@@ -14,7 +14,7 @@ from pathlib import Path
 import pytest
 import yaml
 
-from finrl_pro_ds.live.ensemble_bundle import (
+from sharpen.live.ensemble_bundle import (
     BundleIntegrityError,
     extract_and_verify_bundle,
 )

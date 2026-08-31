@@ -9,9 +9,9 @@
 #       `steps_per_trial` AND legacy `n_trials`/`hpo_timesteps`.
 #   [ ] GMGP1 BTC re-HPO (`gmgp1_btc_velotrade_rehpo_20260419`) completed.
 #   [ ] `python scripts/monitor_fleet.py` — gpuhub-1:0 + gpuhub-2:0 free.
-#   [x] Distributed HPO path wired S485 — `finrl_pro_ds.hpo.objective.make_objective`
+#   [x] Distributed HPO path wired S485 — `sharpen.hpo.objective.make_objective`
 #       dispatches `environment.type: funding_arb` to funding-arb/DSAC factory
-#       at `finrl_pro_ds/hpo/funding_arb_objective.py`. No worker-CLI changes
+#       at `sharpen/hpo/funding_arb_objective.py`. No worker-CLI changes
 #       needed; agent_type=sac (auto-resolved from config.agents.sac) works.
 #
 # Launch (6 workers = 3 replicas × 2 GPUs, S488 rule = HPO on gpuhub-1 only):

@@ -15,10 +15,10 @@ import tempfile
 import numpy as np
 import torch
 
-from finrl_pro_ds.agents.deepscalper.flat_replay_buffer import FlatReplayBuffer
-from finrl_pro_ds.agents.deepscalper.iqn_agent import IQNAgent
-from finrl_pro_ds.agents.deepscalper.iqn_network import IQNNetwork, QuantileEmbedding
-from finrl_pro_ds.agents.deepscalper.noisy_linear import NoisyLinear
+from sharpen.agents.deepscalper.flat_replay_buffer import FlatReplayBuffer
+from sharpen.agents.deepscalper.iqn_agent import IQNAgent
+from sharpen.agents.deepscalper.iqn_network import IQNNetwork, QuantileEmbedding
+from sharpen.agents.deepscalper.noisy_linear import NoisyLinear
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -399,7 +399,7 @@ class TestDailyEpisodes:
 
     def test_episode_length_config_parsing(self):
         """Verify episode_length and random_start are parsed from config."""
-        from finrl_pro_ds.envs.deep_scalper_env import DeepScalperEnv
+        from sharpen.envs.deep_scalper_env import DeepScalperEnv
 
         cfg = self._make_env_config(episode_length=288, random_start=True)
         env = DeepScalperEnv(cfg)
@@ -408,7 +408,7 @@ class TestDailyEpisodes:
 
     def test_default_no_episode_limit(self):
         """Without episode_length, env should not truncate early."""
-        from finrl_pro_ds.envs.deep_scalper_env import DeepScalperEnv
+        from sharpen.envs.deep_scalper_env import DeepScalperEnv
 
         cfg = self._make_env_config()
         env = DeepScalperEnv(cfg)
@@ -417,7 +417,7 @@ class TestDailyEpisodes:
 
     def test_random_start_different_indices(self):
         """Random start should produce different starting positions."""
-        from finrl_pro_ds.envs.deep_scalper_env import DeepScalperEnv
+        from sharpen.envs.deep_scalper_env import DeepScalperEnv
 
         cfg = self._make_env_config(episode_length=10, random_start=True)
         env = DeepScalperEnv(cfg)

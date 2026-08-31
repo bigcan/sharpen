@@ -119,7 +119,7 @@ class TestWindowSchedule:
 
 class TestAgentMap:
     def test_all_agent_names_resolve(self):
-        from finrl_pro_ds.alphaseek.agents import AGENT_MAP
+        from sharpen.alphaseek.agents import AGENT_MAP
 
         for name in ["D3QN", "DoubleDQN", "TwinD3QN"]:
             assert name in AGENT_MAP

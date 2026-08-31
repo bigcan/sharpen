@@ -9,17 +9,17 @@ from __future__ import annotations
 
 import numpy as np
 
-from finrl_pro_ds.crucible import DataCatalog
-from finrl_pro_ds.crucible.agentic.proposer import LibrarySeedProposer, ProposalContext
-from finrl_pro_ds.crucible.data import EdgarConnector, FredConnector, SeriesRef
-from finrl_pro_ds.crucible.data.altdata_bridge import (
+from sharpen.crucible import DataCatalog
+from sharpen.crucible.agentic.proposer import LibrarySeedProposer, ProposalContext
+from sharpen.crucible.data import EdgarConnector, FredConnector, SeriesRef
+from sharpen.crucible.data.altdata_bridge import (
     ALTDATA_ALIASES,
     bridge_altdata_feature_slots,
     default_connectors,
     resolve_terminal,
 )
-from finrl_pro_ds.signals.features import Panel
-from finrl_pro_ds.signals.generation.grammar import available_terminals
+from sharpen.signals.features import Panel
+from sharpen.signals.generation.grammar import available_terminals
 
 _BARS = np.arange(np.datetime64("2019-06-01"), np.datetime64("2020-06-01"),
                   np.timedelta64(1, "D")).astype("datetime64[ns]")
@@ -55,7 +55,7 @@ class _BrokenConnector:
         raise RuntimeError("HTTP 429 Too Many Requests")
 
     def provenance(self, ref):
-        from finrl_pro_ds.crucible.data import Provenance
+        from sharpen.crucible.data import Provenance
         return Provenance("stooq", "u", "lic", "release-lag")
 
 
@@ -70,12 +70,12 @@ class _LeakyConnector:
         return [SeriesRef("leaky", "bad", "macro")]
 
     def fetch(self, ref, start, end, *, as_of=None):
-        from finrl_pro_ds.crucible.data import SeriesData
+        from sharpen.crucible.data import SeriesData
         rp = np.array(["2020-02-01"], dtype="datetime64[ns]")
         return SeriesData(ref, rp, np.array([1.0]), rp - np.timedelta64(5, "D"))  # release 5d BEFORE ref
 
     def provenance(self, ref):
-        from finrl_pro_ds.crucible.data import Provenance
+        from sharpen.crucible.data import Provenance
         return Provenance("leaky", "u", "lic", "none-rejected")
 
 
@@ -90,7 +90,7 @@ def test_resolve_terminal_aliases_nonlegal_and_passes_legal() -> None:
         "edgar", "0000320193:RevenueFromContractWithCustomerExcludingAssessedTax",
         "fundamental")) == "edgar:aapl_revenue"
     # every alias value is a distinct, DSL-legal terminal.
-    from finrl_pro_ds.crucible.data import is_valid_terminal
+    from sharpen.crucible.data import is_valid_terminal
     assert all(is_valid_terminal(v) for v in ALTDATA_ALIASES.values())
     assert len(set(ALTDATA_ALIASES.values())) == len(ALTDATA_ALIASES)
 
@@ -98,7 +98,7 @@ def test_resolve_terminal_aliases_nonlegal_and_passes_legal() -> None:
 def test_default_cot_markets_are_orthogonal_and_correctly_labelled() -> None:
     """Doc 3 Part C: the default COT set spans economically-orthogonal underlyings (not one asset's
     views), and 067651 is labelled WTI (not the old 'gold' mislabel)."""
-    from finrl_pro_ds.crucible.data.altdata_bridge import (
+    from sharpen.crucible.data.altdata_bridge import (
         COT_TERMINAL_ASSET_CLASS,
         DEFAULT_COT_MARKETS,
         _COT_MARKET_SPEC,
@@ -223,7 +223,7 @@ def _slots_with_a_duplicate(t: int = 400) -> dict[str, np.ndarray]:
 
 
 def test_redundancy_filter_drops_mechanical_duplicates_keeps_independents() -> None:
-    from finrl_pro_ds.crucible.data.altdata_bridge import _drop_redundant_slots
+    from sharpen.crucible.data.altdata_bridge import _drop_redundant_slots
 
     slots = _slots_with_a_duplicate()
     kept = _drop_redundant_slots(slots, 0.90)
@@ -234,7 +234,7 @@ def test_redundancy_filter_drops_mechanical_duplicates_keeps_independents() -> N
 
 def test_redundancy_filter_is_off_by_default_and_noop_at_threshold_one() -> None:
     """`None` must be byte-identical to the pre-filter behaviour (no recorded verdict can move)."""
-    from finrl_pro_ds.crucible.data.altdata_bridge import _drop_redundant_slots
+    from sharpen.crucible.data.altdata_bridge import _drop_redundant_slots
 
     slots = _slots_with_a_duplicate()
     assert set(_drop_redundant_slots(slots, 1.0)) == set(slots), "|corr| > 1.0 is unreachable"
@@ -244,7 +244,7 @@ def test_redundancy_filter_uses_first_differences_not_levels() -> None:
     """Two INDEPENDENT random walks co-trend in levels but not in differences. A level-based rule
     would over-reject them; the differenced rule must keep both (the measured motivation: level
     median |corr| 0.156 vs 0.020 differenced on the real us_equity slots)."""
-    from finrl_pro_ds.crucible.data.altdata_bridge import _drop_redundant_slots
+    from sharpen.crucible.data.altdata_bridge import _drop_redundant_slots
 
     rng = np.random.default_rng(5)
     t = 3000
@@ -264,7 +264,7 @@ def test_overlay_slots_are_round_robined_across_sources() -> None:
     Regression for the 2026-08-10 us_equity run: slots arrive grouped (fred:* then cot:*), so 6 FRED
     slots x 3 templates consumed 18 of 24 overlay specs and only 2 of 6 COT markets reached the batch.
     """
-    from finrl_pro_ds.crucible.agentic.proposer import _round_robin_by_source
+    from sharpen.crucible.agentic.proposer import _round_robin_by_source
 
     slots = tuple([f"fred:F{i}" for i in range(6)] + [f"cot:C{i}" for i in range(9)])
     out = _round_robin_by_source(slots)

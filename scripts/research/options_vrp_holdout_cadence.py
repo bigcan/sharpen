@@ -32,8 +32,8 @@ ROOT = Path(__file__).resolve().parents[2]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
-from finrl_pro_ds.crypto.data import deribit_options_loader as dol  # noqa: E402
-from finrl_pro_ds.crypto.data import options_array_builder as oab  # noqa: E402
+from sharpen.crypto.data import deribit_options_loader as dol  # noqa: E402
+from sharpen.crypto.data import options_array_builder as oab  # noqa: E402
 
 # Load the gate script by path (scripts/ is not a package) and reuse its engine.
 _spec = importlib.util.spec_from_file_location(

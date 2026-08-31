@@ -38,14 +38,14 @@ if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
 import scripts.research.crucible_calibration as cal  # noqa: E402  (shared planted machinery)
-from finrl_pro_ds.crucible.corrected_contract import (  # noqa: E402
+from sharpen.crucible.corrected_contract import (  # noqa: E402
     CorrectedConfig,
     corrected_contract_fitness,
     fresh_lord_level,
 )
-from finrl_pro_ds.signals.generation.config import load_generation_config  # noqa: E402
-from finrl_pro_ds.signals.generation.evolve import _overlay_returns  # noqa: E402
-from finrl_pro_ds.signals.generation.fitness import _combined_book, combination_fitness  # noqa: E402
+from sharpen.signals.generation.config import load_generation_config  # noqa: E402
+from sharpen.signals.generation.evolve import _overlay_returns  # noqa: E402
+from sharpen.signals.generation.fitness import _combined_book, combination_fitness  # noqa: E402
 
 log = logging.getLogger("crucible_corrected_contract")
 

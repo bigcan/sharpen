@@ -2,7 +2,7 @@
 
 ``simulate_asset``/``SimConfig``/``returns_from_pnl`` were moved VERBATIM from
 ``scripts/research/options_vrp_falsification.py`` into the library
-(``finrl_pro_ds/crypto/options_vrp_sim.py``) so the paper ``VRPSleeve`` can import the
+(``sharpen/crypto/options_vrp_sim.py``) so the paper ``VRPSleeve`` can import the
 validated sim without a ``scripts/`` dependency. These tests pin:
 
   1. **Re-export identity** — the falsification script (and the diversification gate)
@@ -19,7 +19,7 @@ from __future__ import annotations
 
 import numpy as np
 
-from finrl_pro_ds.crypto.options_vrp_sim import (
+from sharpen.crypto.options_vrp_sim import (
     ANN,
     SimConfig,
     returns_from_pnl,

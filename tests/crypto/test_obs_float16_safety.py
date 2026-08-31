@@ -24,9 +24,9 @@ from __future__ import annotations
 
 import numpy as np
 
-from finrl_pro_ds.crypto.envs import crypto_perp_env as perp_mod
-from finrl_pro_ds.crypto.envs import funding_arb_env as arb_mod
-from finrl_pro_ds.envs.obs_guard import FP16_MAX, OBS_CLIP
+from sharpen.crypto.envs import crypto_perp_env as perp_mod
+from sharpen.crypto.envs import funding_arb_env as arb_mod
+from sharpen.envs.obs_guard import FP16_MAX, OBS_CLIP
 
 from .test_crypto_perp_env_long_only import _make_env as _make_perp_env
 from .test_funding_arb_env import _make_env as _make_arb_env

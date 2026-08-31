@@ -33,7 +33,7 @@ from __future__ import annotations
 
 import numpy as np
 
-from finrl_pro_ds.envs.dsr import DSRCalculator
+from sharpen.envs.dsr import DSRCalculator
 
 GOLDEN_STEP2_DSR = -2.5
 

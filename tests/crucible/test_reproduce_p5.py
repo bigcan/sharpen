@@ -14,7 +14,7 @@ from pathlib import Path
 
 import pytest
 
-from finrl_pro_ds.crucible import (
+from sharpen.crucible import (
     CRUCIBLE_VERSION,
     RunManifest,
     compare_manifests,

@@ -24,14 +24,14 @@ is implemented.**
 ## Part 0 — Where diversity collapses today (two points, both real)
 
 **Point 1 — the proposer seed bank is tiny and templated.**
-[`LibrarySeedProposer`](../../finrl_pro_ds/crucible/agentic/proposer.py) emits exactly: 8 fixed WQ101
+[`LibrarySeedProposer`](../../sharpen/crucible/agentic/proposer.py) emits exactly: 8 fixed WQ101
 cross-sectional formulas (`_CS_SEED_BANK`) + 3 overlay templates (`_OVERLAY_TEMPLATES`: `level`,
 `trend`, `smooth`) instantiated per feature slot. cont-107's "12 altdata overlays" = **3 templates ×
 4 slots**, all `ts_min(correlation(rank(adv20), <slot-op>))`-shaped — structurally near-identical by
 construction. There is no generative variety and no diversity objective.
 
 **Point 2 — the GA collapses what little variety exists into one fitness basin.**
-[`evolve`](../../finrl_pro_ds/signals/generation/evolve.py) is a plain elitist GA (elites →
+[`evolve`](../../sharpen/signals/generation/evolve.py) is a plain elitist GA (elites →
 `mutate`/`crossover` → repeat) that hill-climbs the marginal-contribution fitness. It has **no
 diversity pressure**, so it converges — cont-107's 10 scored cross-sectional candidates were all
 `stddev(decay_linear(volume, …))` permutations (one basin). Even a diverse seed set would be funneled
@@ -83,13 +83,13 @@ pairwise return correlation before investing in Parts A/B.
 ## Part A — Generative proposer (replace the fixed seed bank)
 
 Two flavors behind the *same* `Proposer` seam
-([proposer.py:108](../../finrl_pro_ds/crucible/agentic/proposer.py) — `propose(context) -> list`).
+([proposer.py:108](../../sharpen/crucible/agentic/proposer.py) — `propose(context) -> list`).
 The moat (CR-1) is intact for both: the proposer only ever sees `ProposalContext` (terminals, killed
 families, existing hashes, asset classes) — **never a score/verdict/holdout**, enforced by the Author.
 
 ### A1 — QD grammar proposer (offline, deterministic, no LLM) — build this first
 Reuse the existing generative grammar
-([grammar.py](../../finrl_pro_ds/signals/generation/grammar.py): `grow`, `mutate`, `crossover`,
+([grammar.py](../../sharpen/signals/generation/grammar.py): `grow`, `mutate`, `crossover`,
 `available_terminals`). Instead of sampling a flat random population (which clusters), organize
 generation as **MAP-Elites over a STRUCTURAL behavior descriptor** — the only kind computable at
 proposal time (no data is scored in the proposer; that is the moat):

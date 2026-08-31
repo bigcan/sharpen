@@ -23,7 +23,7 @@ from pathlib import Path
 import pytest
 import yaml
 
-from finrl_pro_ds.config_utils import ConfigMergeError, deep_merge
+from sharpen.config_utils import ConfigMergeError, deep_merge
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 BASE_CONFIG = PROJECT_ROOT / "configs" / "live_gmgp1_xauusd_ctrader.yaml"

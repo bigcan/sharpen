@@ -30,7 +30,7 @@ for _p in (str(ROOT), str(ROOT / "scripts")):
     if _p not in sys.path:
         sys.path.insert(0, _p)
 
-from finrl_pro_ds.crucible.orchestrator.substrate import (  # noqa: E402
+from sharpen.crucible.orchestrator.substrate import (  # noqa: E402
     _pooled_points,
     interp_mde,
     lord_depth_for,
@@ -157,7 +157,7 @@ def test_family_emission_does_not_perturb_the_fresh_curve():
     against the pre-family run. Deliberately tiny (t=1512, n=12, 3 betas, 3 seeds) so it stays a
     unit test.
     """
-    from finrl_pro_ds.crucible.corrected_contract import CorrectedConfig
+    from sharpen.crucible.corrected_contract import CorrectedConfig
     from research.crucible_calibration import _xsec_power_curve, load_calib
 
     cc = load_calib(ROOT / "configs" / "crucible_calibration.gates.yaml",

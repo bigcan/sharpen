@@ -12,9 +12,9 @@ from __future__ import annotations
 
 import numpy as np
 
-from finrl_pro_ds.signals.eval_harness import assert_causal
-from finrl_pro_ds.signals.features import Panel
-from finrl_pro_ds.signals.generation import (
+from sharpen.signals.eval_harness import assert_causal
+from sharpen.signals.features import Panel
+from sharpen.signals.generation import (
     DslSignal,
     crossover,
     depth,
@@ -25,10 +25,10 @@ from finrl_pro_ds.signals.generation import (
     parse,
     to_formula,
 )
-from finrl_pro_ds.signals.generation.grammar import _SIG, _slots
-from finrl_pro_ds.signals.library._alpha_dsl import eval_formula
-from finrl_pro_ds.signals.library._alpha_formulas import FORMULAS
-from finrl_pro_ds.signals.library.alphas101 import SKIP
+from sharpen.signals.generation.grammar import _SIG, _slots
+from sharpen.signals.library._alpha_dsl import eval_formula
+from sharpen.signals.library._alpha_formulas import FORMULAS
+from sharpen.signals.library.alphas101 import SKIP
 
 
 # ----------------------------------------------------------------- fixtures ----
@@ -49,7 +49,7 @@ def _panel(t: int = 220, n: int = 24, seed: int = 0) -> Panel:
 
 
 def _ctx(panel: Panel) -> dict:
-    from finrl_pro_ds.signals.library import operators as op
+    from sharpen.signals.library import operators as op
     return {"open": panel.open, "high": panel.high, "low": panel.low, "close": panel.close,
             "volume": panel.volume, "returns": op.returns(panel.close),
             "vwap": (panel.high + panel.low + panel.close) / 3.0, "sector": panel.sector_id}
@@ -153,7 +153,7 @@ class _LeakySignal:
     generation path; a generated genome can never express this, but this locks the guard)."""
 
     def __init__(self) -> None:
-        from finrl_pro_ds.signals.spec import SignalSpec
+        from sharpen.signals.spec import SignalSpec
         self.spec = SignalSpec(name="leaky", hypothesis="peeks t+1", family="101alpha",
                                expected_sign=1)
 

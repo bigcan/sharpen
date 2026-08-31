@@ -1,4 +1,4 @@
-"""Tests for finrl_pro_ds.config_utils — deep_merge + _prep_backtest_config."""
+"""Tests for sharpen.config_utils — deep_merge + _prep_backtest_config."""
 from __future__ import annotations
 
 from pathlib import Path
@@ -6,7 +6,7 @@ from pathlib import Path
 import pytest
 import yaml
 
-from finrl_pro_ds.config_utils import (
+from sharpen.config_utils import (
     ConfigMergeError,
     _prep_backtest_config,
     apply_overlays,

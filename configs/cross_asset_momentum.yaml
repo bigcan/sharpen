@@ -108,7 +108,7 @@ env:
 # ---------- AGENTS (SAC; RL is a thin overlay on the linear core) ------------
 # AGENT = SB3 SAC (MlpPolicy). The allocator env returns a FLAT Box obs, exactly
 # like its sibling CryptoPerpEnv (which also uses SB3 via crypto_hpo_runner — the
-# runner this pipeline adapts). The custom finrl_pro_ds SACAgent/SACTrainer are
+# runner this pipeline adapts). The custom sharpen SACAgent/SACTrainer are
 # V7-multiscale-DICT-obs only (they read obs["scale_*"]+obs["private"]) and are NOT
 # compatible here. HPO (cross_asset_pipeline._sac_search_space) searches
 # learning_rate/buffer_size/batch_size/gamma/tau/learning_starts; the values below

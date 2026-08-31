@@ -7,7 +7,7 @@ from pathlib import Path
 
 import pytest
 
-from finrl_pro_ds.live.swap_handshake import (
+from sharpen.live.swap_handshake import (
     check_swap_approved,
     record_successful_load,
 )
@@ -234,7 +234,7 @@ def test_record_successful_load_creates_parent_dir(workdir: Path):
 
 
 def test_to_dict_keys():
-    from finrl_pro_ds.live.swap_handshake import SwapHandshakeResult
+    from sharpen.live.swap_handshake import SwapHandshakeResult
     r = SwapHandshakeResult(
         approved=True, reason="x", is_swap=False,
         previous_bundle_path=None, previous_bundle_sha256=None,

@@ -18,8 +18,8 @@ from pathlib import Path
 
 import numpy as np
 
-from finrl_pro_ds.crypto import options_pricing as op
-from finrl_pro_ds.crypto.envs.options_vol_harvest_env import OptionsVolHarvestEnv
+from sharpen.crypto import options_pricing as op
+from sharpen.crypto.envs.options_vol_harvest_env import OptionsVolHarvestEnv
 
 # --- load the (non-package) research falsification module for the parity oracle --
 _FALS_PATH = Path(__file__).resolve().parents[2] / "scripts" / "research" / "options_vrp_falsification.py"
@@ -228,7 +228,7 @@ def test_cvar_penalty_lowers_reward_on_tail_loss():
     independent DSR probe seeded to the env's PRE-compute state gives the bare DSR
     (calling _calc_reward mutates the env's own DSR EMA, so we must not read it after).
     """
-    from finrl_pro_ds.envs.dsr import DSRCalculator
+    from sharpen.envs.dsr import DSRCalculator
 
     buf = list(np.random.default_rng(2).normal(0.0005, 0.008, 80))
     spot, iv, funding = synthetic_series(T=40, seed=11)

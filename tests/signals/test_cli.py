@@ -31,7 +31,7 @@ def test_cli_smoke(tmp_path) -> None:
     rs = cli.main(["--batch", "smoke", "--panel", "synthetic:300,40",
                    "--gates", str(gpath), "--out", str(out)])
 
-    from finrl_pro_ds.signals.library import demo
+    from sharpen.signals.library import demo
     assert rs.n_trials == len(demo.SIGNALS)          # all demo signals are causal -> deflated
     assert (out / "scorecard.json").exists() and (out / "scorecard.md").exists()
     data = json.loads((out / "scorecard.json").read_text(encoding="utf-8"))

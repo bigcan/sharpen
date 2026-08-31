@@ -24,8 +24,8 @@ ROOT = Path(__file__).resolve().parents[1]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
-from finrl_pro_ds.data.splitter import TimeRange  # noqa: E402
-from finrl_pro_ds.eval.obs_noise import (  # noqa: E402
+from sharpen.data.splitter import TimeRange  # noqa: E402
+from sharpen.eval.obs_noise import (  # noqa: E402
     FoldNoiseResult,
     InvariantViolation,
     NoiseSpec,
@@ -184,7 +184,7 @@ def test_obs_noise_nominal_matches_direct_unnoised(tmp_path):
         device="cpu",
         _load_agents=_fake_load_agents, _run_rule=_fake_run_rule,
     )
-    from finrl_pro_ds.eval.obs_noise import pf_from_pv
+    from sharpen.eval.obs_noise import pf_from_pv
     direct_pv = _pv_from_close(str(src), "2025-09-01", "2025-10-01")
     assert results[0].pf_nominal == pytest.approx(pf_from_pv(direct_pv), abs=1e-9)
 
@@ -264,7 +264,7 @@ def test_build_obs_noise_report_schema():
             0, spec, pf_nominal=1.6, mdd_nominal=-0.04,
             pf_seeds=[1.5] * 10, mdd_seeds=[-0.05] * 10,
         ))
-    from finrl_pro_ds.eval.obs_noise import resolve_obs_noise_gate
+    from sharpen.eval.obs_noise import resolve_obs_noise_gate
     gates = {
         "obs_noise_pf_floor_10bps": 0.85, "obs_noise_pf_floor_50bps": 0.70,
         "obs_noise_mdd_buffer_pp_10bps": 3.0, "obs_noise_mdd_buffer_pp_50bps": 5.0,

@@ -1,4 +1,4 @@
-"""Unit tests for SACTrainer (finrl_pro_ds/training/sac_trainer.py).
+"""Unit tests for SACTrainer (sharpen/training/sac_trainer.py).
 
 Covers:
   - Constructor initialization and config parsing
@@ -16,7 +16,7 @@ import numpy as np
 import pytest
 import torch
 
-from finrl_pro_ds.training.sac_trainer import SACTrainer
+from sharpen.training.sac_trainer import SACTrainer
 
 # ---------------------------------------------------------------------------
 # Helpers: Fake vectorized environment
@@ -428,7 +428,7 @@ class TestCheckpointSaveLoad:
 class TestTrainOneStep:
     """Run minimal training and verify no crashes, metrics flow."""
 
-    @patch("finrl_pro_ds.training.sac_trainer.wandb")
+    @patch("sharpen.training.sac_trainer.wandb")
     def test_train_completes(self, mock_wandb, fake_env):
         """Training loop runs to completion with minimal config."""
         mock_wandb.log = MagicMock()
@@ -449,7 +449,7 @@ class TestTrainOneStep:
         assert "checkpoint_final" in final_path
         assert os.path.isfile(final_path)
 
-    @patch("finrl_pro_ds.training.sac_trainer.wandb")
+    @patch("sharpen.training.sac_trainer.wandb")
     def test_train_populates_buffer(self, mock_wandb, fake_env):
         """After training, replay buffer has transitions stored."""
         mock_wandb.log = MagicMock()
@@ -468,7 +468,7 @@ class TestTrainOneStep:
         # Buffer should have at least some transitions
         assert len(trainer.agent.replay_buffer) > 0
 
-    @patch("finrl_pro_ds.training.sac_trainer.wandb")
+    @patch("sharpen.training.sac_trainer.wandb")
     def test_train_advances_step_count(self, mock_wandb, fake_env):
         """Agent step_count is updated during training."""
         mock_wandb.log = MagicMock()
@@ -486,7 +486,7 @@ class TestTrainOneStep:
 
         assert trainer.agent.step_count >= 15
 
-    @patch("finrl_pro_ds.training.sac_trainer.wandb")
+    @patch("sharpen.training.sac_trainer.wandb")
     def test_train_multi_env(self, mock_wandb):
         """Training works with multiple vectorized envs."""
         mock_wandb.log = MagicMock()
@@ -508,7 +508,7 @@ class TestTrainOneStep:
         # With 4 envs, step_count increases by 4 per loop iteration
         assert trainer.agent.step_count >= 40
 
-    @patch("finrl_pro_ds.training.sac_trainer.wandb")
+    @patch("sharpen.training.sac_trainer.wandb")
     def test_train_episode_tracking(self, mock_wandb):
         """Episode rewards and lengths are tracked when episodes end."""
         mock_wandb.log = MagicMock()
@@ -535,7 +535,7 @@ class TestTrainOneStep:
 class TestTrainWithWandBDisabled:
     """Verify training works without WandB configured (mock prevents actual calls)."""
 
-    @patch("finrl_pro_ds.training.sac_trainer.wandb")
+    @patch("sharpen.training.sac_trainer.wandb")
     def test_hpo_mode_skips_wandb_log(self, mock_wandb):
         """In HPO mode, main wandb.log at log_interval is skipped."""
         mock_wandb.log = MagicMock()
@@ -559,7 +559,7 @@ class TestTrainWithWandBDisabled:
             os.path.join(trainer.ckpt_dir, "checkpoint_final.pth"),
         )
 
-    @patch("finrl_pro_ds.training.sac_trainer.wandb")
+    @patch("sharpen.training.sac_trainer.wandb")
     def test_wandb_log_exception_handled(self, mock_wandb):
         """If wandb.log raises, training does not crash."""
         mock_wandb.log = MagicMock(side_effect=Exception("WandB offline"))
@@ -641,7 +641,7 @@ class TestUTDScaling:
 class TestTrainerEdgeCases:
     """Edge cases and boundary conditions."""
 
-    @patch("finrl_pro_ds.training.sac_trainer.wandb")
+    @patch("sharpen.training.sac_trainer.wandb")
     def test_learning_starts_boundary(self, mock_wandb, fake_env):
         """Training runs even when total_timesteps < learning_starts (no gradient updates)."""
         mock_wandb.log = MagicMock()
@@ -680,7 +680,7 @@ class TestTrainerEdgeCases:
         trainer = SACTrainer(env, config, device="cpu")
         assert trainer._n_scales == 2
 
-    @patch("finrl_pro_ds.training.sac_trainer.wandb")
+    @patch("sharpen.training.sac_trainer.wandb")
     def test_checkpoint_during_training(self, mock_wandb):
         """Checkpoint is saved at checkpoint_interval during training."""
         mock_wandb.log = MagicMock()

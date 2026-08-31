@@ -22,7 +22,7 @@ sleeve. There is no meaningful single combined action vector, and inventing one 
 fabricated baseline.
 
 ⚠️ NO CONSUMER YET. `ActionDriftTracker` is instantiated only at
-`finrl_pro_ds/crypto/live/live_engine.py:140` (the RL live engine). The TAILWIND executor has
+`sharpen/crypto/live/live_engine.py:140` (the RL live engine). The TAILWIND executor has
 no tracker call site, so this artifact satisfies the protocol contract and is ready for the
 consumer, but nothing enforces drift at runtime on this path today. Wiring that consumer is a
 pre-attempt item for the Tier-2 audit.
@@ -41,15 +41,15 @@ import numpy as np
 ROOT = Path(__file__).resolve().parents[2]
 OUT = ROOT / "results" / "tailwind_v1"
 OUT.mkdir(parents=True, exist_ok=True)
-sys.path.insert(0, str(ROOT))                              # finrl_pro_ds (bare-script run)
+sys.path.insert(0, str(ROOT))                              # sharpen (bare-script run)
 sys.path.insert(0, str(Path(__file__).resolve().parent))   # sibling research modules
 
 import audit_tailwind_book as atb              # noqa: E402
 import portfolio_frontier as pf                # noqa: E402
 import xsec_momentum_falsification as mom      # noqa: E402
 
-from finrl_pro_ds.features import defensive_signals as dfs  # noqa: E402
-from finrl_pro_ds.reporting.eval_distribution import (      # noqa: E402
+from sharpen.features import defensive_signals as dfs  # noqa: E402
+from sharpen.reporting.eval_distribution import (      # noqa: E402
     DEFAULT_DEADBAND_ABS,
     DEFAULT_SATURATION_ABS,
     compute_eval_distribution,

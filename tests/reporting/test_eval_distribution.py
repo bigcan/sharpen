@@ -5,7 +5,7 @@ from __future__ import annotations
 import numpy as np
 import pytest
 
-from finrl_pro_ds.reporting.eval_distribution import (
+from sharpen.reporting.eval_distribution import (
     DEFAULT_DEADBAND_ABS,
     DEFAULT_HIST_EDGES,
     DEFAULT_SATURATION_ABS,

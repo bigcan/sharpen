@@ -7,7 +7,7 @@ these tests pin the shape.
 from __future__ import annotations
 
 import scripts.research.crucible_corrected_contract as ccm
-from finrl_pro_ds.crucible.corrected_contract import CorrectedConfig
+from sharpen.crucible.corrected_contract import CorrectedConfig
 
 
 def _setup():

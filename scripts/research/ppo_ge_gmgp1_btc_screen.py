@@ -36,9 +36,9 @@ import yaml
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
 
-from finrl_pro_ds.agents.ppo_continuous.ppo_continuous_agent import PPOContinuousAgent  # noqa: E402
-from finrl_pro_ds.hpo.env_factory import create_vector_env, make_env  # noqa: E402
-from finrl_pro_ds.training.ppo_continuous_trainer import PPOContinuousTrainer  # noqa: E402
+from sharpen.agents.ppo_continuous.ppo_continuous_agent import PPOContinuousAgent  # noqa: E402
+from sharpen.hpo.env_factory import create_vector_env, make_env  # noqa: E402
+from sharpen.training.ppo_continuous_trainer import PPOContinuousTrainer  # noqa: E402
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
 logger = logging.getLogger("ppo_ge_screen")

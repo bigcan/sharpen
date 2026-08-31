@@ -13,7 +13,7 @@ Investigation concluded the **entire SG-1 and GMGP-1 V7 multiscale pipeline is l
 
 ## 2. Evidence
 
-**The bug.** X2 coarse-bar look-ahead in the shared `finrl_pro_ds/data/multiscale_handler.py`: `_scale_index_map` mapped each base bar to the *fully-completed* coarse bar, feeding up to `scale − base_scale` minutes of its own future into the observation. Introduced at file creation (`7b1d9907`, Session 121); invisible to hundreds of diff-scoped `/audit` runs (the line never re-appeared in a diff until the fix); caught only by a Tier-2 deep lifecycle audit. Fixed in `6c027e19` (2026-05-30).
+**The bug.** X2 coarse-bar look-ahead in the shared `sharpen/data/multiscale_handler.py`: `_scale_index_map` mapped each base bar to the *fully-completed* coarse bar, feeding up to `scale − base_scale` minutes of its own future into the observation. Introduced at file creation (`7b1d9907`, Session 121); invisible to hundreds of diff-scoped `/audit` runs (the line never re-appeared in a diff until the fix); caught only by a Tier-2 deep lifecycle audit. Fixed in `6c027e19` (2026-05-30).
 
 **Two layers of contamination:**
 - **Layer 1 — environment** (fixed by `6c027e19`): the obs itself carried future data.

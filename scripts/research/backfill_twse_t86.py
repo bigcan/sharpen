@@ -5,7 +5,7 @@ The Crucible Taiwan overlay slots were power-starved: the connector's old 400-da
 each ``twse_inst:*`` series with only ~267 of the panel's ~2,796 bars (~9.5%), so a flow overlay would
 have needed an implausibly large marginal edge to clear the pre-registered gates. T86 IS range-
 queryable arbitrarily far back (live-verified: full snapshots for 2014 and 2018), so this script fills
-the persistent day store (``finrl_pro_ds/crucible/data/twse_institutional._AccumulationStore``) once,
+the persistent day store (``sharpen/crucible/data/twse_institutional._AccumulationStore``) once,
 from the panel start (2015-01-05) to today, lifting coverage to ~2,750 bars (SE(SR) ~1.0 -> ~0.30).
 
 It is idempotent and resumable: the store persists per-day and the connector skips already-stored days,
@@ -34,7 +34,7 @@ ROOT = Path(__file__).resolve().parents[2]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
-from finrl_pro_ds.crucible.data.twse_institutional import (  # noqa: E402
+from sharpen.crucible.data.twse_institutional import (  # noqa: E402
     _DEFAULT_STORE_PATH,
     _DEFAULT_TICKERS,
     _FIELD_COLUMNS,

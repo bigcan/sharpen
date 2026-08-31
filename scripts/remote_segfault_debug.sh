@@ -26,7 +26,7 @@ print(f'OK - vector env created')
 venv.close()
 
 print('Step 4: Create trainer')
-from finrl_pro_ds.training.deepscalper_trainer import DeepScalperTrainer
+from sharpen.training.deepscalper_trainer import DeepScalperTrainer
 venv2 = create_vector_env(cfg, num_envs=24, use_sync=True)
 device = 'cuda'
 trainer = DeepScalperTrainer(venv2, cfg, device=device, run_name='debug_test')

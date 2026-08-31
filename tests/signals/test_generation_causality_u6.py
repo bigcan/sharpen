@@ -15,10 +15,10 @@ from __future__ import annotations
 import numpy as np
 import pytest
 
-import finrl_pro_ds.signals.library.operators as ops
-from finrl_pro_ds.signals.features import Panel
-from finrl_pro_ds.signals.generation.config import load_generation_config
-from finrl_pro_ds.signals.generation.evolve import _genome_is_causal, evolve
+import sharpen.signals.library.operators as ops
+from sharpen.signals.features import Panel
+from sharpen.signals.generation.config import load_generation_config
+from sharpen.signals.generation.evolve import _genome_is_causal, evolve
 
 # Seeds that ALL route through ``delay`` — so patching that one operator makes the whole population
 # leaky and the assertion below is about every scored genome, not a lucky subset.

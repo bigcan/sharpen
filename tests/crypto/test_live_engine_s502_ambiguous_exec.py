@@ -17,7 +17,7 @@ from __future__ import annotations
 import asyncio
 from datetime import datetime, timezone
 
-from finrl_pro_ds.crypto.live.live_engine import LiveTradingEngine
+from sharpen.crypto.live.live_engine import LiveTradingEngine
 
 
 def _make_engine(reconcile_interval: int = 4, total_bars: int = 17):

@@ -36,20 +36,20 @@ ROOT = Path(__file__).resolve().parents[2]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
-from finrl_pro_ds.crucible import (  # noqa: E402
+from sharpen.crucible import (  # noqa: E402
     CRUCIBLE_VERSION,
     RunManifest,
     gates_hash,
 )
-from finrl_pro_ds.signals.eval_harness import _ls_weights  # noqa: E402
-from finrl_pro_ds.signals.features import Panel  # noqa: E402
-from finrl_pro_ds.signals.generation.config import (  # noqa: E402
+from sharpen.signals.eval_harness import _ls_weights  # noqa: E402
+from sharpen.signals.features import Panel  # noqa: E402
+from sharpen.signals.generation.config import (  # noqa: E402
     load_generation_config,
     load_generation_meta,
 )
-from finrl_pro_ds.signals.generation.evolve import evolve  # noqa: E402
-from finrl_pro_ds.signals.library._alpha_formulas import FORMULAS  # noqa: E402
-from finrl_pro_ds.signals.library.alphas101 import SKIP  # noqa: E402
+from sharpen.signals.generation.evolve import evolve  # noqa: E402
+from sharpen.signals.library._alpha_formulas import FORMULAS  # noqa: E402
+from sharpen.signals.library.alphas101 import SKIP  # noqa: E402
 
 log = logging.getLogger("generate_alphas")
 DEFAULT_GATES = ROOT / "configs" / "signal_eval.gates.yaml"
@@ -135,8 +135,8 @@ def main() -> int:
         panel = _synthetic_panel(args.t, args.n, planted=args.planted, seed=0)
         base = _proxy_base_sleeves(panel, hold=ek["hold_horizon"])
     elif meta["panel"] == "taiwan":
-        from finrl_pro_ds.data.taiwan_panel_loader import load_taiwan_panel
-        from finrl_pro_ds.signals.generation.base_sleeves import taiwan_base_sleeves
+        from sharpen.data.taiwan_panel_loader import load_taiwan_panel
+        from sharpen.signals.generation.base_sleeves import taiwan_base_sleeves
         panel = load_taiwan_panel(  # 10-ETF cross-asset panel from taiwan_cross_asset.yaml
             args.start, args.end)
         log.info("TAIWAN base book (TX/TE/TF futures TSMOM, single-leg) on the panel clock.")
@@ -144,8 +144,8 @@ def main() -> int:
             panel, hold_horizon=ek["hold_horizon"], cost_bps=ek["cost_bps"],
             start=args.start, end=args.end)
     else:                                # cross_asset (the default, validated substrate)
-        from finrl_pro_ds.data.cross_asset_panel_loader import load_cross_asset_panel
-        from finrl_pro_ds.signals.generation.base_sleeves import production_base_sleeves
+        from sharpen.data.cross_asset_panel_loader import load_cross_asset_panel
+        from sharpen.signals.generation.base_sleeves import production_base_sleeves
         panel = load_cross_asset_panel(  # universe comes from the cross-asset config, not gates
             args.start, args.end, config_path=ROOT / "configs" / "cross_asset_momentum.yaml")
         log.info("PRODUCTION base sleeves (linear-core TSMOM + rates-carry) on the panel clock.")

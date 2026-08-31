@@ -4,7 +4,7 @@ import unittest
 import numpy as np
 import pandas as pd
 
-from finrl_pro_ds.analytics.pyfolio_analyzer import PyfolioAnalyzer
+from sharpen.analytics.pyfolio_analyzer import PyfolioAnalyzer
 
 
 class TestAnalyticsFixes(unittest.TestCase):

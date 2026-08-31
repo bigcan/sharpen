@@ -63,7 +63,7 @@ The mis-scoped workflow ultimately completed (`docs/research/UNSPECIFIED_deep_li
 
 ## 5. Concrete next steps
 **Paper soak (not blocked):**
-1. Wire rates-carry into the rung-1 paper executor as the documented `carry_ary` additive sleeve (`finrl_pro_ds/envs/multi_asset_allocator_env.py:511`); re-run the rung-1 **forward-path** audit on the 2-sleeve executor (the cont-47 step-4 capital-gate items still apply).
+1. Wire rates-carry into the rung-1 paper executor as the documented `carry_ary` additive sleeve (`sharpen/envs/multi_asset_allocator_env.py:511`); re-run the rung-1 **forward-path** audit on the 2-sleeve executor (the cont-47 step-4 capital-gate items still apply).
 2. Set monitoring to the honest ~0.4–0.5 Sharpe expectation and attribute per-sleeve P&L (watch rates-carry's regime contribution — it should be ~0 standalone in the current rate regime).
 
 **REAL-capital gate (S2 — must clear before live $):**

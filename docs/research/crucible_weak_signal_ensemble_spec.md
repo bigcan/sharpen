@@ -28,7 +28,7 @@ record types: **20 pre-registered** (12 `altdata` overlays + 8 `101alpha` cross-
 **20 scored/LOGGED** (10 overlay + 10 cross-sectional; `family` is not re-stamped on the scored
 row, hence `NULL`). All scored candidates are **LOGGED (0 PROMISING)**.
 
-Binding generation gates ([fitness.py:310](../../finrl_pro_ds/signals/generation/fitness.py)):
+Binding generation gates ([fitness.py:310](../../sharpen/signals/generation/fitness.py)):
 `ΔSR_marginal ≥ 0.10` ∧ `DSR_aug ≥ 0.90` ∧ `marginal-HLZ t ≥ 3.0` ∧ `corr-to-base ≤ 0.70` ∧ not-fragile.
 
 | metric | gate | batch max | batch median | batch min |
@@ -146,7 +146,7 @@ book, clears a book-level significance bar — with multiplicity deflated agains
 against each candidate in isolation.
 
 ### Where it plugs in
-[evolve.py:278](../../finrl_pro_ds/signals/generation/evolve.py) currently does:
+[evolve.py:278](../../sharpen/signals/generation/evolve.py) currently does:
 ```python
 train_passers = [c for c in ranked if c.result is not None and c.result.passes_gate]
 ```
@@ -155,7 +155,7 @@ per-candidate gate but are individually non-degenerate — and assembles a cohor
 *after* per-candidate scoring, *before* holdout validation, and emits a new artifact
 (`CohortEvidence`) that the orchestrator records alongside the per-candidate cards.
 
-### New module: `finrl_pro_ds/signals/generation/cohort.py`
+### New module: `sharpen/signals/generation/cohort.py`
 
 ```python
 @dataclass(frozen=True, slots=True)
@@ -233,7 +233,7 @@ destination (book), deflate for the WHOLE journey (search + the choose-which-m-t
 ## Part 2 — Cross-candidate correlation control
 
 **Gap today:** the only correlation guard is `_base_span_corr` in
-[fitness.py:177](../../finrl_pro_ds/signals/generation/fitness.py) — candidate vs. the *base
+[fitness.py:177](../../sharpen/signals/generation/fitness.py) — candidate vs. the *base
 sleeves*. Nothing measures candidate-vs-candidate correlation, so the search can (and in cont-107
 did) surface a pool of near-duplicates. Without this, #1's cohort is a mirage: N correlated
 members give book Sharpe ≈ s·√(N/(1+(N−1)ρ)), not s·√N, and the deflation would flag it as
@@ -271,14 +271,14 @@ volume,…))` twins. It is a *search-efficiency* fix; 2a is the *correctness* fi
 ## Part 3 — Correlation-aware combiner
 
 **Gap today:** the shipped combiner is convex inverse-vol risk-parity with
-`redundancy_strength = 0.0` ([allocator_factory.py:561](../../finrl_pro_ds/envs/allocator_factory.py)).
+`redundancy_strength = 0.0` ([allocator_factory.py:561](../../sharpen/envs/allocator_factory.py)).
 It weights by 1/σ only — it does **not** account for correlation, so it cannot harvest the
 diversification the ensemble thesis promises, and it *over-weights* a cluster of correlated
 members (each gets its own 1/σ slice, concentrating the book on their shared factor).
 
 **Good news:** the machinery already exists and is *off*, not missing.
 `dynamic_sleeve_alphas` already computes `redund_s = exp(−λ_r · ρ̄_s)` from
-`_trailing_mean_abs_corr` ([allocator_factory.py:458](../../finrl_pro_ds/envs/allocator_factory.py)),
+`_trailing_mean_abs_corr` ([allocator_factory.py:458](../../sharpen/envs/allocator_factory.py)),
 where `ρ̄_s` is sleeve s's trailing mean `|corr|` to the other sleeves. With `λ_r = 0` this
 degrades to `redund ≡ 1` (byte-identical to the live inverse-vol book — the back-compat identity
 that protects the paper executor). The dispatch seam `combiner_alphas` already routes on a

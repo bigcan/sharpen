@@ -32,7 +32,7 @@ from sklearn.ensemble import RandomForestClassifier  # noqa: E402
 from sklearn.metrics import roc_auc_score, accuracy_score, brier_score_loss  # noqa: E402
 from sklearn.calibration import calibration_curve  # noqa: E402
 
-from finrl_pro_ds.data.feature_engineering import MICRO_FEATURE_COLS, MACRO_FEATURE_COLS  # noqa: E402
+from sharpen.data.feature_engineering import MICRO_FEATURE_COLS, MACRO_FEATURE_COLS  # noqa: E402
 
 # ── Feature columns ──
 # Exclude fev3 cross-TF features (only use v2 baseline 45 features)

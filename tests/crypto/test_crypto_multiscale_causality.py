@@ -23,7 +23,7 @@ from __future__ import annotations
 import numpy as np
 import pandas as pd
 
-from finrl_pro_ds.crypto.data.multiscale_crypto_handler import MultiScaleCryptoHandler
+from sharpen.crypto.data.multiscale_crypto_handler import MultiScaleCryptoHandler
 
 
 def _build_ohlcv(assets: list[str], n_hours: int, start: str = "2025-01-01") -> pd.DataFrame:

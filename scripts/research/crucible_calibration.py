@@ -17,7 +17,7 @@ E2). The harness is GREEN only if BOTH hold at one operating point.
 
 WHAT IS CALIBRATED (the real gate, not a copy)
 ----------------------------------------------
-Drives the SHIPPED funnel: ``finrl_pro_ds.signals.generation.evolve.evolve(...)`` -> ``report.promising``,
+Drives the SHIPPED funnel: ``sharpen.signals.generation.evolve.evolve(...)`` -> ``report.promising``,
 whose binding decision is ``combination_fitness(...).passes_gate`` re-scored on the embargoed holdout
 (a 5-condition AND: marginal uplift >= 0.10, deflated-Sharpe dsr_aug >= 0.90, HLZ marginal-t >= 3.0,
 base-corr <= 0.70, CPCV path distribution not fragile). No statistic is re-implemented here.
@@ -51,22 +51,22 @@ ROOT = Path(__file__).resolve().parents[2]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
-from finrl_pro_ds.crucible.corrected_contract import (  # noqa: E402
+from sharpen.crucible.corrected_contract import (  # noqa: E402
     CorrectedConfig,
     corrected_contract_fitness,
     fresh_lord_level,
 )
-from finrl_pro_ds.crucible.orchestrator.fdr import OnlineFDR  # noqa: E402
-from finrl_pro_ds.crucible.orchestrator.substrate import _power_holdout_bars  # noqa: E402
-from finrl_pro_ds.signals.features import Panel  # noqa: E402
-from finrl_pro_ds.signals.generation.config import load_generation_config  # noqa: E402
-from finrl_pro_ds.signals.generation.evolve import _overlay_returns, evolve  # noqa: E402
-from finrl_pro_ds.signals.generation.fitness import (  # noqa: E402
+from sharpen.crucible.orchestrator.fdr import OnlineFDR  # noqa: E402
+from sharpen.crucible.orchestrator.substrate import _power_holdout_bars  # noqa: E402
+from sharpen.signals.features import Panel  # noqa: E402
+from sharpen.signals.generation.config import load_generation_config  # noqa: E402
+from sharpen.signals.generation.evolve import _overlay_returns, evolve  # noqa: E402
+from sharpen.signals.generation.fitness import (  # noqa: E402
     FitnessConfig,
     _combined_book,
     combination_fitness,
 )
-from finrl_pro_ds.signals.library._alpha_formulas import FORMULAS  # noqa: E402
+from sharpen.signals.library._alpha_formulas import FORMULAS  # noqa: E402
 
 log = logging.getLogger("crucible_calibration")
 
@@ -263,7 +263,7 @@ def randomize_feature_slots(panel: Panel, *, seed: int) -> Panel:
 def _proxy_base_sleeves(panel: Panel, *, hold: int) -> dict[str, np.ndarray]:
     """Inline TSMOM (252-1) + short reversal PROXY rank-L/S books — a base book for the marginal gate
     to improve upon. Derived from PRICE only (independent of the regime slot)."""
-    from finrl_pro_ds.signals.eval_harness import _ls_weights
+    from sharpen.signals.eval_harness import _ls_weights
 
     c = panel.close
     fwd1 = panel.forward_returns(1)
@@ -375,14 +375,14 @@ def _xsec_candidate_returns(x: np.ndarray, panel: Panel, *, hold_horizon: int, c
                             min_names: int) -> tuple[np.ndarray, float]:
     """The ORACLE cross-sectional book on the planted characteristic — the same daily-marked,
     rebalance-and-hold rank-L/S construction ``evolve._candidate_returns`` builds from a DSL genome
-    (:func:`finrl_pro_ds.signals.eval_harness._ls_weights`), fed the plant directly.
+    (:func:`sharpen.signals.eval_harness._ls_weights`), fed the plant directly.
 
     Using the oracle rather than a mined genome is deliberate and mirrors how the OVERLAY curve is
     measured (it scores ``macro:plant`` itself, not a search result): the question is the GATE's
     detection floor at a given substrate size, so the signal must be handed over cleanly. Any real
     genome is weaker, so every MDE row here is a LOWER bound on the deployed detection floor — the
     conservative direction for a guard that refuses when MDE is too high."""
-    from finrl_pro_ds.signals.eval_harness import _ls_weights
+    from sharpen.signals.eval_harness import _ls_weights
 
     fwd1 = panel.forward_returns(1)
     T = panel.T

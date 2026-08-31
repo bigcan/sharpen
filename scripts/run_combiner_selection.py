@@ -4,7 +4,7 @@
 Sweeps the dynamic combiner's (λ=``tilt_strength``, ``perf_window``, ``perf_metric``) grid and
 decides whether the DYNAMIC perf-tilt combiner beats the FROZEN static inverse-vol combiner
 OOS by the pre-registered ``gates.combiner_beats_static.min_uplift_vs_baseline`` (ADR-C1-4),
-else ``ship_static_rp``. Reuses :class:`~finrl_pro_ds.paper.TwoSleeveExecutor` end-to-end on
+else ``ship_static_rp``. Reuses :class:`~sharpen.paper.TwoSleeveExecutor` end-to-end on
 the same two-sleeve data as ``run_cross_asset_paper_validation.py``.
 
 **Honest selection (anti-overfit):** the grid is selected on an IN-SAMPLE front split and the
@@ -35,7 +35,7 @@ from typing import Mapping, Sequence
 import numpy as np
 import yaml
 
-from finrl_pro_ds.paper import TwoSleeveExecutor
+from sharpen.paper import TwoSleeveExecutor
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
 log = logging.getLogger("combiner_selection")
@@ -169,7 +169,7 @@ def main() -> int:
     args = ap.parse_args()
 
     # Imported here so the pure select_combiner() (and its unit test) need no data layer.
-    from finrl_pro_ds.data.cross_asset_loader import (
+    from sharpen.data.cross_asset_loader import (
         build_two_sleeve_arrays,
         load_two_sleeve_data,
     )

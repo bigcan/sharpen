@@ -5,7 +5,7 @@ from pathlib import Path
 
 import pytest
 
-from finrl_pro_ds.signals.generation.config import (
+from sharpen.signals.generation.config import (
     load_generation_config,
     load_generation_meta,
 )

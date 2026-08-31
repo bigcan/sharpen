@@ -15,7 +15,7 @@ import gymnasium as gym
 import numpy as np
 import pytest
 
-from finrl_pro_ds.envs.risk_shaping_wrapper import RiskShapingWrapper
+from sharpen.envs.risk_shaping_wrapper import RiskShapingWrapper
 
 
 # ---------------------------------------------------------------------------

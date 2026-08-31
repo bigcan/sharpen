@@ -10,7 +10,7 @@ from __future__ import annotations
 import numpy as np
 
 import scripts.research.crucible_oracle_injection as oi
-from finrl_pro_ds.signals.generation.fitness import FitnessConfig
+from sharpen.signals.generation.fitness import FitnessConfig
 
 _CFG = FitnessConfig(embargo=10)
 

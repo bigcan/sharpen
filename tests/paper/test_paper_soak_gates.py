@@ -10,9 +10,9 @@ import json
 
 import numpy as np
 
-from finrl_pro_ds.paper.parity_harness import ParityReport
-from finrl_pro_ds.paper.paper_state import LiveTrajectory
-from finrl_pro_ds.paper.soak_metrics import (
+from sharpen.paper.parity_harness import ParityReport
+from sharpen.paper.paper_state import LiveTrajectory
+from sharpen.paper.soak_metrics import (
     FAIL,
     PASS,
     UNKNOWN,

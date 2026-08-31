@@ -11,7 +11,7 @@ import numpy as np
 import pytest
 import yaml
 
-from finrl_pro_ds.envs import allocator_factory as factory
+from sharpen.envs import allocator_factory as factory
 
 ROOT = Path(__file__).resolve().parents[2]
 CFG = yaml.safe_load((ROOT / "configs" / "cross_asset_momentum.yaml").read_text(encoding="utf-8"))

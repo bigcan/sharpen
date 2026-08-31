@@ -37,7 +37,7 @@ echo "=== SyncVectorEnv test ==="
 cd /workspace/DeepScalper
 python -c "
 import yaml
-from finrl_pro_ds.training.deepscalper_trainer import DeepScalperTrainer
+from sharpen.training.deepscalper_trainer import DeepScalperTrainer
 cfg = yaml.safe_load(open('configs/phase_b13_inventory_penalty_5min.yaml'))
 # Try creating trainer (this is where segfault happens)
 try:

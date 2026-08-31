@@ -14,7 +14,7 @@ from __future__ import annotations
 import asyncio
 from unittest.mock import AsyncMock, MagicMock
 
-from finrl_pro_ds.crypto.execution.exchange_perp_broker import (
+from sharpen.crypto.execution.exchange_perp_broker import (
     ExchangePerpBroker,
     OrderResult,
 )

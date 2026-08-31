@@ -62,7 +62,7 @@ def _combined_dsr_pbo(n_trials, min_dsr, block_days, bracket_N, label):
     the patched `mom` globals."""
     import portfolio_frontier as pf
     import audit_tailwind_book as at
-    from finrl_pro_ds.crypto.eval.statistics import (
+    from sharpen.crypto.eval.statistics import (
         block_bootstrap_sharpe_ci, deflated_sharpe_ratio, excess_kurtosis,
         probability_of_backtest_overfitting, skewness,
     )

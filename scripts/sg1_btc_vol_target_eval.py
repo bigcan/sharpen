@@ -70,9 +70,9 @@ import yaml
 
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
 
-from finrl_pro_ds.hpo.env_factory import make_env  # noqa: E402
-from finrl_pro_ds.data.splitter import RollingWindowSplitter  # noqa: E402
-from finrl_pro_ds.config_utils import _prep_backtest_config  # noqa: E402
+from sharpen.hpo.env_factory import make_env  # noqa: E402
+from sharpen.data.splitter import RollingWindowSplitter  # noqa: E402
+from sharpen.config_utils import _prep_backtest_config  # noqa: E402
 from scripts.sg1_btc_velotrade_ensemble_eval import _override_test_window  # noqa: E402
 
 PCTS = [50, 60, 70, 80, 90]

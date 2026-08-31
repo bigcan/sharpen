@@ -24,7 +24,7 @@ from typing import Any
 
 import yaml
 
-# Repo root on sys.path so lazy `finrl_pro_ds.*` imports (e.g. `_resolve_base_book`'s
+# Repo root on sys.path so lazy `sharpen.*` imports (e.g. `_resolve_base_book`'s
 # `config_utils.deep_merge`) resolve when this file is invoked directly as a script
 # (`python scripts/validate_config.py ...`), where sys.path[0] is `scripts/`, not the
 # repo root or cwd. Mirrors the guard `execution_overlay_runner.py` already carries.
@@ -87,7 +87,7 @@ def _resolve_base_book(cfg: dict[str, Any], config_path: Path) -> dict[str, Any]
     base_path = next((p for p in candidates if p.exists() and p.is_file()), None)
     if base_path is None:
         return cfg
-    from finrl_pro_ds.config_utils import deep_merge
+    from sharpen.config_utils import deep_merge
 
     base_cfg = load_yaml(base_path)
     return deep_merge(base_cfg, cfg)
@@ -365,7 +365,7 @@ def check_legacy_prop_firm_block(
 
     Post S495-cont the prop-firm decoupling split responsibilities:
     - Training-side DD shaping lives under ``env.risk:`` +
-      :class:`finrl_pro_ds.envs.risk_shaping_wrapper.RiskShapingWrapper`.
+      :class:`sharpen.envs.risk_shaping_wrapper.RiskShapingWrapper`.
     - Live-side profit-target tracking lives under ``challenge:`` +
       ``ChallengeStateMachine`` (live engine).
 
@@ -1839,7 +1839,7 @@ def check_v23_swap_handshake(cfg: dict, r: ValidationResult) -> None:
     check_paper_deploy) AND should declare an explicit
     ``safety.last_bundle_file`` so the handshake state survives container
     restarts on a non-default mount. The handshake itself is enforced at
-    runtime by ``finrl_pro_ds.live.swap_handshake.check_swap_approved``;
+    runtime by ``sharpen.live.swap_handshake.check_swap_approved``;
     this validator only catches the declaration mistake.
     """
     if not _is_prop_firm(cfg):
@@ -2411,9 +2411,9 @@ def check_crossq(cfg: dict, r: ValidationResult) -> None:
         return
 
     try:
-        from finrl_pro_ds.agents.sac.sac_agent import normalize_crossq_config
+        from sharpen.agents.sac.sac_agent import normalize_crossq_config
     except ImportError:
-        r.warn("crossq present but finrl_pro_ds is not importable — run with PYTHONPATH=. to validate it")
+        r.warn("crossq present but sharpen is not importable — run with PYTHONPATH=. to validate it")
         return
 
     try:
@@ -2461,7 +2461,7 @@ def validate(config_path: Path, stage: str, overlays: list[str] | None = None) -
     # checks see the effective env/data/gates (exec-overlay config inherits the 2-sleeve book).
     cfg = _resolve_base_book(cfg, config_path)
     if overlays:
-        from finrl_pro_ds.config_utils import apply_overlays
+        from sharpen.config_utils import apply_overlays
         project_root = Path(__file__).resolve().parent.parent
         cfg = apply_overlays(
             cfg, overlays,

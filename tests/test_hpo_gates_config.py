@@ -12,8 +12,8 @@ than trust:
 import numpy as np
 import pytest
 
-from finrl_pro_ds.hpo import objective as obj
-from finrl_pro_ds.hpo.evaluate import _extract_portfolio_value, buy_and_hold_total_return
+from sharpen.hpo import objective as obj
+from sharpen.hpo.evaluate import _extract_portfolio_value, buy_and_hold_total_return
 
 
 class _StubEnv:

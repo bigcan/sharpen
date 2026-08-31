@@ -48,7 +48,7 @@ import pandas as pd  # noqa: E402  (after sys.path bootstrap so scheduled runs r
 import requests  # noqa: E402
 
 import deribit_chain_logger as dcl  # noqa: E402  (sibling script: shared chain reader + parse)
-from finrl_pro_ds.crypto.options_pricing import ANN, leg_delta  # noqa: E402
+from sharpen.crypto.options_pricing import ANN, leg_delta  # noqa: E402
 
 logger = logging.getLogger("vrp_testnet")
 

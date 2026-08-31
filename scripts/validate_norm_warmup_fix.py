@@ -22,8 +22,8 @@ import pandas as pd
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 
-from finrl_pro_ds.crypto.live.live_obs_builder import LiveObsBuilder  # noqa: E402
-from finrl_pro_ds.data.multiscale_handler import (  # noqa: E402
+from sharpen.crypto.live.live_obs_builder import LiveObsBuilder  # noqa: E402
+from sharpen.data.multiscale_handler import (  # noqa: E402
     _compute_scale_features, _resample_ohlcv,
 )
 

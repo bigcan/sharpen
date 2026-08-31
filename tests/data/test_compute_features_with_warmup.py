@@ -14,7 +14,7 @@ import numpy as np
 import pandas as pd
 import pytest
 
-from finrl_pro_ds.data.multiscale_handler import (
+from sharpen.data.multiscale_handler import (
     _compute_scale_features,
     compute_features_with_warmup,
 )
@@ -68,7 +68,7 @@ def test_live_obs_builder_strips_tz_on_init_and_update():
     LiveObsBuilder must force tz-naive at the parse boundary. This test pins
     that contract on both _init_from_dataframe and update().
     """
-    from finrl_pro_ds.crypto.live.live_obs_builder import LiveObsBuilder
+    from sharpen.crypto.live.live_obs_builder import LiveObsBuilder
     df = _synthetic_ohlcv(2000)
     df_aware = df.copy()
     df_aware['timestamp'] = pd.to_datetime(df_aware['timestamp']).dt.tz_localize('UTC')

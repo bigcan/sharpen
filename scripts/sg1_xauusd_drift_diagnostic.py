@@ -39,7 +39,7 @@ import yaml
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 
-from finrl_pro_ds.hpo.env_factory import make_env  # noqa: E402
+from sharpen.hpo.env_factory import make_env  # noqa: E402
 from scripts.sg1_xauusd_ensemble_eval import (  # noqa: E402
     _agg_agreement,
     _infer_actions,

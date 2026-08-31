@@ -16,7 +16,7 @@ import math
 
 import pytest
 
-from finrl_pro_ds.crucible.orchestrator.substrate import (
+from sharpen.crucible.orchestrator.substrate import (
     interp_mde,
     stamp_substrate_power,
     sweep_candidate_type,

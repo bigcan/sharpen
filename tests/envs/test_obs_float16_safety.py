@@ -23,10 +23,10 @@ from __future__ import annotations
 import numpy as np
 import pytest
 
-from finrl_pro_ds.crypto.envs import options_vol_harvest_env as opt_mod
-from finrl_pro_ds.envs import multi_asset_allocator_env as alloc_mod
-from finrl_pro_ds.envs.multi_asset_allocator_env import MultiAssetAllocatorEnv
-from finrl_pro_ds.envs.obs_guard import FP16_MAX, OBS_CLIP, sanitize_obs
+from sharpen.crypto.envs import options_vol_harvest_env as opt_mod
+from sharpen.envs import multi_asset_allocator_env as alloc_mod
+from sharpen.envs.multi_asset_allocator_env import MultiAssetAllocatorEnv
+from sharpen.envs.obs_guard import FP16_MAX, OBS_CLIP, sanitize_obs
 
 from .conftest import build_arrays, synthetic_prices
 from .test_options_vol_harvest import make_env as make_options_env

@@ -261,7 +261,7 @@ def main() -> None:
 
     saffs_root = ensure_prism_root()
     # Import only AFTER PRISM_ROOT is set.
-    from finrl_pro_ds.crypto.features.prism_features import (
+    from sharpen.crypto.features.prism_features import (
         compute_prism_features,
         get_prism_feature_cols,
         unload_prism,

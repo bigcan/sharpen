@@ -44,7 +44,7 @@ try:
 except ModuleNotFoundError:
     pass
 
-from finrl_pro_ds.crucible import (  # noqa: E402
+from sharpen.crucible import (  # noqa: E402
     CRUCIBLE_VERSION,
     DataCatalog,
     Lockbox,
@@ -56,18 +56,18 @@ from finrl_pro_ds.crucible import (  # noqa: E402
     load_incubation_criterion,
     run_orchestrator_tick,
 )
-from finrl_pro_ds.crucible.agentic import LibrarySeedProposer, LlmProposer  # noqa: E402
-from finrl_pro_ds.crucible.corrected_contract import CorrectedConfig  # noqa: E402
-from finrl_pro_ds.crucible.search_memory import SearchMemoryConfig  # noqa: E402
-from finrl_pro_ds.crucible.orchestrator.orchestrator import _safe  # noqa: E402
-from finrl_pro_ds.crucible.orchestrator.substrate import (  # noqa: E402
+from sharpen.crucible.agentic import LibrarySeedProposer, LlmProposer  # noqa: E402
+from sharpen.crucible.corrected_contract import CorrectedConfig  # noqa: E402
+from sharpen.crucible.search_memory import SearchMemoryConfig  # noqa: E402
+from sharpen.crucible.orchestrator.orchestrator import _safe  # noqa: E402
+from sharpen.crucible.orchestrator.substrate import (  # noqa: E402
     PowerGuard,
     PreparedSubstrate,
     folded_snapshot_hash,
     stamp_substrate_power,
 )
-from finrl_pro_ds.signals.features import Panel  # noqa: E402
-from finrl_pro_ds.signals.generation.config import (  # noqa: E402
+from sharpen.signals.features import Panel  # noqa: E402
+from sharpen.signals.generation.config import (  # noqa: E402
     load_cohort_config,
     load_generation_config,
     load_generation_meta,
@@ -190,7 +190,7 @@ def _synthetic_panel(t: int, n: int, *, seed: int = 0, n_feature_slots: int = 1)
 
 def _proxy_base_sleeves(panel: Panel, hold: int = 21) -> dict[str, np.ndarray]:
     """Inline TSMOM + reversal proxy books (stand-in so the loop runs end-to-end on synthetic)."""
-    from finrl_pro_ds.signals.eval_harness import _ls_weights
+    from sharpen.signals.eval_harness import _ls_weights
 
     c = panel.close
     fwd1 = panel.forward_returns(1)
@@ -225,7 +225,7 @@ def _build_substrate(args, cfg, ek, meta, sweep, sweep_hash) -> tuple[Substrate,
 
     def prepare() -> PreparedSubstrate:
         if args.mode == "synthetic":
-            from finrl_pro_ds.signals.generation.base_sleeves import unit_components
+            from sharpen.signals.generation.base_sleeves import unit_components
             panel = _synthetic_panel(args.t, args.n, n_feature_slots=args.synthetic_slots)
             base = _proxy_base_sleeves(panel, hold=ek["hold_horizon"])
             # F14: proxy sleeves are unit-gross cost-free return streams → the overlay-cost
@@ -239,9 +239,9 @@ def _build_substrate(args, cfg, ek, meta, sweep, sweep_hash) -> tuple[Substrate,
             # failure mode this substrate is most exposed to.
             import dataclasses
 
-            from finrl_pro_ds.crucible.data.altdata_bridge import bridge_altdata_feature_slots
-            from finrl_pro_ds.crucible.data.us_equity_panel import build_us_equity_panel
-            from finrl_pro_ds.signals.generation.base_sleeves import us_equity_base_sleeves
+            from sharpen.crucible.data.altdata_bridge import bridge_altdata_feature_slots
+            from sharpen.crucible.data.us_equity_panel import build_us_equity_panel
+            from sharpen.signals.generation.base_sleeves import us_equity_base_sleeves
             panel = build_us_equity_panel()
             # 2026-08-10: bridge the macro/positioning series into feature slots, exactly as the
             # cross_asset branch does. WITHOUT this the panel carries ZERO feature slots, so the
@@ -272,8 +272,8 @@ def _build_substrate(args, cfg, ek, meta, sweep, sweep_hash) -> tuple[Substrate,
             # cont-151 derived-optimal substrate. Same shape as the `intraday` branch below (no
             # alt-data bridge — every connector publishes daily-or-slower, which on an hourly clock
             # is a step function, not a signal), on the FX-majors union-grid panel.
-            from finrl_pro_ds.crucible.data.intraday_panel import build_fx_majors_panel
-            from finrl_pro_ds.signals.generation.base_sleeves import intraday_base_sleeves
+            from sharpen.crucible.data.intraday_panel import build_fx_majors_panel
+            from sharpen.signals.generation.base_sleeves import intraday_base_sleeves
             panel = build_fx_majors_panel()
             base_hold = meta.get("base_hold_horizon") or ek["hold_horizon"]
             base, base_components = intraday_base_sleeves(
@@ -285,8 +285,8 @@ def _build_substrate(args, cfg, ek, meta, sweep, sweep_hash) -> tuple[Substrate,
             # monthly), so bridging one onto an hourly clock would hold a single value flat across
             # ~5,694 bars a year and hand the overlay proposer a step function, not a signal. The
             # cross-sectional path over the 12 instruments is the whole mining surface here.
-            from finrl_pro_ds.crucible.data.intraday_panel import build_intraday_panel
-            from finrl_pro_ds.signals.generation.base_sleeves import intraday_base_sleeves
+            from sharpen.crucible.data.intraday_panel import build_intraday_panel
+            from sharpen.signals.generation.base_sleeves import intraday_base_sleeves
             panel = build_intraday_panel()
             # The base book rebalances on its OWN cadence (generation.base_hold_horizon). At the
             # candidate's 21-bar hold this book bleeds 30.6%/yr in friction to a calendar SR of
@@ -313,16 +313,16 @@ def _build_substrate(args, cfg, ek, meta, sweep, sweep_hash) -> tuple[Substrate,
             # substrate until 2026-08-10.
             import dataclasses
 
-            from finrl_pro_ds.crucible.data.altdata_bridge import bridge_altdata_feature_slots
-            from finrl_pro_ds.crucible.data.taiwan_altdata import (
+            from sharpen.crucible.data.altdata_bridge import bridge_altdata_feature_slots
+            from sharpen.crucible.data.taiwan_altdata import (
                 TAIWAN_ALTDATA_ALIASES,
                 taiwan_connectors,
             )
-            from finrl_pro_ds.crucible.data.taiwan_smallcap_panel import (
+            from sharpen.crucible.data.taiwan_smallcap_panel import (
                 ALL_CHANNELS,
                 build_taiwan_smallcap_panel,
             )
-            from finrl_pro_ds.signals.generation.base_sleeves import taiwan_base_sleeves
+            from sharpen.signals.generation.base_sleeves import taiwan_base_sleeves
             panel = build_taiwan_smallcap_panel(channels=ALL_CHANNELS)
             if not args.no_altdata_slots:
                 bar_start = np.datetime_as_string(panel.dates.min(), unit="D")
@@ -346,16 +346,16 @@ def _build_substrate(args, cfg, ek, meta, sweep, sweep_hash) -> tuple[Substrate,
         elif meta["panel"] == "taiwan":
             import dataclasses
 
-            from finrl_pro_ds.crucible.data.altdata_bridge import bridge_altdata_feature_slots
-            from finrl_pro_ds.crucible.data.taiwan_altdata import (
+            from sharpen.crucible.data.altdata_bridge import bridge_altdata_feature_slots
+            from sharpen.crucible.data.taiwan_altdata import (
                 TAIWAN_ALTDATA_ALIASES,
                 taiwan_connectors,
                 taiwan_per_name_coverage,
                 taiwan_per_name_slots,
             )
-            from finrl_pro_ds.crucible.data.twse_institutional import TwseInstitutionalConnector
-            from finrl_pro_ds.data.taiwan_panel_loader import load_taiwan_panel
-            from finrl_pro_ds.signals.generation.base_sleeves import taiwan_base_sleeves
+            from sharpen.crucible.data.twse_institutional import TwseInstitutionalConnector
+            from sharpen.data.taiwan_panel_loader import load_taiwan_panel
+            from sharpen.signals.generation.base_sleeves import taiwan_base_sleeves
             panel = load_taiwan_panel(args.start, args.end)
             # Bridge TWSE/TAIFEX positioning series into feature slots, same shape as the cross_asset
             # branch below (bridge_altdata_feature_slots is already generic — only the connector list
@@ -399,9 +399,9 @@ def _build_substrate(args, cfg, ek, meta, sweep, sweep_hash) -> tuple[Substrate,
         else:
             import dataclasses
 
-            from finrl_pro_ds.crucible.data.altdata_bridge import bridge_altdata_feature_slots
-            from finrl_pro_ds.data.cross_asset_panel_loader import load_cross_asset_panel
-            from finrl_pro_ds.signals.generation.base_sleeves import production_base_sleeves
+            from sharpen.crucible.data.altdata_bridge import bridge_altdata_feature_slots
+            from sharpen.data.cross_asset_panel_loader import load_cross_asset_panel
+            from sharpen.signals.generation.base_sleeves import production_base_sleeves
             panel = load_cross_asset_panel(
                 args.start, args.end, config_path=ROOT / "configs" / "cross_asset_momentum.yaml")
             # Bridge accepted macro/positioning/fundamental series into feature slots so the overlay
@@ -581,7 +581,7 @@ def _run_governance_epilogue(sub, out_dir: Path, handoff_ts: str) -> None:
     surfacing a NOTIFY_<hash>.md + a structured log line. OFFLINE notifiers only — a live TelegramNotifier
     (@<TELEGRAM_BOT>) is a documented drop-in the operator wires deliberately, never fired from a headless run.
     Nothing here promotes or runs the Tier-2 audit (CLAUDE.md)."""
-    from finrl_pro_ds.crucible.governance import (  # noqa: E402
+    from sharpen.crucible.governance import (  # noqa: E402
         FileNotifier,
         GovernanceStore,
         LogNotifier,

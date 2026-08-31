@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from datetime import datetime, timedelta, timezone
 
-from finrl_pro_ds.cfd.live.cfd_bar_clock import CFDBarClock
+from sharpen.cfd.live.cfd_bar_clock import CFDBarClock
 
 
 # ---------------------------------------------------------------
@@ -228,7 +228,7 @@ def test_heartbeat_fires_during_market_closed_sleep(monkeypatch):
 
     # Patch asyncio.sleep in the cfd_bar_clock module to a no-op coroutine
     # so the chunked loop completes instantly.
-    import finrl_pro_ds.cfd.live.cfd_bar_clock as mod
+    import sharpen.cfd.live.cfd_bar_clock as mod
 
     async def fake_sleep(_secs):
         pass
@@ -265,7 +265,7 @@ def test_heartbeat_silent_when_callback_not_wired(monkeypatch):
 
     clock._inner.wait_for_next_bar = fake_inner_wait
 
-    import finrl_pro_ds.cfd.live.cfd_bar_clock as mod
+    import sharpen.cfd.live.cfd_bar_clock as mod
 
     async def fake_sleep(_secs):
         pass

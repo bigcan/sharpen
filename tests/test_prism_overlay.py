@@ -70,7 +70,7 @@ class TestPRISMOverlay:
 
     @patch("prism_client.PRISMClient")
     def test_normal_vol_multiplier_1x(self, mock_client_cls, base_config):
-        from finrl_pro_ds.crypto.live.prism_overlay import PRISMOverlay
+        from sharpen.crypto.live.prism_overlay import PRISMOverlay
 
         mock_client = MagicMock()
         mock_client.get_regime.return_value = _make_regime(vol_regime="NORMAL_VOL")
@@ -85,7 +85,7 @@ class TestPRISMOverlay:
 
     @patch("prism_client.PRISMClient")
     def test_low_vol_multiplier_1_3x(self, mock_client_cls, base_config):
-        from finrl_pro_ds.crypto.live.prism_overlay import PRISMOverlay
+        from sharpen.crypto.live.prism_overlay import PRISMOverlay
 
         mock_client = MagicMock()
         mock_client.get_regime.return_value = _make_regime(vol_regime="LOW_VOL", composite_code=6)
@@ -99,7 +99,7 @@ class TestPRISMOverlay:
 
     @patch("prism_client.PRISMClient")
     def test_high_vol_multiplier_0_3x(self, mock_client_cls, base_config):
-        from finrl_pro_ds.crypto.live.prism_overlay import PRISMOverlay
+        from sharpen.crypto.live.prism_overlay import PRISMOverlay
 
         mock_client = MagicMock()
         mock_client.get_regime.return_value = _make_regime(vol_regime="HIGH_VOL", composite_code=5)
@@ -113,7 +113,7 @@ class TestPRISMOverlay:
 
     @patch("prism_client.PRISMClient")
     def test_crisis_flatten(self, mock_client_cls, base_config):
-        from finrl_pro_ds.crypto.live.prism_overlay import PRISMOverlay
+        from sharpen.crypto.live.prism_overlay import PRISMOverlay
 
         mock_client = MagicMock()
         mock_client.get_regime.return_value = _make_regime(
@@ -132,7 +132,7 @@ class TestPRISMOverlay:
 
     @patch("prism_client.PRISMClient")
     def test_crisis_flatten_disabled(self, mock_client_cls, base_config):
-        from finrl_pro_ds.crypto.live.prism_overlay import PRISMOverlay
+        from sharpen.crypto.live.prism_overlay import PRISMOverlay
 
         base_config["crisis_flatten"] = False
         mock_client = MagicMock()
@@ -151,7 +151,7 @@ class TestPRISMOverlay:
 
     @patch("prism_client.PRISMClient")
     def test_api_error_fallback(self, mock_client_cls, base_config):
-        from finrl_pro_ds.crypto.live.prism_overlay import PRISMOverlay
+        from sharpen.crypto.live.prism_overlay import PRISMOverlay
 
         mock_client = MagicMock()
         mock_client.get_regime.side_effect = ConnectionError("API unreachable")
@@ -166,7 +166,7 @@ class TestPRISMOverlay:
 
     @patch("prism_client.PRISMClient")
     def test_timeout_error_fallback(self, mock_client_cls, base_config):
-        from finrl_pro_ds.crypto.live.prism_overlay import PRISMOverlay
+        from sharpen.crypto.live.prism_overlay import PRISMOverlay
 
         import requests
         mock_client = MagicMock()
@@ -181,7 +181,7 @@ class TestPRISMOverlay:
 
     @patch("prism_client.PRISMClient")
     def test_cache_hit(self, mock_client_cls, base_config):
-        from finrl_pro_ds.crypto.live.prism_overlay import PRISMOverlay
+        from sharpen.crypto.live.prism_overlay import PRISMOverlay
 
         mock_client = MagicMock()
         mock_client.get_regime.return_value = _make_regime(vol_regime="LOW_VOL", composite_code=6)
@@ -199,7 +199,7 @@ class TestPRISMOverlay:
 
     @patch("prism_client.PRISMClient")
     def test_cache_expiry(self, mock_client_cls, base_config):
-        from finrl_pro_ds.crypto.live.prism_overlay import PRISMOverlay
+        from sharpen.crypto.live.prism_overlay import PRISMOverlay
 
         base_config["cache_ttl"] = 0  # Immediate expiry
 
@@ -215,7 +215,7 @@ class TestPRISMOverlay:
 
     @patch("prism_client.PRISMClient")
     def test_custom_multipliers(self, mock_client_cls, base_config):
-        from finrl_pro_ds.crypto.live.prism_overlay import PRISMOverlay
+        from sharpen.crypto.live.prism_overlay import PRISMOverlay
 
         base_config["multipliers"]["HIGH_VOL"] = 0.5
 
@@ -230,7 +230,7 @@ class TestPRISMOverlay:
 
     @patch("prism_client.PRISMClient")
     def test_stats_tracking(self, mock_client_cls, base_config):
-        from finrl_pro_ds.crypto.live.prism_overlay import PRISMOverlay
+        from sharpen.crypto.live.prism_overlay import PRISMOverlay
 
         # cache_ttl=0 so a *successful* result is never reused, but an error
         # opens a 5-minute fallback backoff during which the cached fallback is
@@ -258,7 +258,7 @@ class TestPRISMOverlay:
 
     @patch("prism_client.PRISMClient")
     def test_regime_info_fields(self, mock_client_cls, base_config):
-        from finrl_pro_ds.crypto.live.prism_overlay import PRISMOverlay
+        from sharpen.crypto.live.prism_overlay import PRISMOverlay
 
         mock_client = MagicMock()
         mock_client.get_regime.return_value = _make_regime(

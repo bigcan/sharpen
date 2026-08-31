@@ -15,8 +15,8 @@ from __future__ import annotations
 import numpy as np
 import pytest
 
-from finrl_pro_ds.crucible.data import taiwan_altdata as ta
-from finrl_pro_ds.crucible.data.connector import SeriesRef
+from sharpen.crucible.data import taiwan_altdata as ta
+from sharpen.crucible.data.connector import SeriesRef
 
 _TICKERS = ("0050", "006208", "00891")
 _FIELDS = ("foreign_net", "trust_net")
@@ -50,7 +50,7 @@ def _stub_join(monkeypatch):
     """Bypass the network/quality/PIT machinery — this suite is about SHAPE and ALIGNMENT. The PIT gate
     itself is covered by the panel_bridge tests; here we encode the ticker into the value so a
     misaligned column is detectable."""
-    from finrl_pro_ds.crucible.data import panel_bridge as pb
+    from sharpen.crucible.data import panel_bridge as pb
 
     monkeypatch.setattr(pb, "validate_series", lambda d: type("R", (), {
         "passed": True, "reasons": (), "n_obs": 6, "max_gap_days": 0.0})())
@@ -106,7 +106,7 @@ def test_coverage_preflight_detects_ticker_drift():
 
 
 def test_per_name_terminals_are_dsl_legal_and_do_not_collide_with_the_broadcast_aliases():
-    from finrl_pro_ds.crucible.data.panel_bridge import is_valid_terminal
+    from sharpen.crucible.data.panel_bridge import is_valid_terminal
 
     for t in ta._PER_NAME_TERMINALS:
         assert is_valid_terminal(t), f"{t} is not a DSL-legal terminal"
@@ -118,8 +118,8 @@ def test_per_name_terminals_are_dsl_legal_and_do_not_collide_with_the_broadcast_
 def test_per_name_terminals_reach_the_cross_sectional_registry():
     """The point of U3a meeting U3b: these terminals must be drawable by a cross_sectional genome,
     while the broadcast ones must not."""
-    from finrl_pro_ds.signals.features import make_synthetic_panel
-    from finrl_pro_ds.signals.generation.grammar import cross_sectional_terminals
+    from sharpen.signals.features import make_synthetic_panel
+    from sharpen.signals.generation.grammar import cross_sectional_terminals
 
     T, N = 40, len(_TICKERS)
     p = make_synthetic_panel(T=T, N=N, seed=0, feature_slots={

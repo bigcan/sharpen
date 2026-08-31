@@ -165,8 +165,8 @@ def main() -> int:
     ap.add_argument("--out", default=str(ROOT / "results" / "signal_eval" / "defensive_sleeve_eval.json"))
     args = ap.parse_args()
 
-    from finrl_pro_ds.data.cross_asset_panel_loader import load_cross_asset_panel
-    from finrl_pro_ds.signals.generation.base_sleeves import production_base_sleeves
+    from sharpen.data.cross_asset_panel_loader import load_cross_asset_panel
+    from sharpen.signals.generation.base_sleeves import production_base_sleeves
 
     gen = (yaml.safe_load(Path(args.gen_gates).read_text(encoding="utf-8")) or {}).get("generation", {})
     max_base_corr = float(gen.get("max_base_corr", 0.70))

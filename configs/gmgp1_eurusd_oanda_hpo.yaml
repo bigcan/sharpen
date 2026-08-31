@@ -15,7 +15,7 @@
 # Sibling SG-1-EURUSD-OANDA paper LIVE 2026-05-26 07:42 UTC on same firm/broker.
 #
 # Broker target: OANDA practice (api-fxpractice.oanda.com). Live deploy goes
-# through `finrl_pro_ds.cfd.execution.oanda_broker.OandaBroker` shipped S551
+# through `sharpen.cfd.execution.oanda_broker.OandaBroker` shipped S551
 # (commit 17b76290). Symbol map at broker boundary: EURUSD <-> EUR_USD.
 #
 # Architecture template: clone of `gmgp1_xauusd_ftmo_hpo.yaml` (15-min V7

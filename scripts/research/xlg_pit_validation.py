@@ -29,10 +29,10 @@ import pandas as pd
 ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT))
 
-from finrl_pro_ds.data import cross_asset_loader as cal  # noqa: E402
-from finrl_pro_ds.signals.eval_harness import _ls_weights, compute_scores  # noqa: E402
-from finrl_pro_ds.signals.features import Panel  # noqa: E402
-from finrl_pro_ds.signals.library.alphas101 import SIGNALS as ALPHAS  # noqa: E402
+from sharpen.data import cross_asset_loader as cal  # noqa: E402
+from sharpen.signals.eval_harness import _ls_weights, compute_scores  # noqa: E402
+from sharpen.signals.features import Panel  # noqa: E402
+from sharpen.signals.library.alphas101 import SIGNALS as ALPHAS  # noqa: E402
 
 MEMBERS = Path(r"C:\tmp\sp500_pit_members.csv")
 CACHE = ROOT / "data" / "raw" / "equity_panel" / "_pit_union.pkl"
