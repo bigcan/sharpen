@@ -27,7 +27,7 @@ import yaml
 
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
 
-from finrl_pro_ds.hpo.env_factory import make_env  # noqa: E402
+from sharpen.hpo.env_factory import make_env  # noqa: E402
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s", datefmt="%H:%M:%S")
 log = logging.getLogger("gate-eval")
@@ -37,7 +37,7 @@ MAX_SINGLE_DAY_SHARE = 0.50
 
 
 def _build_sac_agent(config, device):
-    from finrl_pro_ds.agents.sac.sac_agent import SACAgent
+    from sharpen.agents.sac.sac_agent import SACAgent
     network_config = dict(config.get("network", {}))
     if not network_config:
         raise ValueError("config missing 'network' section")
@@ -60,10 +60,10 @@ def _build_sac_agent(config, device):
     return agent
 
 
-# _prep_backtest_config consolidated to finrl_pro_ds.config_utils in S495-cont
+# _prep_backtest_config consolidated to sharpen.config_utils in S495-cont
 # (prop-firm decoupling rev 2). Re-exported here under the original name so
 # downstream scripts that import it from this module continue to work.
-from finrl_pro_ds.config_utils import _prep_backtest_config  # noqa: E402,F401
+from sharpen.config_utils import _prep_backtest_config  # noqa: E402,F401
 
 
 def run_gate_backtest(

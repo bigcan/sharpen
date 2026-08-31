@@ -80,7 +80,7 @@ def test_pathA_features_are_walk_forward_safe():
     # In-process provider needs no DB; avoid SAFFS settings' DB-password guard at import.
     os.environ.setdefault("PRISM_USE_DB", "false")
 
-    from finrl_pro_ds.crypto.features.prism_features import (
+    from sharpen.crypto.features.prism_features import (
         compute_prism_features,
         unload_prism,
     )

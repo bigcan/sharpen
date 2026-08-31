@@ -15,8 +15,8 @@ from __future__ import annotations
 import numpy as np
 import pandas as pd
 
-from finrl_pro_ds.signals import Gates
-from finrl_pro_ds.signals.eval_harness import (
+from sharpen.signals import Gates
+from sharpen.signals.eval_harness import (
     Capturability,
     CostResult,
     CPCVResult,
@@ -26,9 +26,9 @@ from finrl_pro_ds.signals.eval_harness import (
     HygieneResult,
     Robustness,
 )
-from finrl_pro_ds.signals.features import Panel
-from finrl_pro_ds.signals.generation.fitness import FitnessConfig, combination_fitness
-from finrl_pro_ds.signals.scorecard import SignalScorecard, _finalize
+from sharpen.signals.features import Panel
+from sharpen.signals.generation.fitness import FitnessConfig, combination_fitness
+from sharpen.signals.scorecard import SignalScorecard, _finalize
 
 K = 900
 

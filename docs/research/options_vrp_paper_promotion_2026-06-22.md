@@ -91,7 +91,7 @@ sleeve, not an index put-write, is the one worth paper-promoting on this platfor
 
 ## Integration handoff — wiring BTC VRP into the paper executor
 
-The paper executor (`finrl_pro_ds/paper/two_sleeve.py`, `TwoSleeveExecutor`) is a fund-of-funds
+The paper executor (`sharpen/paper/two_sleeve.py`, `TwoSleeveExecutor`) is a fund-of-funds
 over **allocator sleeves** (momentum + rates-carry) that share one ETF price-panel union, driven
 through `linear_core_trajectory` and risk-parity-combined via `risk_parity_alphas` +
 `combine_sleeve_weights`, then replayed through `PaperState`. `_SLEEVES` is hardcoded to two.

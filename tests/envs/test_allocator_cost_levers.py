@@ -16,8 +16,8 @@ from __future__ import annotations
 
 import numpy as np
 
-from finrl_pro_ds.envs import allocator_factory as factory
-from finrl_pro_ds.envs.multi_asset_allocator_env import MultiAssetAllocatorEnv
+from sharpen.envs import allocator_factory as factory
+from sharpen.envs.multi_asset_allocator_env import MultiAssetAllocatorEnv
 
 from .conftest import build_arrays, synthetic_prices
 

@@ -1,4 +1,4 @@
-"""Tests for finrl_pro_ds.live.challenge_state_machine.
+"""Tests for sharpen.live.challenge_state_machine.
 
 Covers:
 - Smoothed target hit triggers
@@ -21,12 +21,12 @@ from unittest.mock import MagicMock
 
 import pytest
 
-from finrl_pro_ds.live.challenge_state_machine import (
+from sharpen.live.challenge_state_machine import (
     REASON_PHASE_COMPLETE,
     ChallengePhase,
     ChallengeStateMachine,
 )
-from finrl_pro_ds.monitoring.kill_file import REASON_DRIFT_CRIT, write_kill_file
+from sharpen.monitoring.kill_file import REASON_DRIFT_CRIT, write_kill_file
 
 
 # ---------------------------------------------------------------------------

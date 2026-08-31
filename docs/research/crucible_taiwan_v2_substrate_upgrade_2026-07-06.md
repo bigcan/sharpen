@@ -29,7 +29,7 @@ from ~1.0 to **~0.30**, making a ΔSR ≈ 0.6–0.9 edge *detectable* instead of
 ## Why not just re-run against `taiwan_manual`
 
 The ledger dedup key is the **canonical formula string only** — there is no substrate/data component in
-`candidate_hash` ([`hypothesis.py`](../../finrl_pro_ds/crucible/agentic/hypothesis.py) `candidate_hash`).
+`candidate_hash` ([`hypothesis.py`](../../sharpen/crucible/agentic/hypothesis.py) `candidate_hash`).
 So the ~24 overlays already scored in `taiwan_manual` at ~1/10th power are **permanently hash-blocked**
 there. Re-running against `taiwan_manual` would silently skip exactly the hypotheses we most need to
 re-test, scoring only never-seen slots while the already-seen ones stay frozen at their low-power

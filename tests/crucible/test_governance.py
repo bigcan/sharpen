@@ -6,7 +6,7 @@ survivor is handed off exactly once). A non-CLEARED entry must be REFUSED.
 """
 from __future__ import annotations
 
-from finrl_pro_ds.crucible import (
+from sharpen.crucible import (
     CRUCIBLE_VERSION,
     FileNotifier,
     GovernanceStore,
@@ -18,9 +18,9 @@ from finrl_pro_ds.crucible import (
     handoff_for,
     scan_and_handoff,
 )
-from finrl_pro_ds.crucible.agentic.card import DiscoveryCard
-from finrl_pro_ds.crucible.governance.notify import LogNotifier
-from finrl_pro_ds.crucible.lockbox.lockbox import Lockbox, LockboxEntry
+from sharpen.crucible.agentic.card import DiscoveryCard
+from sharpen.crucible.governance.notify import LogNotifier
+from sharpen.crucible.lockbox.lockbox import Lockbox, LockboxEntry
 
 _GATES = "configs/signal_eval.gates.yaml"
 

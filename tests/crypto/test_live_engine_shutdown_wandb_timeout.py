@@ -17,7 +17,7 @@ import threading
 import time
 import types
 
-from finrl_pro_ds.crypto.live.live_engine import LiveTradingEngine
+from sharpen.crypto.live.live_engine import LiveTradingEngine
 
 
 def _make_engine_for_shutdown() -> LiveTradingEngine:

@@ -12,8 +12,8 @@ import json
 import numpy as np
 import pytest
 
-from finrl_pro_ds.crucible.data.quality_gate import naive_reference_period_join
-from finrl_pro_ds.data import fundamentals as fnd
+from sharpen.crucible.data.quality_gate import naive_reference_period_join
+from sharpen.data import fundamentals as fnd
 
 
 # --------------------------------------------------------------------------- #
@@ -78,7 +78,7 @@ class TestPublicationTimeCausality:
         ref, val, rel = fnd._parse_concept(transport("facts"), ("NetIncomeLoss",), "flow")
         series = fnd._series("net_income", "AAA", ref, val, rel)
         bars = np.array(["2020-04-15"], dtype="datetime64[ns]")
-        from finrl_pro_ds.crucible.data.quality_gate import asof_join
+        from sharpen.crucible.data.quality_gate import asof_join
         assert np.isnan(asof_join(series, bars)[0]), "PIT join must not know an unfiled quarter"
         assert naive_reference_period_join(series, bars)[0] == 100.0  # the leak, for contrast
 

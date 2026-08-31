@@ -17,7 +17,7 @@ ps aux | grep python | grep -v grep
 echo ""
 echo "=== Quick env test ==="
 python -c "
-from finrl_pro_ds.envs.deep_scalper_env import DeepScalperEnv
+from sharpen.envs.deep_scalper_env import DeepScalperEnv
 import yaml
 cfg = yaml.safe_load(open('configs/phase_b13_inventory_penalty_5min.yaml'))
 env = DeepScalperEnv(cfg['env'])

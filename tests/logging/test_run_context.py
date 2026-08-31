@@ -1,4 +1,4 @@
-"""Tests for `finrl_pro_ds.logging.run_context`.
+"""Tests for `sharpen.logging.run_context`.
 
 No network — `wandb.init`, `wandb.log`, `wandb.define_metric` are patched.
 """
@@ -8,7 +8,7 @@ from unittest import mock
 
 import pytest
 
-from finrl_pro_ds.logging import run_context
+from sharpen.logging import run_context
 
 
 @pytest.fixture(autouse=True)

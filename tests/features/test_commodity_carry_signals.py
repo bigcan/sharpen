@@ -15,7 +15,7 @@ import numpy as np
 import pandas as pd
 import pytest
 
-from finrl_pro_ds.features import commodity_carry as ccy
+from sharpen.features import commodity_carry as ccy
 
 T = 400
 _PAIRS = {"USO": ("USO", "USL"), "UNG": ("UNG", "UNL")}

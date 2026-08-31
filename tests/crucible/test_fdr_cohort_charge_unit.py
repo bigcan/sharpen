@@ -8,7 +8,7 @@
 #   4. honest is_discovery wiring (a cohort PROMISING replenishes LORD++ wealth).
 from __future__ import annotations
 
-from finrl_pro_ds.crucible.orchestrator.fdr import OnlineFDR
+from sharpen.crucible.orchestrator.fdr import OnlineFDR
 
 
 def _charge_tick(fdr: OnlineFDR, *, n_candidates: int, cand_discoveries: set[int],

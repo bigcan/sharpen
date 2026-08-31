@@ -53,8 +53,8 @@ ROOT = Path(__file__).resolve().parents[1]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
-from finrl_pro_ds.data.splitter import RollingWindowSplitter  # noqa: E402
-from finrl_pro_ds.eval.obs_noise import (  # noqa: E402  (torch-free core)
+from sharpen.data.splitter import RollingWindowSplitter  # noqa: E402
+from sharpen.eval.obs_noise import (  # noqa: E402  (torch-free core)
     InvariantViolation,
     NoiseSpec,
     run_obs_noise_stage,

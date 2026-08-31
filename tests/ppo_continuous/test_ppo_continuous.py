@@ -9,9 +9,9 @@ first epoch and the whole algorithm is wrong. This guards the atanh inversion.
 import numpy as np
 import torch
 
-from finrl_pro_ds.agents.ppo_continuous.networks import PPOContinuousActorCritic
-from finrl_pro_ds.agents.ppo_continuous.ppo_continuous_agent import PPOContinuousAgent
-from finrl_pro_ds.agents.ppo_continuous.rollout_buffer import ContinuousRolloutBuffer
+from sharpen.agents.ppo_continuous.networks import PPOContinuousActorCritic
+from sharpen.agents.ppo_continuous.ppo_continuous_agent import PPOContinuousAgent
+from sharpen.agents.ppo_continuous.rollout_buffer import ContinuousRolloutBuffer
 
 SCALE_CFG = {"input_size": 8, "channels": (8, 8), "kernel_size": 3, "output_dim": 16, "dropout": 0.0}
 N_SCALES, W, F, PD, AD, FUS = 2, 12, 8, 5, 1, 32

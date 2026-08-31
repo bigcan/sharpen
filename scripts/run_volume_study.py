@@ -148,7 +148,7 @@ def launch_budget(cfg_path: Path, label: str, seeds: list[int],
 
     Note: the launcher itself appends `_<timestamp>` to the prefix and `-seed{N}`
     to per-seed names. The validate_run_name regex
-    (`finrl_pro_ds/utils/naming.py`) is `^[a-z0-9-]+_\\d{8}_\\d{6}$` — descriptive
+    (`sharpen/utils/naming.py`) is `^[a-z0-9-]+_\\d{8}_\\d{6}$` — descriptive
     id must be lowercase/digits/hyphens only. Do NOT embed timestamps or
     underscores in `prefix` here; study-disambiguation is handled via the
     `study-id-<ts>` wandb tag instead.

@@ -1,4 +1,4 @@
-"""Tests for finrl_pro_ds.reporting.challenge_target."""
+"""Tests for sharpen.reporting.challenge_target."""
 from __future__ import annotations
 
 import math
@@ -6,7 +6,7 @@ import math
 import numpy as np
 import pytest
 
-from finrl_pro_ds.reporting import (
+from sharpen.reporting import (
     DEFAULT_PHASE_SPECS,
     compute_challenge_target_hit_rate,
     compute_challenge_target_hit_rates,

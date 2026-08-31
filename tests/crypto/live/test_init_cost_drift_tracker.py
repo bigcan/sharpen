@@ -9,7 +9,7 @@ from __future__ import annotations
 
 import pytest
 
-from finrl_pro_ds.crypto.live.live_engine import _init_cost_drift_tracker
+from sharpen.crypto.live.live_engine import _init_cost_drift_tracker
 
 
 def test_no_retrain_block_returns_none():

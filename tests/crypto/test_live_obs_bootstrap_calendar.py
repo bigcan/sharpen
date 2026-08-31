@@ -11,7 +11,7 @@ import logging
 
 import pytest
 
-from finrl_pro_ds.crypto.live.live_obs_builder import LiveObsBuilder
+from sharpen.crypto.live.live_obs_builder import LiveObsBuilder
 
 
 def _builder(asset_class: str, bootstrap_bars: int = 30_000) -> LiveObsBuilder:

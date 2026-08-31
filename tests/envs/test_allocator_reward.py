@@ -7,8 +7,8 @@ from __future__ import annotations
 
 import numpy as np
 
-from finrl_pro_ds.envs.dsr import DSRCalculator
-from finrl_pro_ds.envs.multi_asset_allocator_env import MultiAssetAllocatorEnv
+from sharpen.envs.dsr import DSRCalculator
+from sharpen.envs.multi_asset_allocator_env import MultiAssetAllocatorEnv
 
 from .conftest import build_arrays, causal_vol, synthetic_prices
 

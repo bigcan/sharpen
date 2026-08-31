@@ -48,17 +48,17 @@ for _p in (str(ROOT), str(ROOT / "scripts")):
     if _p not in sys.path:
         sys.path.insert(0, _p)
 
-from finrl_pro_ds.crucible.corrected_contract import (  # noqa: E402
+from sharpen.crucible.corrected_contract import (  # noqa: E402
     CorrectedConfig,
     corrected_contract_fitness,
     fresh_lord_level,
 )
-from finrl_pro_ds.crucible.orchestrator.fdr import OnlineFDR  # noqa: E402
-from finrl_pro_ds.crucible.orchestrator.substrate import (  # noqa: E402
+from sharpen.crucible.orchestrator.fdr import OnlineFDR  # noqa: E402
+from sharpen.crucible.orchestrator.substrate import (  # noqa: E402
     _power_holdout_bars,
     interp_mde,
 )
-from finrl_pro_ds.signals.generation.evolve import _combined_book, _overlay_returns  # noqa: E402
+from sharpen.signals.generation.evolve import _combined_book, _overlay_returns  # noqa: E402
 from research.crucible_calibration import (  # noqa: E402
     _panel_ts,
     _planted_base_sleeves,

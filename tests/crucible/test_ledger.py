@@ -6,7 +6,7 @@ from pathlib import Path
 
 import pytest
 
-from finrl_pro_ds.crucible.ledger import TrialLedger, TrialRecord
+from sharpen.crucible.ledger import TrialLedger, TrialRecord
 
 _V = "crucible-v2.0"
 

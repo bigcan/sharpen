@@ -7,7 +7,7 @@ working on Crucible alpha-mining, or when invariants need deeper context than th
 ## Full Project Map
 
 ```
-finrl_pro_ds/
+sharpen/
   agents/
     sac/sac_agent.py              # SAC -- continuous position control (ACTIVE)
     sac/networks.py               # SAC actor/critic networks
@@ -132,7 +132,7 @@ docker/live/
 
 ## Crucible Alpha-Mining Architecture (full)
 
-**Purpose:** `finrl_pro_ds/crucible/` (current: `crucible-v2.8`, see `version.py`) is a continuous agentic alpha-discovery system built on top of the existing `finrl_pro_ds/signals/` DSL + T0-T5 deflated evaluation funnel (not a replacement). Falsification-first pipeline: ACQUIRE (free data connectors) -> HYPOTHESIZE (agent proposes pre-registered specs, blind to verdicts) -> MINE (DSL/genetic search) -> DEFLATE (T0-T5 gates) -> COMBINE + forward-incubate in a **lockbox** on data that postdates the hypothesis timestamp, before any human-initiated Tier-2 audit. Value proposition is the *filter*, not idea supply: rigorous statistical gatekeeping (pre-registration, split-ledger anti-oracle, per-substrate online-FDR) across capacity-constrained free data domains (FRED/ALFRED macro, CFTC COT positioning, SEC EDGAR fundamentals, GDELT sentiment, Stooq global market, TWSE/TAIFEX Taiwan). P0-P5 roadmap shipped (see below); zero PROMISING survivors have cleared the lockbox as of `crucible-v2.8`.
+**Purpose:** `sharpen/crucible/` (current: `crucible-v2.8`, see `version.py`) is a continuous agentic alpha-discovery system built on top of the existing `sharpen/signals/` DSL + T0-T5 deflated evaluation funnel (not a replacement). Falsification-first pipeline: ACQUIRE (free data connectors) -> HYPOTHESIZE (agent proposes pre-registered specs, blind to verdicts) -> MINE (DSL/genetic search) -> DEFLATE (T0-T5 gates) -> COMBINE + forward-incubate in a **lockbox** on data that postdates the hypothesis timestamp, before any human-initiated Tier-2 audit. Value proposition is the *filter*, not idea supply: rigorous statistical gatekeeping (pre-registration, split-ledger anti-oracle, per-substrate online-FDR) across capacity-constrained free data domains (FRED/ALFRED macro, CFTC COT positioning, SEC EDGAR fundamentals, GDELT sentiment, Stooq global market, TWSE/TAIFEX Taiwan). P0-P5 roadmap shipped (see below); zero PROMISING survivors have cleared the lockbox as of `crucible-v2.8`.
 
 ### Subpackages
 
@@ -141,14 +141,14 @@ docker/live/
 | `agentic/` | Proposer/Author/DataScout seam. Shipped default `LibrarySeedProposer` (deterministic, offline, curated WQ101 + macro-overlay seed bank). `HypothesisAuthor` reads ONLY `ledger_agent_view` (dedup keys + killed-family list -- never verdicts/DSR/holdout) + data catalog; emits pre-registered `SignalSpec`s hashed per `proposal_ts`. `DiscoveryCard` records verdict + narrative, read-only after scoring. |
 | `data/` | Free-data connectors, uniform `DataConnector` protocol (`connector.py`) carrying `release_timestamp` (the PIT join-leak tripwire). Concrete: `fred.py`, `cftc_cot.py`, `edgar.py`, `gdelt.py`, `stooq.py`, `twse_institutional.py`, `taifex_positioning.py` (poll-only endpoint, local accumulation store). `quality_gate.py` enforces as-of-join reconstruction (fails on look-ahead). `panel_bridge.py`/`altdata_bridge.py` wire connectors into the live `Panel`. |
 | `governance/` | Survivor -> notification -> Tier-2-handoff pipeline, run *around* the funnel. `driver.py` scans lockbox for CLEARED entries, builds a `Tier2Handoff` packet (verdict + forward evidence + exact `deep_strategy_audit.js` command), notifies operator (`notify.py`), idempotency guard (`store.py`, SQLite). **Never runs the audit itself** -- human-initiated per root `CLAUDE.md`'s Anti-Patterns. |
-| `lockbox/` | Forward-incubation (CR-8, the keystone anti-oracle mechanism). `lockbox.py`: pre-registered criterion pinned at enrollment, mutable accrual state, status ∈ {INCUBATING, CLEARED, REJECTED}, verdict rendered EXACTLY ONCE. `incubation.py` computes forward evidence on bars strictly after `proposal_ts` via `finrl_pro_ds/paper/`. |
+| `lockbox/` | Forward-incubation (CR-8, the keystone anti-oracle mechanism). `lockbox.py`: pre-registered criterion pinned at enrollment, mutable accrual state, status ∈ {INCUBATING, CLEARED, REJECTED}, verdict rendered EXACTLY ONCE. `incubation.py` computes forward evidence on bars strictly after `proposal_ts` via `sharpen/paper/`. |
 | `orchestrator/` | Continuous nightly-tick loop. `orchestrator.py`: `substrate_dirty` gate (mine only on new data/fresh specs, conserves FDR wealth), runs the hypothesis loop within budget. `budget.py` hard per-tick LLM-token/candidate caps. `burst.py` routes expensive HPO to GPUHub. `fdr.py` per-substrate online-FDR (LORD++) wealth. `substrate.py` multi-substrate coordination + versioned tick log. |
 | `catalog.py` | Central SQLite data catalog -- what the agent can hypothesize over today (source, series, date_range, freshness, snapshot_hash). Pinned per run for reproducibility. |
 | `ledger.py` | Split trial ledger (anti-oracle moat, CR-1): full `trial_ledger` (verdict + DSR + OOS delta, agent-blind) + SQL VIEW `ledger_agent_view` (dedup keys + killed-family list only, agent-visible). |
 | `manifest.py` | `RunManifest` pins `crucible_version` + `gates_hash` + `data_snapshot_hash` + `rng_seeds`. Reproducible only if all four match. |
 | `reproduce.py` | `crucible reproduce <run_id>` -- re-executes from manifest + recipe, asserts verdicts bit-identical. |
 
-`finrl_pro_ds/signals/` is a **dependency**, not a sibling: Crucible reuses `spec.py`, `generation/grammar.py`, `generation/evolve.py` (C3 genetic search), `generation/dsl_signal.py`, `generation/fitness.py`, `base_sleeves.py`, `eval_harness.py` (T0-T5), `features.py` (`Panel.feature_slots` extension for non-OHLCV series, added P1a). `generation/cohort_eval.py` / `cohort.py` / `cohort_mc.py` (P2.7) add an opt-in weak-signal COHORT evaluator downstream of the main funnel.
+`sharpen/signals/` is a **dependency**, not a sibling: Crucible reuses `spec.py`, `generation/grammar.py`, `generation/evolve.py` (C3 genetic search), `generation/dsl_signal.py`, `generation/fitness.py`, `base_sleeves.py`, `eval_harness.py` (T0-T5), `features.py` (`Panel.feature_slots` extension for non-OHLCV series, added P1a). `generation/cohort_eval.py` / `cohort.py` / `cohort_mc.py` (P2.7) add an opt-in weak-signal COHORT evaluator downstream of the main funnel.
 
 ### Running it
 
@@ -206,7 +206,7 @@ Design specs: `docs/research/crucible_agentic_discovery_spec.md` (canonical, §0
 
 ## Prediction-Market Research (Polymarket) -- moved out
 
-The Polymarket 5-min up/down maker-diagnostic + forward paper-test (`pm-updown-mm-v0`) that used to live at `scripts/data/*polymarket*` / `scripts/research/polymarket_updown_mm_diagnostic.py` / `configs/polymarket_updown_mm_paper.gates.yaml` was spun off 2026-07-05 into its own repo: [`Chiwin-Technology/polymarket-updown-research`](https://github.com/Chiwin-Technology/polymarket-updown-research). It was always self-contained (zero `finrl_pro_ds` imports, no fleet/Docker/skill integration), so nothing else in this repo depended on it. The Windows Scheduled Task that pulls the remote forward-collector's output now points at the new repo's checkout.
+The Polymarket 5-min up/down maker-diagnostic + forward paper-test (`pm-updown-mm-v0`) that used to live at `scripts/data/*polymarket*` / `scripts/research/polymarket_updown_mm_diagnostic.py` / `configs/polymarket_updown_mm_paper.gates.yaml` was spun off 2026-07-05 into its own repo: [`Chiwin-Technology/polymarket-updown-research`](https://github.com/Chiwin-Technology/polymarket-updown-research). It was always self-contained (zero `sharpen` imports, no fleet/Docker/skill integration), so nothing else in this repo depended on it. The Windows Scheduled Task that pulls the remote forward-collector's output now points at the new repo's checkout.
 
 Kalshi credentials remain in this repo (`.env` `KALSHI_API_KEY_ID`, gitignored `kalshi_private_key.pem`) but there is no active Kalshi code here or in the new repo -- a prior SecureFinAI-contest client was deleted post-contest 2026-05-02.
 
@@ -216,7 +216,7 @@ Kalshi credentials remain in this repo (`.env` `KALSHI_API_KEY_ID`, gitignored `
 
 | Skill | Trigger | Spec |
 |-------|---------|------|
-| **Audit** | Auto after ANY code change to `finrl_pro_ds/`, `scripts/`, `configs/`. Skip `.md`-only. Also auto after plan/feature/task implementation. | `~/.claude/skills/audit/SKILL.md` + `FINRL.md` |
+| **Audit** | Auto after ANY code change to `sharpen/`, `scripts/`, `configs/`. Skip `.md`-only. Also auto after plan/feature/task implementation. | `~/.claude/skills/audit/SKILL.md` + `FINRL.md` |
 | **Memory** | Auto at session start (boot) and end (`/sync`). Update `core.md` proactively on findings. | `~/.claude/skills/memory/SKILL.md` |
 | **Optimization** | SPS regression, low GPU util, new hardware, perf tuning. Auto before each deployment. | `~/.claude/skills/optimization/SKILL.md` |
 | **Math** | Manual ("check math") + auto after ANY formula/equation/numerical logic change. | `~/.claude/skills/math/SKILL.md` |
@@ -289,7 +289,7 @@ Live trading containers run on a **remote desktop** (<TAILSCALE_HOST>), accessed
 `LiveTradingEngine` writes `/tmp/health_status.json` every bar with: timestamp, position, PV, drawdown, broker_connected, consecutive_errors, should_stop. `healthcheck.sh` reads this JSON and checks staleness (`MAX_STALE_SECONDS`, default 600s), broker connection, error count. Falls back to `pgrep` during bootstrap.
 
 ### Prometheus Metrics (Layer 1)
-`finrl_pro_ds/crypto/live/metrics.py` -- `TradingMetrics` class runs `prometheus_client` HTTP server on a **daemon thread**. `Gauge.set()` is thread-safe. Each strategy gets a unique port via `METRICS_PORT` env var (9101-9106). Disabled by default (`METRICS_PORT=0`).
+`sharpen/crypto/live/metrics.py` -- `TradingMetrics` class runs `prometheus_client` HTTP server on a **daemon thread**. `Gauge.set()` is thread-safe. Each strategy gets a unique port via `METRICS_PORT` env var (9101-9106). Disabled by default (`METRICS_PORT=0`).
 
 **Exported metrics:** `finrl_position`, `finrl_portfolio_value`, `finrl_drawdown_pct`, `finrl_daily_loss_pct`, `finrl_broker_connected`, `finrl_bar_count`, `finrl_total_trades`, `finrl_total_fees`, `finrl_consecutive_errors`, `finrl_last_bar_timestamp`, `finrl_funding_rate`, `prism_position_multiplier`, `prism_composite_code`, `prism_api_latency_seconds`, `prism_api_errors_total`, `prism_fallback_active`.
 

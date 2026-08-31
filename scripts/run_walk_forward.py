@@ -24,8 +24,8 @@ import yaml
 # Add project root to path
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-from finrl_pro_ds.data.splitter import RollingWindowSplitter
-from finrl_pro_ds.logging import clear_namespace, set_namespace
+from sharpen.data.splitter import RollingWindowSplitter
+from sharpen.logging import clear_namespace, set_namespace
 
 logger = logging.getLogger("WalkForward")
 

@@ -15,7 +15,7 @@ constraint rather than of two incidentally-different environments.
 import numpy as np
 import pytest
 
-from finrl_pro_ds.envs.continuous_swing_env import ContinuousSwingEnv
+from sharpen.envs.continuous_swing_env import ContinuousSwingEnv
 from tests.test_continuous_swing_dual_equity import _FakeHandler
 
 

@@ -53,15 +53,15 @@ def main() -> int:
     args = ap.parse_args()
     logging.basicConfig(level=logging.INFO, format="%(message)s")
 
-    from finrl_pro_ds.data.cross_asset_loader import (
+    from sharpen.data.cross_asset_loader import (
         build_two_sleeve_arrays,
         load_two_sleeve_data,
     )
-    from finrl_pro_ds.envs.execution_overlay_factory import (
+    from sharpen.envs.execution_overlay_factory import (
         drive_execution_episodes,
         make_execution_env,
     )
-    from finrl_pro_ds.paper import TwoSleeveExecutor
+    from sharpen.paper import TwoSleeveExecutor
     from scripts.execution_overlay_runner import (
         effective_gates,
         load_overlay_config,

@@ -11,7 +11,7 @@ from __future__ import annotations
 
 import numpy as np
 
-from finrl_pro_ds.signals.generation.base_sleeves import (
+from sharpen.signals.generation.base_sleeves import (
     SleeveComponents,
     _book_from_target_weights,
     unit_components,

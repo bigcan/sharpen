@@ -14,7 +14,7 @@ Sharpe/PF/DD, causal execution lag) so results are directly comparable to the
 cross-sectional pivot's linear GO (net Sharpe 0.60).
 
 Cost + sign model taken VERBATIM from configs/funding_arb_dsac_l1_multiseed.yaml
-and finrl_pro_ds/crypto/envs/funding_arb_env.py:_apply_funding/_apply_spot_borrow:
+and sharpen/crypto/envs/funding_arb_env.py:_apply_funding/_apply_spot_borrow:
   - standard arb (w>0): long-spot/short-perp -> earn +funding when rate>0, NO borrow
   - reverse arb  (w<0): short-spot/long-perp -> earn -funding when rate<0, PAYS borrow
   - spot 1bp + perp 5bp taker per leg; slippage base 2bps; borrow 7.3%/yr hourly

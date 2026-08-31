@@ -183,7 +183,7 @@ in code):
 > ### ⚠️ RESTATED 2026-07-31 — the numbers moved; **every verdict is unchanged**
 >
 > The digits first recorded here (2026-07-16 14:03) **do not reproduce**. Cause is **not code**: all 5
-> commits touching `finrl_pro_ds/signals/` since the run — `92278fe4` (v4.0), `1b8df680` (v6.0),
+> commits touching `sharpen/signals/` since the run — `92278fe4` (v4.0), `1b8df680` (v6.0),
 > `406654ed` (v7.1), `34caacef` (v9.0), `4a231bee` (v10.0) — **plus the exact HEAD at record time
 > (`4be2e6b3`)** were bisected: all 7 code states return a **bit-identical** frictionless Sharpe of
 > `1.044701045608392`.
@@ -191,7 +191,7 @@ in code):
 > Cause is **`data/taiwan_smallcap/pool.parquet`**, re-enumerated 2026-07-31 11:41 as a side effect of
 > a fetcher run for an unrelated probe. Its `sector` column (FinMind `industry_category`) is a
 > **mandatory neutralization control** — scores are residualized on sector dummies daily
-> (`finrl_pro_ds/signals/features.py:164-168`) — so re-classified names move every downstream number.
+> (`sharpen/signals/features.py:164-168`) — so re-classified names move every downstream number.
 > Eligible (non-singleton) sectors went **33 → 31**. Controlled check: collapsing sectors to one
 > bucket gives frictionless 1.0512, the same order as the drift.
 >

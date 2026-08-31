@@ -43,7 +43,7 @@ convex (weights sum to 1), so two ~0-correlated 10%-vol sleeves at 0.5 weight co
 describes.
 
 **Scope — this is the load-bearing part.** The executor path is *not* the research path:
-`finrl_pro_ds/paper/two_sleeve.py` combines sleeve **weights** and `cross_asset_loader.py:458-459`
+`sharpen/paper/two_sleeve.py` combines sleeve **weights** and `cross_asset_loader.py:458-459`
 reads `target_vol_asset`/`lev_cap` from the config, so there the levers **do** bind. So the defect
 is not "the levers do nothing" — it is that **the evidence certifying the challenge (P(pass) 0.711,
 DSR, PBO — all computed on the research basis) and the book that would actually trade are sized by

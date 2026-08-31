@@ -8,7 +8,7 @@ from pathlib import Path
 
 import pandas as pd
 
-from finrl_pro_ds.data.feature_engineering import DeepScalperFeatureEngineer
+from sharpen.data.feature_engineering import DeepScalperFeatureEngineer
 
 # Ensure package is in path
 sys.path.append(str(Path(__file__).parent.parent.parent))

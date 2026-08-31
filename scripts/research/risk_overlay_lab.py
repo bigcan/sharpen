@@ -74,7 +74,7 @@ def load_bars(path: Path, scale_min: int) -> pd.DataFrame:
 
     Resample convention is ``label='left', closed='left'`` and ATR is a simple
     rolling mean of true range over 14 bars, both mirroring
-    ``finrl_pro_ds/data/multiscale_handler.py``.
+    ``sharpen/data/multiscale_handler.py``.
     """
     d = pd.read_parquet(path)
     d["timestamp"] = pd.to_datetime(d["timestamp"])

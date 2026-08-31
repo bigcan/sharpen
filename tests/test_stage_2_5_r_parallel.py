@@ -17,7 +17,7 @@ if str(ROOT) not in sys.path:
 
 import pytest  # noqa: E402
 
-from finrl_pro_ds.eval.sensitivity_audit import build_grid  # noqa: E402
+from sharpen.eval.sensitivity_audit import build_grid  # noqa: E402
 from scripts import stage_2_5_r_sensitivity_audit as mod  # noqa: E402
 
 DEPLOYED = {"deadband_threshold": 0.25, "max_leverage": 1.0}

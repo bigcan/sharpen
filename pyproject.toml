@@ -3,10 +3,10 @@ requires = ["setuptools>=64", "wheel"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "finrl-pro-ds"
+name = "sharpen"
 version = "0.1.0"
-description = "FinRL-Pro_DS scaffold extending FinRL Podracer with modular components."
-authors = [{ name = "FinRL Contributors" }]
+description = "Semi-agentic Hypothesis-to-Alpha Research Platform with Empirical Null-testing."
+authors = [{ name = "Keng Lee" }]
 requires-python = ">=3.11"
 dependencies = [
     "torch>=2.8.0",
@@ -69,7 +69,7 @@ Homepage = "https://github.com/AI4Finance-Foundation/FinRL"
 
 [tool.setuptools.packages.find]
 where = ["."]
-include = ["finrl_pro_ds*"]
+include = ["sharpen*"]
 
 [tool.pytest.ini_options]
 # `-m "not integration"` keeps bare `pytest` off the network: the integration
