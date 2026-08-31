@@ -21,7 +21,7 @@ from stable_baselines3.common.callbacks import CheckpointCallback, EvalCallback
 from stable_baselines3.common.monitor import Monitor
 from stable_baselines3.common.vec_env import DummyVecEnv
 
-from finrl_pro_ds.crypto.envs.multi_exchange_arb_env import (
+from sharpen.crypto.envs.multi_exchange_arb_env import (
     EnvConfig,
     MultiExchangeArbEnv,
 )

@@ -73,7 +73,7 @@ The momentum-alone baseline for the additivity gate is **re-computed on the SAME
 
 ## Decision
 
-- **G1 ✓ AND G2 ✓ → GO.** Chain Architect: add `value_signal` to `finrl_pro_ds/features/cross_asset_signals.py`; assemble TSMOM+value(+rates-carry) static risk-parity book in `allocator_factory.py`; then test an RL *sleeve-allocation* overlay under a hard beat-static gate (Protocol v2; Tier-2 audit pre-capital). Do NOT re-tune the frozen momentum core (voids the Fable chain) — value is purely additive.
+- **G1 ✓ AND G2 ✓ → GO.** Chain Architect: add `value_signal` to `sharpen/features/cross_asset_signals.py`; assemble TSMOM+value(+rates-carry) static risk-parity book in `allocator_factory.py`; then test an RL *sleeve-allocation* overlay under a hard beat-static gate (Protocol v2; Tier-2 audit pre-capital). Do NOT re-tune the frozen momentum core (voids the Fable chain) — value is purely additive.
 - **G1 ✓ AND G2 ✗** (value survives but doesn't lift the combo) → value **NO-GO as a sleeve**; assemble the TSMOM + rates-carry frontier; report the honest 2-sleeve ceiling.
 - **G1 ✗** (value decayed like equity book-value / naive carry) → value **NO-GO**; same fallback as above.
 

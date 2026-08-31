@@ -28,8 +28,8 @@ sys.path.append(os.getcwd())
 from sklearn.ensemble import RandomForestClassifier
 from sklearn.metrics import roc_auc_score, accuracy_score
 
-from finrl_pro_ds.data.parquet_handler import ParquetDataHandler
-from finrl_pro_ds.data.feature_engineering import MICRO_FEATURE_COLS, MACRO_FEATURE_COLS
+from sharpen.data.parquet_handler import ParquetDataHandler
+from sharpen.data.feature_engineering import MICRO_FEATURE_COLS, MACRO_FEATURE_COLS
 
 
 def load_split(config, start_date, end_date, norm_cutoff_date=None):

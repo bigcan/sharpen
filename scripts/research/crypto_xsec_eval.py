@@ -1,7 +1,7 @@
 """Crypto cross-sectional probes (K1 reversal, K2 momentum) + negative control (K3).
 
 Pre-registration: `docs/research/crypto_xsec_preregistration_2026-07-31.md` (committed with an empty
-Results section BEFORE this ran). Same locked `finrl_pro_ds/signals/` scorecard as every other probe
+Results section BEFORE this ran). Same locked `sharpen/signals/` scorecard as every other probe
 today, so results are directly comparable.
 """
 from __future__ import annotations
@@ -18,15 +18,15 @@ ROOT = Path(__file__).resolve().parents[2]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
-from finrl_pro_ds.signals.features import Panel  # noqa: E402
-from finrl_pro_ds.signals.multiplicity import Multiplicity  # noqa: E402
-from finrl_pro_ds.signals.scorecard import (  # noqa: E402
+from sharpen.signals.features import Panel  # noqa: E402
+from sharpen.signals.multiplicity import Multiplicity  # noqa: E402
+from sharpen.signals.scorecard import (  # noqa: E402
     Gates,
     evaluate_batch,
     to_markdown,
     write_scorecard,
 )
-from finrl_pro_ds.signals.spec import SignalSpec  # noqa: E402
+from sharpen.signals.spec import SignalSpec  # noqa: E402
 
 log = logging.getLogger("crypto_xsec")
 

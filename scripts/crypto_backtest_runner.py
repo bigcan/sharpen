@@ -32,18 +32,18 @@ import yaml
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(PROJECT_ROOT))
 
-from finrl_pro_ds.crypto.data.crypto_array_builder import build_env_arrays  # noqa: E402
-from finrl_pro_ds.crypto.data.crypto_loader import (  # noqa: E402
+from sharpen.crypto.data.crypto_array_builder import build_env_arrays  # noqa: E402
+from sharpen.crypto.data.crypto_loader import (  # noqa: E402
     WalkForwardCoverageValidator,
     fetch_crypto_data,
 )
-from finrl_pro_ds.crypto.envs.crypto_perp_env import CryptoPerpEnv  # noqa: E402
-from finrl_pro_ds.envs.prop_firm_wrapper import PropFirmWrapperV7 as PropFirmWrapper  # noqa: E402
-from finrl_pro_ds.crypto.execution.arbitrator import SoftmaxArbitrator  # noqa: E402
-from finrl_pro_ds.crypto.features.crypto_features import (  # noqa: E402
+from sharpen.crypto.envs.crypto_perp_env import CryptoPerpEnv  # noqa: E402
+from sharpen.envs.prop_firm_wrapper import PropFirmWrapperV7 as PropFirmWrapper  # noqa: E402
+from sharpen.crypto.execution.arbitrator import SoftmaxArbitrator  # noqa: E402
+from sharpen.crypto.features.crypto_features import (  # noqa: E402
     compute_crypto_features,
 )
-from finrl_pro_ds.crypto.features.prism_features import (  # noqa: E402
+from sharpen.crypto.features.prism_features import (  # noqa: E402
     compute_prism_features,
     get_prism_feature_cols,
     get_prism_passthrough_cols,
@@ -106,7 +106,7 @@ def prepare_data(config: dict) -> dict:
     # Select feature set version (V1 default, V1.1 via config)
     feature_set_version = config.get("features", {}).get("feature_set_version", "v1")
     if feature_set_version == "v1.1":
-        from finrl_pro_ds.crypto.data.crypto_array_builder import CRYPTO_FEATURE_COLS_V1_1
+        from sharpen.crypto.data.crypto_array_builder import CRYPTO_FEATURE_COLS_V1_1
         feature_cols = list(CRYPTO_FEATURE_COLS_V1_1)
         logger.info(f"Feature set V1.1: {len(feature_cols)} features per asset")
     else:
@@ -148,7 +148,7 @@ def prepare_data(config: dict) -> dict:
 
         # Use combined feature columns (extend V1.1 if already set, else V1 base)
         if feature_cols is None:
-            from finrl_pro_ds.crypto.data.crypto_array_builder import CRYPTO_FEATURE_COLS
+            from sharpen.crypto.data.crypto_array_builder import CRYPTO_FEATURE_COLS
             feature_cols = list(CRYPTO_FEATURE_COLS)
         feature_cols = feature_cols + prism_cols
         passthrough_cols = list(gahmm_pt_cols)
@@ -404,7 +404,7 @@ def _init_wandb(config: dict, args) -> bool:
     if os.environ.get("WANDB_DISABLED"):
         return False
 
-    from finrl_pro_ds.utils.naming import generate_run_name
+    from sharpen.utils.naming import generate_run_name
     run_name = args.run_name or generate_run_name(args.config or "sync_1h")
     tags = list(args.tags or []) + ["sync-1h"]
 
@@ -711,7 +711,7 @@ def _train_and_evaluate(
     val_scores = {}
     val_returns_per_agent = {}
     for name, model in trained_agents.items():
-        from finrl_pro_ds.crypto.eval.statistics import sortino_ratio
+        from sharpen.crypto.eval.statistics import sortino_ratio
         val_result, val_rets = _evaluate_agent_on_env(model, val_env)
         val_sortino = 0.0
         if val_rets:

@@ -13,8 +13,8 @@ import numpy as np
 import pandas as pd
 import pytest
 
-from finrl_pro_ds.data import cross_asset_loader as cal
-from finrl_pro_ds.features import defensive_signals as dfs
+from sharpen.data import cross_asset_loader as cal
+from sharpen.features import defensive_signals as dfs
 
 _ASSETS = ["SPY", "QQQ", "IWM", "TLT", "IEF", "GLD"]
 _CLASS = {"SPY": "equity", "QQQ": "equity", "IWM": "equity",

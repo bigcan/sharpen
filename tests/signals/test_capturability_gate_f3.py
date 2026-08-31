@@ -30,8 +30,8 @@ from pathlib import Path
 import numpy as np
 import pytest
 
-from finrl_pro_ds.signals import Gates
-from finrl_pro_ds.signals.eval_harness import (
+from sharpen.signals import Gates
+from sharpen.signals.eval_harness import (
     Capturability,
     CostResult,
     Deflation,
@@ -40,8 +40,8 @@ from finrl_pro_ds.signals.eval_harness import (
     HygieneResult,
     Robustness,
 )
-from finrl_pro_ds.signals.features import Panel
-from finrl_pro_ds.signals.scorecard import SignalScorecard, _finalize
+from sharpen.signals.features import Panel
+from sharpen.signals.scorecard import SignalScorecard, _finalize
 
 ROOT = Path(__file__).resolve().parents[2]
 

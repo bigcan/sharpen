@@ -50,7 +50,7 @@ from scripts.research.taiwan_txo_vrp_scout import (  # noqa: E402
 from scripts.research.taiwan_txo_vrp_validation import (  # noqa: E402
     _per_cycle_sr, compute_dsr, implied_vol_leg, straddle_delta_legs,
 )
-from finrl_pro_ds.crypto.eval.statistics import (  # noqa: E402
+from sharpen.crypto.eval.statistics import (  # noqa: E402
     block_bootstrap_sharpe_ci, excess_kurtosis, probabilistic_sharpe_ratio, skewness,
 )
 

@@ -34,7 +34,7 @@ ROOT = Path(__file__).resolve().parents[2]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
-from finrl_pro_ds.crucible.orchestrator.substrate import (  # noqa: E402
+from sharpen.crucible.orchestrator.substrate import (  # noqa: E402
     _power_holdout_bars,
     stamp_substrate_power,
 )

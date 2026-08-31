@@ -6,9 +6,9 @@ from unittest.mock import MagicMock
 import gymnasium as gym
 import numpy as np
 
-from finrl_pro_ds.data.feature_engineering import NUM_MACRO_FEATURES, NUM_MICRO_FEATURES
-from finrl_pro_ds.data.parquet_handler import ParquetDataHandler
-from finrl_pro_ds.envs.swing_scalper_env import (
+from sharpen.data.feature_engineering import NUM_MACRO_FEATURES, NUM_MICRO_FEATURES
+from sharpen.data.parquet_handler import ParquetDataHandler
+from sharpen.envs.swing_scalper_env import (
     ACTION_LONG,
     ACTION_SHORT,
     SwingScalperEnv,

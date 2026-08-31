@@ -143,7 +143,7 @@ funnel's FPR is honest — for the paper *and* for any future discovery restart.
 
 ## 7. Risks
 
-- **R1 Double-blind anonymization** — repo name, `finrl_pro_ds` paths, WandB entity, and session/commit IDs are
+- **R1 Double-blind anonymization** — repo name, `sharpen` paths, WandB entity, and session/commit IDs are
   author-identifying. Build an anonymized artifact bundle; do not cite internal memory slugs.
 - **R2 Ledger unavailability** — mitigated by design: every figure is synthetic/reproducible; the real-record numbers
   appear only as *cross-checks* in prose, flagged as "internal, not required for reproduction."
@@ -199,7 +199,7 @@ submit by 2026-08-02.
 
 **Figure F2 second half + §5's measured power curve — the audit's remedy, implemented as a parallel pathway.**
 Architect design in `.agent/artifacts/corrected_contract_architecture.md`. New module
-`finrl_pro_ds/crucible/corrected_contract.py` scores a candidate by ONE significance statistic, promotes iff it
+`sharpen/crucible/corrected_contract.py` scores a candidate by ONE significance statistic, promotes iff it
 clears `t_min` AND a **binding** LORD++ level (F13 fix — `fdr.py` used read-only) AND the 3 cheap guards
 (uplift/fragility/collinearity); the F1-sealed `marginal_t` and F2-sealed `dsr_aug` legs are DROPPED. Own gates file
 `configs/crucible_corrected_contract.gates.yaml` → zero funnel gate bytes, CRU-1 MINOR (`test_version` green).

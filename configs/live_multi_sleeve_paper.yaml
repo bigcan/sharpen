@@ -5,7 +5,7 @@
 # Generalizes live_cross_asset_paper.yaml (the 2-sleeve ETF book, UNCHANGED) by adding
 # the gate-cleared options-VRP sleeve as a RETURN-STREAM sleeve (S553-cont-68; spec
 # .agent/artifacts/multi_sleeve_paper_executor_architecture.md). Combined by
-# finrl_pro_ds.paper.PortfolioExecutor: weight-combine WITHIN the ETF/IB account
+# sharpen.paper.PortfolioExecutor: weight-combine WITHIN the ETF/IB account
 # (momentum ⊕ rates, unchanged) + return-combine ACROSS accounts (ETF vs Deribit) via
 # trailing-causal inverse-vol risk-parity (MS-ADR-1).
 #

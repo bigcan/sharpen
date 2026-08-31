@@ -1,4 +1,4 @@
-"""Tests for the X3 fixed-lot stress pass (`finrl_pro_ds/eval/fixed_lot_stress.py`).
+"""Tests for the X3 fixed-lot stress pass (`sharpen/eval/fixed_lot_stress.py`).
 
 Covers the reconstruction guard (early-term → raise) and the multi-fold
 `compute_stress_subreport` gate logic (PASS / FAIL-dd / FAIL-leverage /
@@ -17,7 +17,7 @@ ROOT = Path(__file__).resolve().parents[1]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
-from finrl_pro_ds.eval.fixed_lot_stress import (  # noqa: E402
+from sharpen.eval.fixed_lot_stress import (  # noqa: E402
     EarlyTerminatedFold,
     compute_stress_subreport,
     reconstruct_fold,

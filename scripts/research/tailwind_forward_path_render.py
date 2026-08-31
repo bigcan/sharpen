@@ -8,7 +8,7 @@ script produces the second:
         tailwind forward-path render at 15% vol so an internal kill does not trip on the book's
         normal drawdown."
 
-The P(pass) simulator (`finrl_pro_ds/prop/challenge_simulator.py`) answers a DIFFERENT question:
+The P(pass) simulator (`sharpen/prop/challenge_simulator.py`) answers a DIFFERENT question:
 it moving-block-bootstraps the return series, which deliberately destroys the realised ordering of
 drawdowns. The internal-kill buffer question is about ordering — whether a real historical
 drawdown sequence trips an 8% / 4% internal halt on a book that was never going to breach the
@@ -51,7 +51,7 @@ import audit_tailwind_book as atb  # noqa: E402
 import portfolio_frontier as pf  # noqa: E402
 import xsec_momentum_falsification as mom  # noqa: E402
 
-from finrl_pro_ds.prop.challenge_simulator import (  # noqa: E402
+from sharpen.prop.challenge_simulator import (  # noqa: E402
     DAILY_BREACH,
     DD_BREACH,
     PASS,
@@ -119,7 +119,7 @@ def check_lever_scale_invariance() -> dict:
 
     SCOPE. This tests the RESEARCH/AUDIT basis (`portfolio_frontier.risk_parity`), which is where
     BOTH the DSR/PBO audit and the P(pass) simulator's return series come from. The paper EXECUTOR
-    takes a different route -- `finrl_pro_ds/paper/two_sleeve.py` combines sleeve WEIGHTS via
+    takes a different route -- `sharpen/paper/two_sleeve.py` combines sleeve WEIGHTS via
     `combine_sleeve_weights`, and `cross_asset_loader.py:458-459` reads `target_vol_asset`/`lev_cap`
     straight from the config -- so on the executor path the levers DO bind. The defect this exposes
     is therefore not "the levers do nothing" but "the evidence certifying the challenge and the book

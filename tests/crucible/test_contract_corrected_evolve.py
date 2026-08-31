@@ -23,8 +23,8 @@ for p in (str(ROOT), str(ROOT / "scripts")):
     if p not in sys.path:
         sys.path.insert(0, p)
 
-from finrl_pro_ds.crucible.corrected_contract import CorrectedConfig  # noqa: E402
-from finrl_pro_ds.signals.generation.evolve import (  # noqa: E402
+from sharpen.crucible.corrected_contract import CorrectedConfig  # noqa: E402
+from sharpen.signals.generation.evolve import (  # noqa: E402
     CONTRACT_CORRECTED,
     CONTRACT_SHIPPED,
     _passes_cheap_prefilter,
@@ -125,7 +125,7 @@ def test_cheap_prefilter_drops_each_guard_but_reads_no_significance_leg(calib, c
     to leave the pre-filter's answer unchanged; breaking any cheap guard has to flip it to False."""
     from dataclasses import replace
 
-    from finrl_pro_ds.signals.generation.fitness import FitnessResult
+    from sharpen.signals.generation.fitness import FitnessResult
 
     ok = FitnessResult(
         fitness=1.0, delta_sr_oos=0.5, delta_sr_median=0.4, frac_paths_positive=0.8,
@@ -273,7 +273,7 @@ def test_offspring_policy_all_still_applies_the_train_prefilter(calib, corr):
 def test_offspring_policy_value_is_validated():
     import yaml
 
-    from finrl_pro_ds.crucible.corrected_contract import CorrectedConfig as CC
+    from sharpen.crucible.corrected_contract import CorrectedConfig as CC
 
     raw = yaml.safe_load(_CORRECTED_GATES.read_text(encoding="utf-8"))
     raw["eligibility"]["offspring_policy"] = "sometimes"

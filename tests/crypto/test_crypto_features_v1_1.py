@@ -14,13 +14,13 @@ import numpy as np
 import pandas as pd
 import pytest
 
-from finrl_pro_ds.crypto.data.crypto_array_builder import (
+from sharpen.crypto.data.crypto_array_builder import (
     CRYPTO_FEATURE_COLS,
     CRYPTO_FEATURE_COLS_V1,
     CRYPTO_FEATURE_COLS_V1_1,
     build_env_arrays,
 )
-from finrl_pro_ds.crypto.features.crypto_features import compute_crypto_features
+from sharpen.crypto.features.crypto_features import compute_crypto_features
 
 # ---------------------------------------------------------------------------
 # Fixtures

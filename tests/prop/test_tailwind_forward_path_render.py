@@ -214,7 +214,7 @@ def test_n_distinct_drawdowns_zero_when_never_breached(render):
 
 # ---------------------------------------------------------------------------- disjointness
 def test_sequential_challenges_windows_are_disjoint_and_ordered(render):
-    from finrl_pro_ds.prop.challenge_simulator import FirmRules, SizingPolicy
+    from sharpen.prop.challenge_simulator import FirmRules, SizingPolicy
 
     rng = np.random.default_rng(3)
     d = _series(rng.normal(0.0004, 0.01, 3000))
@@ -236,7 +236,7 @@ def test_sequential_challenges_windows_are_disjoint_and_ordered(render):
 def test_internal_arm_never_outlasts_the_firm_arm(render):
     """Disjointness advances the cursor on the FIRM run, which is only safe because the tighter
     internal limits always resolve no later than the firm limits."""
-    from finrl_pro_ds.prop.challenge_simulator import FirmRules, SizingPolicy
+    from sharpen.prop.challenge_simulator import FirmRules, SizingPolicy
 
     rng = np.random.default_rng(11)
     d = _series(rng.normal(0.0003, 0.012, 4000))
@@ -251,7 +251,7 @@ def test_internal_arm_never_outlasts_the_firm_arm(render):
 
 # ---------------------------------------------------------------------------- Wilson CI
 def test_wilson_ci_brackets_the_point_estimate_and_is_wide_at_small_n(render):
-    from finrl_pro_ds.prop.challenge_simulator import FirmRules, SizingPolicy
+    from sharpen.prop.challenge_simulator import FirmRules, SizingPolicy
 
     rng = np.random.default_rng(5)
     d = _series(rng.normal(0.0005, 0.009, 2500))
@@ -270,7 +270,7 @@ def test_wilson_ci_brackets_the_point_estimate_and_is_wide_at_small_n(render):
 
 def test_needless_requires_firm_pass_and_internal_kill(render):
     """A start can only be 'needless' if the firm arm PASSED — never on a firm breach."""
-    from finrl_pro_ds.prop.challenge_simulator import FirmRules, SizingPolicy
+    from sharpen.prop.challenge_simulator import FirmRules, SizingPolicy
 
     rng = np.random.default_rng(9)
     d = _series(rng.normal(0.0, 0.02, 2000))     # driftless: many firm breaches
@@ -287,7 +287,7 @@ def test_tighter_internal_limits_never_pass_more_often(render):
     """Monotonicity in the limits: same profit target, strictly tighter DD/daily => the internal
     arm can only pass LESS often. A violation means the two arms are not being run on the same
     windows (the cross-tabulation in `needless_termination` would then be meaningless)."""
-    from finrl_pro_ds.prop.challenge_simulator import DD_BREACH, DAILY_BREACH, PASS, FirmRules, SizingPolicy
+    from sharpen.prop.challenge_simulator import DD_BREACH, DAILY_BREACH, PASS, FirmRules, SizingPolicy
 
     rng = np.random.default_rng(21)
     d = _series(rng.normal(0.0002, 0.011, 3000))

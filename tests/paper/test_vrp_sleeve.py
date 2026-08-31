@@ -14,8 +14,8 @@ import numpy as np
 import pandas as pd
 import pytest
 
-from finrl_pro_ds.crypto.data.options_array_builder import OptionsPanels
-from finrl_pro_ds.paper import SleeveContext, VRPSleeve, resample_returns_to_calendar
+from sharpen.crypto.data.options_array_builder import OptionsPanels
+from sharpen.paper import SleeveContext, VRPSleeve, resample_returns_to_calendar
 
 
 # --------------------------------------------------------------------------- #

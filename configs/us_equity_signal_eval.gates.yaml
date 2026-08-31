@@ -1,5 +1,5 @@
 # Pre-registered gates for the US-EQUITY substrate — top-300 PIT S&P 500 names, daily (S553-cont-152).
-# Substrate = `finrl_pro_ds/crucible/data/us_equity_panel.py`, wired as `panel: us_equity`. Separate
+# Substrate = `sharpen/crucible/data/us_equity_panel.py`, wired as `panel: us_equity`. Separate
 # FILE per ADR-1/CRU-1 so `configs/signal_eval.gates.yaml` keeps its bytes and the frozen gates_hash.
 #
 # ---------------------------------------------------------------------------------------------

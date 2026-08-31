@@ -26,12 +26,12 @@ A NaN sentinel propagates "no signal" cleanly through the live engine if every c
 
 | Component | File | Line | Returns on no-majority |
 |---|---|---|---|
-| Live aggregator | `finrl_pro_ds/agents/sac/ensemble_agent.py` | 51 | `np.zeros_like(actions[0])` |
+| Live aggregator | `sharpen/agents/sac/ensemble_agent.py` | 51 | `np.zeros_like(actions[0])` |
 | Offline aggregator (canonical, multi-workstream) | `scripts/sg1_xauusd_ensemble_eval.py` | 157 | `np.zeros_like(stacked[0])` |
 | Offline aggregator (BTC fork) | `scripts/sg1_btc_velotrade_ensemble_eval.py` | 148 | `np.zeros_like(stacked[0])` |
-| Env step semantic interpreter | `finrl_pro_ds/envs/continuous_swing_env.py` | 243-313 | `delta = target_position - current_position; if |delta| > deadband: trade` |
+| Env step semantic interpreter | `sharpen/envs/continuous_swing_env.py` | 243-313 | `delta = target_position - current_position; if |delta| > deadband: trade` |
 
-### Live engine consumption path (`finrl_pro_ds/crypto/live/live_engine.py`)
+### Live engine consumption path (`sharpen/crypto/live/live_engine.py`)
 
 This file serves both sg1-btc (Bybit broker) and sg1-xauusd (cTrader broker). NaN behavior of each consumer if the aggregator emitted `np.nan` today:
 
@@ -50,8 +50,8 @@ This file serves both sg1-btc (Bybit broker) and sg1-xauusd (cTrader broker). Na
 
 ### Other assets
 
-- `finrl_pro_ds/reporting/eval_distribution.py:75` — `(abs_a < deadband).mean()` — same NaN-undercount as live ActionDriftTracker. Used by Stage 2/2.5 baseline writers, so eval baselines change if NaN-bars become a thing.
-- `finrl_pro_ds/monitoring/agreement_decay.py:155-159` — docstring explicitly says "For ens_agreement the aggregator returns 0 on consensus failure, so |action| < deadband captures both naturally-flat and consensus-failed bars consistently with the eval baseline." This contract is the bug pinned in code comments — Fix 2 must rewrite this contract.
+- `sharpen/reporting/eval_distribution.py:75` — `(abs_a < deadband).mean()` — same NaN-undercount as live ActionDriftTracker. Used by Stage 2/2.5 baseline writers, so eval baselines change if NaN-bars become a thing.
+- `sharpen/monitoring/agreement_decay.py:155-159` — docstring explicitly says "For ens_agreement the aggregator returns 0 on consensus failure, so |action| < deadband captures both naturally-flat and consensus-failed bars consistently with the eval baseline." This contract is the bug pinned in code comments — Fix 2 must rewrite this contract.
 
 ## 2 — NaN sentinel semantic contract (rule-agnostic)
 
@@ -153,11 +153,11 @@ Replay fixture (S538-cont):
 4. Memory: `project_sg1_xauusd_drift_recal_s535.md` (recal that masked the same bug)
 5. Memory: `project_drift_baseline_audit_snapshot_20260506.md` (fleet snapshot)
 6. Memory: `decision_ensemble_val_selection_s495.md` (Stage 2.5 rule selection)
-7. Code: `finrl_pro_ds/agents/sac/ensemble_agent.py:51`
+7. Code: `sharpen/agents/sac/ensemble_agent.py:51`
 8. Code: `scripts/sg1_xauusd_ensemble_eval.py:157`
 9. Code: `scripts/sg1_btc_velotrade_ensemble_eval.py:148`
-10. Code: `finrl_pro_ds/envs/continuous_swing_env.py:243-313`
-11. Code: `finrl_pro_ds/crypto/live/live_engine.py:942-1101`
-12. Code: `finrl_pro_ds/monitoring/{action_drift,agreement_decay}.py`
-13. Code: `finrl_pro_ds/reporting/eval_distribution.py:75`
-14. Code: `finrl_pro_ds/live/agent_loader.py:245` (config-overrides-bundle precedence)
+10. Code: `sharpen/envs/continuous_swing_env.py:243-313`
+11. Code: `sharpen/crypto/live/live_engine.py:942-1101`
+12. Code: `sharpen/monitoring/{action_drift,agreement_decay}.py`
+13. Code: `sharpen/reporting/eval_distribution.py:75`
+14. Code: `sharpen/live/agent_loader.py:245` (config-overrides-bundle precedence)

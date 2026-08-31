@@ -24,7 +24,7 @@ from pathlib import Path
 import numpy as np
 import pandas as pd
 
-from finrl_pro_ds.crypto.envs.multi_exchange_arb_env import (
+from sharpen.crypto.envs.multi_exchange_arb_env import (
     EnvConfig,
     MultiExchangeArbEnv,
 )

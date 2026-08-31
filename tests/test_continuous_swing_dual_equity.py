@@ -14,7 +14,7 @@ import numpy as np
 import pandas as pd
 import pytest
 
-from finrl_pro_ds.envs.continuous_swing_env import ContinuousSwingEnv
+from sharpen.envs.continuous_swing_env import ContinuousSwingEnv
 
 
 class _FakeHandler:
@@ -189,7 +189,7 @@ def synthetic_parquet(tmp_path):
 
 def test_handler_step_emits_high_low(synthetic_parquet):
     """IC-N1: handler.step() result carries high/low with low <= close <= high."""
-    from finrl_pro_ds.data.multiscale_handler import MultiScaleOHLCVHandler
+    from sharpen.data.multiscale_handler import MultiScaleOHLCVHandler
 
     h = MultiScaleOHLCVHandler(
         file_path=synthetic_parquet,

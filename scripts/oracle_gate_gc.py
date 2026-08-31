@@ -25,8 +25,8 @@ import yaml
 project_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, project_root)
 
-from finrl_pro_ds.data.parquet_handler import ParquetDataHandler  # noqa: E402
-from finrl_pro_ds.envs.deep_scalper_env import DeepScalperEnv  # noqa: E402
+from sharpen.data.parquet_handler import ParquetDataHandler  # noqa: E402
+from sharpen.envs.deep_scalper_env import DeepScalperEnv  # noqa: E402
 
 
 def run_agent(env, policy_fn, label: str) -> dict:

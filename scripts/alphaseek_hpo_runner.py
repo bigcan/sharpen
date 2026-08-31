@@ -33,14 +33,14 @@ import yaml
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(PROJECT_ROOT))
 
-from finrl_pro_ds.alphaseek.agents import (  # noqa: E402
+from sharpen.alphaseek.agents import (  # noqa: E402
     AgentDoubleDQN,
 )
-from finrl_pro_ds.alphaseek.lob_trade_simulator import (  # noqa: E402
+from sharpen.alphaseek.lob_trade_simulator import (  # noqa: E402
     EvalLOBTradeSimulator,
     LOBTradeSimulator,
 )
-from finrl_pro_ds.alphaseek.trainer import AlphaSeekTrainer  # noqa: E402
+from sharpen.alphaseek.trainer import AlphaSeekTrainer  # noqa: E402
 
 logger = logging.getLogger(__name__)
 
@@ -406,7 +406,7 @@ def _run_agent_pipeline(
         force=True,
     )
 
-    from finrl_pro_ds.alphaseek.agents import AGENT_MAP as _AGENT_MAP
+    from sharpen.alphaseek.agents import AGENT_MAP as _AGENT_MAP
 
     agent_class = _AGENT_MAP[agent_name]
     w_idx = window["window"]

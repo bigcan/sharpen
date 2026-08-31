@@ -19,8 +19,8 @@ import pandas as pd
 ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT))
 
-from finrl_pro_ds.data import sp500_pit_panel as pit  # noqa: E402
-from finrl_pro_ds.data.equity_panel_loader import load_sp500_universe  # noqa: E402
+from sharpen.data import sp500_pit_panel as pit  # noqa: E402
+from sharpen.data.equity_panel_loader import load_sp500_universe  # noqa: E402
 
 OUT = ROOT / "results" / "ballast_v1"
 

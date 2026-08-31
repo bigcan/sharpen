@@ -2,7 +2,7 @@
 
 import pytest
 
-from finrl_pro_ds.alphaseek.risk import AlphaSeekRiskConfig, AlphaSeekRiskManager
+from sharpen.alphaseek.risk import AlphaSeekRiskConfig, AlphaSeekRiskManager
 
 
 @pytest.fixture

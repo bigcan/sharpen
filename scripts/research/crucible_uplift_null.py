@@ -69,23 +69,23 @@ if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
 import scripts.research.crucible_calibration as cal  # noqa: E402  (reuse the realistic-null substrate)
-from finrl_pro_ds.crucible.corrected_contract import (  # noqa: E402
+from sharpen.crucible.corrected_contract import (  # noqa: E402
     CorrectedConfig,
     corrected_contract_fitness,
     fresh_lord_level,
 )
-from finrl_pro_ds.signals.features import Panel  # noqa: E402
-from finrl_pro_ds.signals.generation.config import (  # noqa: E402
+from sharpen.signals.features import Panel  # noqa: E402
+from sharpen.signals.generation.config import (  # noqa: E402
     load_generation_config,
     load_generation_meta,
 )
-from finrl_pro_ds.signals.generation.evolve import (  # noqa: E402
+from sharpen.signals.generation.evolve import (  # noqa: E402
     _candidate_returns,
     _overlay_ctx,
     _overlay_returns,
     _split,
 )
-from finrl_pro_ds.signals.generation.grammar import available_terminals, parse  # noqa: E402
+from sharpen.signals.generation.grammar import available_terminals, parse  # noqa: E402
 
 log = logging.getLogger("crucible_uplift_null")
 
@@ -111,15 +111,15 @@ def _load_real_substrate(panel_name: str, ek: dict, cfg, *, start: str | None, e
     the orchestrator's real branch uses, with ``return_components=True`` so the overlay path charges the
     F14 cost correction exactly as production does."""
     if panel_name == "taiwan":
-        from finrl_pro_ds.data.taiwan_panel_loader import load_taiwan_panel
-        from finrl_pro_ds.signals.generation.base_sleeves import taiwan_base_sleeves
+        from sharpen.data.taiwan_panel_loader import load_taiwan_panel
+        from sharpen.signals.generation.base_sleeves import taiwan_base_sleeves
         panel = load_taiwan_panel(start, end)
         base, comps = taiwan_base_sleeves(
             panel, hold_horizon=ek["hold_horizon"], cost_bps=ek["cost_bps"],
             start=start, end=end, return_components=True)
     else:
-        from finrl_pro_ds.data.cross_asset_panel_loader import load_cross_asset_panel
-        from finrl_pro_ds.signals.generation.base_sleeves import production_base_sleeves
+        from sharpen.data.cross_asset_panel_loader import load_cross_asset_panel
+        from sharpen.signals.generation.base_sleeves import production_base_sleeves
         panel = load_cross_asset_panel(
             start or "2007-01-01", end, config_path=ROOT / "configs" / "cross_asset_momentum.yaml")
         base, comps = production_base_sleeves(

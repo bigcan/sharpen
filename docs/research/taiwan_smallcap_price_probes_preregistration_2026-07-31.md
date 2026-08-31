@@ -3,7 +3,7 @@
 **Written:** 2026-07-31 (S553-cont-146), **BEFORE any signal was computed or any IC was seen.**
 **Substrate:** `data/taiwan_smallcap/` cap-rank 51-250 band — the same locked universe and panel
 builder as the 2026-07-15 campaign. **Zero data fetch:** both signals derive from `prices.parquet`,
-already on disk. **Harness:** the locked `finrl_pro_ds/signals/` scorecard, thresholds unchanged.
+already on disk. **Harness:** the locked `sharpen/signals/` scorecard, thresholds unchanged.
 
 ## 0. Why these, and why they are not a re-specification
 
@@ -177,11 +177,11 @@ exactly.
 
 **RESOLVED 2026-07-31 — and the guess in the first version of this paragraph was WRONG.** It named the
 v7.1 per-name `(T,N)` alt-data bridge as the likeliest source. A bisect **falsified** that: all five
-post-07-16 `finrl_pro_ds/signals/` commits *plus the exact HEAD at record time* (`4be2e6b3`) — seven
+post-07-16 `sharpen/signals/` commits *plus the exact HEAD at record time* (`4be2e6b3`) — seven
 code states — return a bit-identical `1.044701045608392`. The cause is **data**:
 `data/taiwan_smallcap/pool.parquet` was re-enumerated 2026-07-31 11:41 by an unrelated probe's fetcher
 run, and its `sector` column is a **mandatory neutralization control** (scores are residualized on
-sector dummies daily, `finrl_pro_ds/signals/features.py:164-168`), so re-classified names move every
+sector dummies daily, `sharpen/signals/features.py:164-168`), so re-classified names move every
 downstream number — eligible sectors went 33 → 31. **All verdicts are unchanged in both readings.**
 The sector map is now pinned to `pool.frozen.parquet` with a `sector_map_sha` stamp. Full restatement
 and audit trail: `taiwan_smallcap_altdata_probes_preregistration_2026-07-15.md` §6.

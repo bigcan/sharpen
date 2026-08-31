@@ -8,7 +8,7 @@ Training (continuous_swing_env.py:288-311) clamps |position| to
 of the trailing-200 ATR buffer. The live engine applies NO such cap: the only
 position-magnitude limit is the constant `max_position_pct` (=1.0) in
 CryptoRiskManager.check() (crypto_risk_manager.py:268-276); there is zero
-volatility-dependent throttle anywhere in finrl_pro_ds/crypto/live or the risk
+volatility-dependent throttle anywhere in sharpen/crypto/live or the risk
 manager. So on the highest-decile-vol bars the live policy can carry up to 2x
 the position the training env held. This script measures how often that cap
 BINDS and the size of the resulting live-vs-train exposure gap.
@@ -54,9 +54,9 @@ import yaml
 
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
 
-from finrl_pro_ds.hpo.env_factory import make_env  # noqa: E402
-from finrl_pro_ds.data.splitter import RollingWindowSplitter  # noqa: E402
-from finrl_pro_ds.config_utils import _prep_backtest_config  # noqa: E402
+from sharpen.hpo.env_factory import make_env  # noqa: E402
+from sharpen.data.splitter import RollingWindowSplitter  # noqa: E402
+from sharpen.config_utils import _prep_backtest_config  # noqa: E402
 from scripts.sg1_btc_velotrade_ensemble_eval import _override_test_window  # noqa: E402
 
 

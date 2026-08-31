@@ -22,8 +22,8 @@ ROOT = Path(__file__).resolve().parents[2]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
-from finrl_pro_ds.signals import Gates, evaluate_batch, make_synthetic_panel  # noqa: E402
-from finrl_pro_ds.signals.features import ohlc_violations  # noqa: E402
+from sharpen.signals import Gates, evaluate_batch, make_synthetic_panel  # noqa: E402
+from sharpen.signals.features import ohlc_violations  # noqa: E402
 from scripts.data.fetch_taiwan_fundamentals_finmind import (  # noqa: E402
     _is_tier_block,
     big_holder_percent,

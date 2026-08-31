@@ -51,7 +51,7 @@
 #   -> its WF verdict reads trailing DD off the lenient bare-env 30% surface with
 #   no fixed-lot cross-check, making the "DD within Velotrade 10% cap" gate
 #   non-binding. The velotrade engine is a config-driven port that (a) runs the
-#   X3 fixed-lot stress pass (finrl_pro_ds/eval/fixed_lot_stress.py, audit-verified
+#   X3 fixed-lot stress pass (sharpen/eval/fixed_lot_stress.py, audit-verified
 #   P7-10) gating the HONEST worst fixed-lot trailing DD vs the 10% cap, and
 #   (b) grades the chosen rule via --chosen_rule. Same CLI args; zero code change.
 #   REQUIRES stress_dd_buffer_pp + stress_leverage_max in the gates file (else

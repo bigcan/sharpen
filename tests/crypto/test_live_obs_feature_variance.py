@@ -11,7 +11,7 @@ from collections import deque
 import numpy as np
 import pytest
 
-from finrl_pro_ds.crypto.live.live_obs_builder import (
+from sharpen.crypto.live.live_obs_builder import (
     FeatureVarianceStatus,
     LiveObsBuilder,
 )

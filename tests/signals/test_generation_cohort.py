@@ -17,12 +17,12 @@ from statistics import NormalDist
 import numpy as np
 import pytest
 
-from finrl_pro_ds.crypto.eval.statistics import (
+from sharpen.crypto.eval.statistics import (
     deflated_sharpe_ratio,
     excess_kurtosis,
     skewness,
 )
-from finrl_pro_ds.signals.generation.cohort import (
+from sharpen.signals.generation.cohort import (
     CohortConfig,
     blep_sr_star,
     cohort_dsr,
@@ -35,8 +35,8 @@ from finrl_pro_ds.signals.generation.cohort import (
     measure_pool_diversity,
     pairwise_corr_matrix,
 )
-from finrl_pro_ds.signals.generation.cohort import _with_redundancy
-from finrl_pro_ds.signals.generation.fitness import (
+from sharpen.signals.generation.cohort import _with_redundancy
+from sharpen.signals.generation.fitness import (
     FitnessConfig,
     _combined_book,
     _per_period_sharpe,

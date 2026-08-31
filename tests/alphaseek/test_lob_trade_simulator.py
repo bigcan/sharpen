@@ -20,7 +20,7 @@ class TestLOBTradeSimulatorBasic:
     """Basic simulator tests using real LOB data."""
 
     def _make_sim(self, **kwargs):
-        from finrl_pro_ds.alphaseek.lob_trade_simulator import LOBTradeSimulator
+        from sharpen.alphaseek.lob_trade_simulator import LOBTradeSimulator
 
         defaults = {
             "lob_parquet_path": LOB_PARQUET,
@@ -75,7 +75,7 @@ class TestLOBTradeSimulatorStepGap:
     """Verify step_gap affects max_step and max_holding correctly."""
 
     def _make_sim(self, step_gap):
-        from finrl_pro_ds.alphaseek.lob_trade_simulator import LOBTradeSimulator
+        from sharpen.alphaseek.lob_trade_simulator import LOBTradeSimulator
 
         return LOBTradeSimulator(
             lob_parquet_path=LOB_PARQUET,
@@ -109,7 +109,7 @@ class TestLOBTradeSimulatorStepGap:
 @skip_no_data
 class TestEvalLOBTradeSimulator:
     def test_eval_deterministic_start(self):
-        from finrl_pro_ds.alphaseek.lob_trade_simulator import EvalLOBTradeSimulator
+        from sharpen.alphaseek.lob_trade_simulator import EvalLOBTradeSimulator
 
         sim = EvalLOBTradeSimulator(
             lob_parquet_path=LOB_PARQUET,

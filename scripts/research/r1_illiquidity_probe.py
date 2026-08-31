@@ -11,7 +11,7 @@ Stages:
   python scripts/research/r1_illiquidity_probe.py --stage all
 
 Feature fidelity: features and causal coarse-bar maps are consumed directly from
-finrl_pro_ds.data.multiscale_handler.MultiScaleOHLCVHandler (the de-leaked X2
+sharpen.data.multiscale_handler.MultiScaleOHLCVHandler (the de-leaked X2
 code path) — no reimplementation. TW-4 re-asserts the X2 causality condition on
 every gathered window.
 """
@@ -30,7 +30,7 @@ import pandas as pd
 ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT))
 
-from finrl_pro_ds.data.multiscale_handler import MultiScaleOHLCVHandler  # noqa: E402
+from sharpen.data.multiscale_handler import MultiScaleOHLCVHandler  # noqa: E402
 
 DATA_DIR = ROOT / "data" / "r1_illiquidity"
 OUT_DIR = ROOT / "results" / "r1_illiquidity"

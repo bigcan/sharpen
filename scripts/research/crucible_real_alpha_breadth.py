@@ -50,9 +50,9 @@ from scipy.stats import spearmanr
 ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT))
 
-from finrl_pro_ds.crucible.data.us_equity_panel import build_us_equity_panel  # noqa: E402
-from finrl_pro_ds.signals.eval_harness import _ls_weights, compute_scores  # noqa: E402
-from finrl_pro_ds.signals.library.alphas101 import SIGNALS as ALPHAS  # noqa: E402
+from sharpen.crucible.data.us_equity_panel import build_us_equity_panel  # noqa: E402
+from sharpen.signals.eval_harness import _ls_weights, compute_scores  # noqa: E402
+from sharpen.signals.library.alphas101 import SIGNALS as ALPHAS  # noqa: E402
 
 MEMBERS = Path(r"C:\tmp\sp500_pit_members.csv")
 OUT = ROOT / "results" / "signal_eval" / "crucible_equity_breadth"
@@ -124,20 +124,20 @@ def main() -> int:
     if args.panel == "us_equity":
         panel = build_us_equity_panel(top_k=args.k)
     elif args.panel == "cross_asset":
-        from finrl_pro_ds.data.cross_asset_panel_loader import load_cross_asset_panel
+        from sharpen.data.cross_asset_panel_loader import load_cross_asset_panel
         panel = load_cross_asset_panel(
             "2007-01-01", config_path=ROOT / "configs" / "cross_asset_momentum.yaml")
     elif args.panel == "taiwan":
-        from finrl_pro_ds.data.taiwan_panel_loader import load_taiwan_panel
+        from sharpen.data.taiwan_panel_loader import load_taiwan_panel
         panel = load_taiwan_panel(None, None)
     elif args.panel == "taiwan_smallcap":
-        from finrl_pro_ds.crucible.data.taiwan_smallcap_panel import build_taiwan_smallcap_panel
+        from sharpen.crucible.data.taiwan_smallcap_panel import build_taiwan_smallcap_panel
         panel = build_taiwan_smallcap_panel()
     elif args.panel == "intraday_fx":
-        from finrl_pro_ds.crucible.data.intraday_panel import build_fx_majors_panel
+        from sharpen.crucible.data.intraday_panel import build_fx_majors_panel
         panel = build_fx_majors_panel()
     else:
-        from finrl_pro_ds.crucible.data.intraday_panel import build_intraday_panel
+        from sharpen.crucible.data.intraday_panel import build_intraday_panel
         panel = build_intraday_panel()
     univ = panel.active.astype(bool)
     min_names = args.min_names if args.min_names is not None else (

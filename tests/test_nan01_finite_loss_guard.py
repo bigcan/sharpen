@@ -22,8 +22,8 @@ import math
 import pytest
 import torch
 
-from finrl_pro_ds.agents.sac.dsac_agent import DistributionalSACAgent
-from finrl_pro_ds.training.sac_trainer import SACTrainer
+from sharpen.agents.sac.dsac_agent import DistributionalSACAgent
+from sharpen.training.sac_trainer import SACTrainer
 
 
 # --------------------------------------------------------------------------- #
@@ -138,7 +138,7 @@ def test_grad_skips_is_exposed_in_metrics():
     """A run that has silently stopped learning must be visible, not look like flat training."""
     import inspect
 
-    from finrl_pro_ds.agents.sac.sac_agent import SACAgent
+    from sharpen.agents.sac.sac_agent import SACAgent
     for cls in (SACAgent, DistributionalSACAgent):
         assert '"grad_skips"' in inspect.getsource(cls.train_step_mega), \
             f"{cls.__name__} does not report grad_skips"
@@ -187,7 +187,7 @@ def test_all_three_optimizers_use_the_one_primitive():
     step survives anywhere. Guards against a future path re-introducing an unguarded one."""
     import inspect
 
-    from finrl_pro_ds.agents.sac.sac_agent import SACAgent
+    from sharpen.agents.sac.sac_agent import SACAgent
     for cls in (SACAgent, DistributionalSACAgent):
         src = inspect.getsource(cls.train_step_mega)
         assert src.count("_step_if_finite(") == 3, (

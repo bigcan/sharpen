@@ -13,7 +13,7 @@ real-chain re-validation the de-contamination re-audit demanded
 
 Greeks: only `delta` is read by the backtest (25-delta strangle / wing selection); it is
 computed from `mark_iv` via the project's single-source-of-truth BS module
-(`finrl_pro_ds.crypto.options_pricing`). gamma/vega/theta are filled for schema parity;
+(`sharpen.crypto.options_pricing`). gamma/vega/theta are filled for schema parity;
 bid_iv/ask_iv are left NaN (the live book summary does not publish them — only a
 diagnostic in the backtest). INVERSE vs USDC-LINEAR is preserved in `symbol` so the
 backtest's `INVERSE_ONLY` filter still applies (the contamination lesson).
@@ -32,16 +32,16 @@ import time
 from datetime import datetime, timezone
 from pathlib import Path
 
-# Resolve finrl_pro_ds when run as a script (script dir shadows cwd on sys.path).
+# Resolve sharpen when run as a script (script dir shadows cwd on sys.path).
 _ROOT = Path(__file__).resolve().parents[2]
 if str(_ROOT) not in sys.path:
     sys.path.insert(0, str(_ROOT))
 
-import numpy as np  # noqa: E402  (after sys.path bootstrap so scheduled runs resolve finrl_pro_ds)
+import numpy as np  # noqa: E402  (after sys.path bootstrap so scheduled runs resolve sharpen)
 import pandas as pd  # noqa: E402
 import requests  # noqa: E402
 
-from finrl_pro_ds.crypto.options_pricing import (  # noqa: E402
+from sharpen.crypto.options_pricing import (  # noqa: E402
     ANN,
     leg_delta,
     leg_gamma,

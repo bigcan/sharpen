@@ -97,7 +97,7 @@ class TestSeedDemoBuffer(unittest.TestCase):
 
     def _make_trainer(self, discrete_dims=3, demo_seed_steps=10, num_envs=4,
                       logret_override=None):
-        from finrl_pro_ds.training.deepscalper_trainer import DeepScalperTrainer
+        from sharpen.training.deepscalper_trainer import DeepScalperTrainer
         cfg = _make_config(discrete_dims=discrete_dims, demo_seed_steps=demo_seed_steps,
                            num_envs=num_envs)
         env = _make_mock_env(num_envs=num_envs, logret_override=logret_override)

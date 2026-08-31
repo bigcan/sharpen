@@ -20,8 +20,8 @@ import numpy as np
 import pandas as pd
 import pytest
 
-from finrl_pro_ds.crucible import TrialLedger, TrialRecord
-from finrl_pro_ds.crucible.agentic import (
+from sharpen.crucible import TrialLedger, TrialRecord
+from sharpen.crucible.agentic import (
     DiscoveryCard,
     HypothesisAuthor,
     HypothesisProposal,
@@ -29,10 +29,10 @@ from finrl_pro_ds.crucible.agentic import (
     ProposalContext,
     run_hypothesis_loop,
 )
-from finrl_pro_ds.crucible.agentic.card import INCUBATION_PENDING
-from finrl_pro_ds.crucible.agentic.hypothesis import candidate_hash
-from finrl_pro_ds.signals.features import Panel
-from finrl_pro_ds.signals.generation.fitness import FitnessConfig
+from sharpen.crucible.agentic.card import INCUBATION_PENDING
+from sharpen.crucible.agentic.hypothesis import candidate_hash
+from sharpen.signals.features import Panel
+from sharpen.signals.generation.fitness import FitnessConfig
 
 T, N = 320, 12
 _CFG = FitnessConfig(embargo=10)
@@ -132,8 +132,8 @@ def test_proposal_context_carries_no_scores_even_with_scored_ledger(tmp_path) ->
 def test_scorer_signature_cannot_receive_rationale() -> None:
     """Structural CR-1: the mine/deflation entry points have NO parameter through which the agent's
     economic rationale could reach the scorer."""
-    from finrl_pro_ds.signals.generation.evolve import evolve
-    from finrl_pro_ds.signals.generation.fitness import combination_fitness
+    from sharpen.signals.generation.evolve import evolve
+    from sharpen.signals.generation.fitness import combination_fitness
 
     for fn in (evolve, combination_fitness):
         params = set(inspect.signature(fn).parameters)
@@ -257,7 +257,7 @@ def test_exit_gate_synthetic_zero_promising_and_deterministic(tmp_path) -> None:
 # copies the scorer numbers verbatim (CR-1), not paraphrased.
 
 def _fitness_result() -> object:
-    from finrl_pro_ds.signals.generation.fitness import FitnessResult
+    from sharpen.signals.generation.fitness import FitnessResult
     return FitnessResult(fitness=0.9, delta_sr_oos=0.08, delta_sr_median=0.06,
                          frac_paths_positive=0.8, delta_sr_p05=-0.01, n_paths=15, dsr_aug=1.7,
                          cand_hlz_pass=True, turnover_ann=1.2, n_nodes=3, passes_gate=True,
@@ -265,12 +265,12 @@ def _fitness_result() -> object:
 
 
 def test_card_links_survivor_to_preregistered_spec_verbatim() -> None:
-    from finrl_pro_ds.crucible.agentic.hypothesis import PreRegisteredSpec
-    from finrl_pro_ds.crucible.agentic.loop import _card_for
-    from finrl_pro_ds.signals.generation.evolve import Candidate, GenerationReport
-    from finrl_pro_ds.signals.spec import SignalSpec
+    from sharpen.crucible.agentic.hypothesis import PreRegisteredSpec
+    from sharpen.crucible.agentic.loop import _card_for
+    from sharpen.signals.generation.evolve import Candidate, GenerationReport
+    from sharpen.signals.spec import SignalSpec
 
-    from finrl_pro_ds.signals.generation.grammar import parse, to_formula
+    from sharpen.signals.generation.grammar import parse, to_formula
     formula = to_formula(parse("rank(delta(close, 20))"))    # canonical form (matches the mine's key)
     chash = candidate_hash(formula)
     res = _fitness_result()
@@ -304,9 +304,9 @@ def test_card_links_survivor_to_preregistered_spec_verbatim() -> None:
 def test_card_marks_evolved_offspring_when_no_prereg_match() -> None:
     """A survivor with no matching pre-registered seed (an evolved offspring) is labelled as such and
     carries no proposal_ts — it is not a pre-registered hypothesis."""
-    from finrl_pro_ds.crucible.agentic.loop import _card_for
-    from finrl_pro_ds.signals.generation.evolve import Candidate, GenerationReport
-    from finrl_pro_ds.signals.generation.grammar import parse, to_formula
+    from sharpen.crucible.agentic.loop import _card_for
+    from sharpen.signals.generation.evolve import Candidate, GenerationReport
+    from sharpen.signals.generation.grammar import parse, to_formula
 
     formula = to_formula(parse("rank(sum(returns, 5))"))
     cand = Candidate(formula=formula, fitness=0.5, result=_fitness_result())  # type: ignore[arg-type]

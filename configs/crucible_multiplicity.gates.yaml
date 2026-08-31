@@ -3,7 +3,7 @@
 # ADR-1 separation: this is its OWN file, exactly as the lockbox / cohort / power /
 # corrected-contract gates are, so multiplicity work cannot move a byte of the frozen funnel
 # moat (configs/signal_eval.gates.yaml, 519158fa1450) or the Taiwan / small-cap probe seals.
-# Never hardcode these values in code — finrl_pro_ds/signals/multiplicity.py reads them here.
+# Never hardcode these values in code — sharpen/signals/multiplicity.py reads them here.
 #
 # The DEFLATION MAGNITUDE itself is not a threshold in this file: the count fed to DSR is
 # max(batch_pool, declared_hypotheses), which is data, not a tunable. What lives here is

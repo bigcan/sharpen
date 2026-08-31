@@ -1,14 +1,14 @@
 """Taiwan alt-data connector registry — Crucible v2.8."""
 from __future__ import annotations
 
-from finrl_pro_ds.crucible.data.panel_bridge import is_valid_terminal
-from finrl_pro_ds.crucible.data.taifex_positioning import TaifexPositioningConnector
-from finrl_pro_ds.crucible.data.taiwan_altdata import (
+from sharpen.crucible.data.panel_bridge import is_valid_terminal
+from sharpen.crucible.data.taifex_positioning import TaifexPositioningConnector
+from sharpen.crucible.data.taiwan_altdata import (
     TAIWAN_ALTDATA_ALIASES,
     TAIWAN_TERMINAL_ASSET_CLASS,
     taiwan_connectors,
 )
-from finrl_pro_ds.crucible.data.twse_institutional import TwseInstitutionalConnector
+from sharpen.crucible.data.twse_institutional import TwseInstitutionalConnector
 
 
 def test_every_alias_value_is_dsl_legal() -> None:
@@ -40,7 +40,7 @@ def test_terminal_asset_class_map_covers_every_terminal_exactly() -> None:
     alias values — nothing aliases to them, they are built by `taiwan_per_name_slots` — so the old
     equality against the alias values alone could not hold once they existed. Kept as an EXACT equality
     against the union so a newly-added terminal of either kind still cannot ship unclassified."""
-    from finrl_pro_ds.crucible.data.taiwan_altdata import _PER_NAME_TERMINALS
+    from sharpen.crucible.data.taiwan_altdata import _PER_NAME_TERMINALS
 
     expected = set(TAIWAN_ALTDATA_ALIASES.values()) | set(_PER_NAME_TERMINALS)
     assert set(TAIWAN_TERMINAL_ASSET_CLASS) == expected

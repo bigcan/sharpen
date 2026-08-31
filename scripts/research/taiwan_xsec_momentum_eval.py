@@ -3,7 +3,7 @@
 Step two of the "less-liquid market = more extractable alpha" thesis test (artifact
 ``.agent/artifacts/taiwan_market_data_sourcing_research_s553.md``). Reads the cleaned +
 manifested TWSE large-cap panel produced by ``scripts/data/fetch_taiwan_finmind.py``,
-builds a :class:`finrl_pro_ds.signals.Panel`, and runs ONE low-turnover signal family —
+builds a :class:`sharpen.signals.Panel`, and runs ONE low-turnover signal family —
 cross-sectional 12-1 / 6-1 / 3-1 price momentum (Jegadeesh-Titman, skip-the-last-month) —
 through the existing 6-tier deflated signal-eval harness under Taiwan-specific gates
 (``configs/taiwan_signal_eval.gates.yaml``), whose cost model bakes in the 0.30%
@@ -39,7 +39,7 @@ from pathlib import Path
 import numpy as np
 import pandas as pd
 
-from finrl_pro_ds.signals import (
+from sharpen.signals import (
     Gates,
     HypothesisLedger,
     Panel,
@@ -48,7 +48,7 @@ from finrl_pro_ds.signals import (
     to_markdown,
     write_scorecard,
 )
-from finrl_pro_ds.signals.spec import SignalSpec
+from sharpen.signals.spec import SignalSpec
 
 ROOT = Path(__file__).resolve().parents[2]
 log = logging.getLogger("taiwan_xsec_momentum")

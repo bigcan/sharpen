@@ -21,7 +21,7 @@ from unittest.mock import AsyncMock, MagicMock
 import numpy as np
 import pytest
 
-from finrl_pro_ds.crypto.mlops.crypto_risk_manager import (
+from sharpen.crypto.mlops.crypto_risk_manager import (
     CryptoRiskConfig,
     CryptoRiskManager,
 )
@@ -53,7 +53,7 @@ def _build_engine(config: dict, risk_manager, monkeypatch):
     short-circuited. Yields an engine where the only meaningful behavior is
     the path from ``_trading_step_inner(bar_time)`` to ``risk_manager.check``.
     """
-    from finrl_pro_ds.crypto.live.live_engine import LiveTradingEngine
+    from sharpen.crypto.live.live_engine import LiveTradingEngine
 
     monkeypatch.setenv("STRATEGY_NAME", "test-engine-s506")
     monkeypatch.setenv("METRICS_PORT", "0")
