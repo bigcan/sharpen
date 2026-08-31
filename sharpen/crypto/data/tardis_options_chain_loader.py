@@ -38,7 +38,7 @@ import pandas as pd
 logger = logging.getLogger(__name__)
 
 CSV_URL = "https://datasets.tardis.dev/v1/deribit/options_chain/{y}/{m:02d}/01/OPTIONS.csv.gz"
-USER_AGENT = "finrl-pro-ds/vrp-harvest (free first-of-month chain loader)"
+USER_AGENT = "sharpen/vrp-harvest (free first-of-month chain loader)"
 DEFAULT_CACHE_DIR = Path("data/processed/deribit_chain")
 
 # Columns kept from the (24-column) options_chain schema.

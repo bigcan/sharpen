@@ -517,7 +517,7 @@ def deploy_to_worker(
             f"cd {REMOTE_WORKSPACE}",
             path_export,
             "ulimit -n 65536",
-            f"{pip_cmd} uninstall finrl-pro-ds -y || true",
+            f"{pip_cmd} uninstall sharpen finrl-pro-ds -y || true",
             "rm -rf sharpen.egg-info finrl_pro_ds.egg-info build dist",
             f"unzip -o {zip_name}",
             f"rm -f {zip_name}",
