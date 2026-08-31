@@ -1,3 +1,8 @@
+# Portions of this file are derived from ElegantRL
+# (https://github.com/AI4Finance-Foundation/ElegantRL), Copyright 2024
+# AI4Finance Foundation Inc., licensed under the Apache License, Version 2.0.
+# Modified by Keng Lee, 2026. See the NOTICE file for details.
+
 """AlphaSeek DQN Trainer — production training loop.
 
 Adapted from contest/reference/erl_run.py::train_agent(). Provides:
