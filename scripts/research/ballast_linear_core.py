@@ -23,12 +23,12 @@ import pandas as pd
 ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT))
 
-from finrl_pro_ds.data import cross_asset_loader as cal  # noqa: E402
-from finrl_pro_ds.data import fundamentals as fnd  # noqa: E402
-from finrl_pro_ds.portfolio.long_only import (  # noqa: E402
+from sharpen.data import cross_asset_loader as cal  # noqa: E402
+from sharpen.data import fundamentals as fnd  # noqa: E402
+from sharpen.portfolio.long_only import (  # noqa: E402
     PortfolioConfig, active_stats, backtest, performance,
 )
-from finrl_pro_ds.signals.library import ballast as bs  # noqa: E402
+from sharpen.signals.library import ballast as bs  # noqa: E402
 
 log = logging.getLogger("ballast_p2")
 OUT = ROOT / "results" / "ballast_v1"

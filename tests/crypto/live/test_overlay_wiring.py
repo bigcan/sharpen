@@ -2,7 +2,7 @@
 
 S498 P1: GMGP1-BTC Velotrade Step 5 migration. The crypto path never used
 PropFirmWrapper or RiskShapingWrapper at training or live time (verified
-via grep — no matches under finrl_pro_ds/crypto/ or scripts/run_live.py),
+via grep — no matches under sharpen/crypto/ or scripts/run_live.py),
 so the wrapper-parity Q1 test designed for SG-1 XAUUSD is inapplicable.
 The actual surface to validate is engine-level config consumption: the
 overlay supplies ``challenge.*`` (ChallengeStateMachine) and ``risk.*``
@@ -19,7 +19,7 @@ from unittest.mock import MagicMock
 import pytest
 import yaml
 
-from finrl_pro_ds.config_utils import apply_overlays
+from sharpen.config_utils import apply_overlays
 
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
@@ -80,7 +80,7 @@ def test_crypto_risk_manager_propagates_static_peak(resolved_config: dict) -> No
     overlay's ``risk.static_peak: true`` reaches CryptoRiskConfig.static_peak.
     A regression here means the FTMO-style fixed-equity-peak guard would
     silently degrade to ratchet mode on bounce."""
-    from finrl_pro_ds.crypto.mlops.crypto_risk_manager import (
+    from sharpen.crypto.mlops.crypto_risk_manager import (
         CryptoRiskConfig,
         CryptoRiskManager,
     )
@@ -117,7 +117,7 @@ def test_live_engine_instantiates_challenge_state_machine(
     silently degrades to the legacy "challenge handled by training wrapper"
     contract, leaving the live engine with no profit-target tripwire.
     """
-    from finrl_pro_ds.crypto.live.live_engine import LiveTradingEngine
+    from sharpen.crypto.live.live_engine import LiveTradingEngine
 
     # STRATEGY_NAME is read off env in __init__; pin it for determinism.
     monkeypatch.setenv("STRATEGY_NAME", "gmgp1-btc-test")
@@ -150,7 +150,7 @@ def test_live_engine_no_challenge_when_block_absent(monkeypatch) -> None:
     """Negative control: a base-only (pre-Step-5) load must NOT instantiate
     the state machine. Catches a regression where a default-on dispatch
     would activate the tripwire on training/HPO/backtest configs."""
-    from finrl_pro_ds.crypto.live.live_engine import LiveTradingEngine
+    from sharpen.crypto.live.live_engine import LiveTradingEngine
 
     with BASE_CONFIG.open(encoding="utf-8") as f:
         base = yaml.safe_load(f)

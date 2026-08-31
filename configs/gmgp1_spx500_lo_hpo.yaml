@@ -98,7 +98,7 @@ network:
   window_size: 30
 
 # Placeholder HPs — geometric midpoints of the broad search space in
-# finrl_pro_ds/hpo/objective.py:132-144. narrow_mode: false => every dim is resampled per
+# sharpen/hpo/objective.py:132-144. narrow_mode: false => every dim is resampled per
 # trial and these are NOT used as priors. There is no donor study for equities, so a narrow
 # search would have no anchor to narrow around.
 agents:

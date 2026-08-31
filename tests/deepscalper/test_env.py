@@ -5,9 +5,9 @@ from unittest.mock import MagicMock
 import gymnasium as gym
 import numpy as np
 
-from finrl_pro_ds.data.feature_engineering import NUM_MICRO_FEATURES
-from finrl_pro_ds.data.parquet_handler import ParquetDataHandler
-from finrl_pro_ds.envs.deep_scalper_env import DeepScalperEnv
+from sharpen.data.feature_engineering import NUM_MICRO_FEATURES
+from sharpen.data.parquet_handler import ParquetDataHandler
+from sharpen.envs.deep_scalper_env import DeepScalperEnv
 
 
 class TestDeepScalperEnv(unittest.TestCase):

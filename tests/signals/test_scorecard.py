@@ -5,7 +5,7 @@ import json
 
 import numpy as np
 
-from finrl_pro_ds.signals import (
+from sharpen.signals import (
     Gates,
     SignalSpec,
     evaluate_batch,
@@ -13,7 +13,7 @@ from finrl_pro_ds.signals import (
     to_markdown,
     write_scorecard,
 )
-from finrl_pro_ds.signals.features import Panel
+from sharpen.signals.features import Panel
 
 
 class Trail:

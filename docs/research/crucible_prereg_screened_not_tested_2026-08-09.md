@@ -254,7 +254,7 @@ assumption, not a measurement.
 | — overlay output | `results/crucible_lord_depletion/lord_depletion_power.json` |
 | — cross_sectional, shipped grid (reproduces the stamp) | `results/crucible_lord_depletion/lord_depletion_power_xsec.json` |
 | — cross_sectional, refined grid | `results/crucible_lord_depletion/lord_depletion_power_xsec_fine.json` |
-| the fix | `finrl_pro_ds/signals/generation/evolve.py` (train pre-filter branch) |
+| the fix | `sharpen/signals/generation/evolve.py` (train pre-filter branch) |
 | reporting | `substrate.py` / `orchestrator.py` `n_holdout_tested` (+ migration) |
-| version rationale | `finrl_pro_ds/crucible/version.py` (`crucible-v12.0`) |
+| version rationale | `sharpen/crucible/version.py` (`crucible-v12.0`) |
 | regression tests | `tests/crucible/test_contract_corrected_evolve.py` (3), `test_orchestrator.py` (1) |

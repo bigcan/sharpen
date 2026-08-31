@@ -11,7 +11,7 @@ from __future__ import annotations
 import numpy as np
 
 import scripts.research.crucible_matched_null as mn
-from finrl_pro_ds.signals.generation.fitness import FitnessConfig
+from sharpen.signals.generation.fitness import FitnessConfig
 
 
 def test_zero_sharpe_base_is_near_zero_sharpe() -> None:

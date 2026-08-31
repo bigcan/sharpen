@@ -16,9 +16,9 @@ from __future__ import annotations
 import numpy as np
 import pytest
 
-from finrl_pro_ds.crucible.data import quality_gate as qg
-from finrl_pro_ds.crucible.data.connector import SeriesData, SeriesRef
-from finrl_pro_ds.crucible.data.quality_gate import (
+from sharpen.crucible.data import quality_gate as qg
+from sharpen.crucible.data.connector import SeriesData, SeriesRef
+from sharpen.crucible.data.quality_gate import (
     _canonical_asof_values,
     asof_join,
     assert_asof_join_causal,

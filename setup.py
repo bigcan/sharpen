@@ -1,7 +1,7 @@
 from setuptools import setup, find_packages
 
 setup(
-    name="finrl_pro_ds",
+    name="sharpen",
     version="0.1.0",
     author="Keng Lee",
     author_email="bigcan@users.noreply.github.com",
@@ -29,7 +29,7 @@ setup(
         'protobuf==3.20.1',
         'rich>=14.0.0'
     ],
-    description="FinRL-Pro_DS",
+    description="Sharpen — semi-agentic quant strategy research platform",
     classifiers=[
         # Trove classifiers
         # Full list: https://pypi.python.org/pypi?%3Aaction=list_classifiers

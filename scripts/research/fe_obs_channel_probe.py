@@ -12,7 +12,7 @@ present cannot pass.
 
 Forks scripts/research/r1_illiquidity_probe.py (same de-leaked MultiScaleOHLCV
 path, same WF/bootstrap/FDR machinery). Feature construction is consumed directly
-from finrl_pro_ds.data.multiscale_handler — no reimplementation. The FFD channel
+from sharpen.data.multiscale_handler — no reimplementation. The FFD channel
 reuses _fractional_diff (crypto_features, FE-08-fixed) + the handler's own
 _symlog -> _ema_zscore_tanh normalization.
 
@@ -37,8 +37,8 @@ import pandas as pd
 ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT))
 
-from finrl_pro_ds.crypto.features.crypto_features import _fractional_diff  # noqa: E402
-from finrl_pro_ds.data.multiscale_handler import (  # noqa: E402
+from sharpen.crypto.features.crypto_features import _fractional_diff  # noqa: E402
+from sharpen.data.multiscale_handler import (  # noqa: E402
     MultiScaleOHLCVHandler,
     _ema_zscore_tanh,
     _symlog,

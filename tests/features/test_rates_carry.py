@@ -1,6 +1,6 @@
 """Rates-carry conviction: formula fidelity to the research, units, and LEAK-2 causality.
 
-Pins the productionized signal (``finrl_pro_ds.features.rates_carry``) to the validated
+Pins the productionized signal (``sharpen.features.rates_carry``) to the validated
 ``scripts/research/carry_falsification.rates_carry_signal``: per-bond carry =
 ``tanh((tenor_yield - 3m) / 1.5)`` in PERCENT units, causal as-of read, warmup → 0.
 """
@@ -10,7 +10,7 @@ import numpy as np
 import pandas as pd
 import pytest
 
-from finrl_pro_ds.features import rates_carry as rc
+from sharpen.features import rates_carry as rc
 
 
 def _synthetic_curve(T: int = 600, seed: int = 3) -> dict[str, pd.Series]:

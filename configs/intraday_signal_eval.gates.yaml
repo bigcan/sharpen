@@ -1,7 +1,7 @@
 # Pre-registered gates for the INTRADAY Crucible mining substrate (S553-cont-151).
 # Substrate = the 12 uniformity-verified Dukascopy 1h instruments (FX / metals / energy),
 # T=77,298 common bars over 2013-01-01 -> 2026-07-31, built by
-# finrl_pro_ds/crucible/data/intraday_panel.py and scored against the intraday TSMOM base book
+# sharpen/crucible/data/intraday_panel.py and scored against the intraday TSMOM base book
 # (base_sleeves.intraday_base_sleeves).
 #
 # Only the `generation:` block is read (by signals.generation.config); the funnel `universe:`/

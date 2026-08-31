@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import pytest
 
-from finrl_pro_ds.monitoring.agreement_decay import (
+from sharpen.monitoring.agreement_decay import (
     CONSENSUS_RULES,
     AgreementDecayStatus,
     AgreementDecayTracker,
@@ -42,7 +42,7 @@ def test_ctor_rejects_nonpositive_deadband():
 
 def test_ctor_logs_for_non_consensus_rule(caplog):
     import logging
-    with caplog.at_level(logging.WARNING, logger="finrl_pro_ds.monitoring.agreement_decay"):
+    with caplog.at_level(logging.WARNING, logger="sharpen.monitoring.agreement_decay"):
         AgreementDecayTracker(0.10, rule="ens_mean", window_bars=200)
     assert any(
         "non-consensus rule" in rec.getMessage() for rec in caplog.records

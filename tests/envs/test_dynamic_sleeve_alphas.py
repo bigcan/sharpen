@@ -20,7 +20,7 @@ import numpy as np
 import pandas as pd
 import pytest
 
-from finrl_pro_ds.envs.allocator_factory import (
+from sharpen.envs.allocator_factory import (
     _trailing_ann_perf,
     dynamic_sleeve_alphas,
     risk_parity_alphas,

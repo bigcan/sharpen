@@ -3,7 +3,7 @@
 
 The 4th-sleeve analog of ``eval_defensive_sleeve.py``. Answers the only question that matters for
 an added sleeve: does folding ``commodity_carry`` (a thin, energy-only ETF roll-spread carry book —
-see ``finrl_pro_ds/features/commodity_carry.py`` for why it is thin) into the live
+see ``sharpen/features/commodity_carry.py`` for why it is thin) into the live
 {tsmom, rates_carry} book improve the inverse-vol COMBINED book, net of cost, at low correlation?
 This is the portfolio bar (marginal uplift), NOT the sleeve's standalone Sharpe.
 
@@ -169,8 +169,8 @@ def main() -> int:
                     default=str(ROOT / "results" / "signal_eval" / "commodity_carry_sleeve_eval.json"))
     args = ap.parse_args()
 
-    from finrl_pro_ds.data.cross_asset_panel_loader import load_cross_asset_panel
-    from finrl_pro_ds.signals.generation.base_sleeves import production_base_sleeves
+    from sharpen.data.cross_asset_panel_loader import load_cross_asset_panel
+    from sharpen.signals.generation.base_sleeves import production_base_sleeves
 
     gen = (yaml.safe_load(Path(args.gen_gates).read_text(encoding="utf-8")) or {}).get("generation", {})
     max_base_corr = float(gen.get("max_base_corr", 0.70))

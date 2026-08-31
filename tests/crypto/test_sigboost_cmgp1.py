@@ -8,8 +8,8 @@ import numpy as np
 import pandas as pd
 import pytest
 
-from finrl_pro_ds.crypto.data.multiscale_crypto_handler import MultiScaleCryptoHandler
-from finrl_pro_ds.crypto.envs.crypto_perp_swing_env import CryptoPerpSwingEnv
+from sharpen.crypto.data.multiscale_crypto_handler import MultiScaleCryptoHandler
+from sharpen.crypto.envs.crypto_perp_swing_env import CryptoPerpSwingEnv
 
 
 # ---------------------------------------------------------------------------
@@ -253,7 +253,7 @@ class TestNetworkCompat:
         """SummaryStatsEncoder should accept V1.1 input dim (517 for 10 assets)."""
         try:
             import torch
-            from finrl_pro_ds.agents.sac.networks import SummaryStatsEncoder
+            from sharpen.agents.sac.networks import SummaryStatsEncoder
         except ImportError:
             pytest.skip("torch not available")
 
@@ -267,7 +267,7 @@ class TestNetworkCompat:
         """SummaryStatsEncoder should still work with V1 dim (467 for 10 assets)."""
         try:
             import torch
-            from finrl_pro_ds.agents.sac.networks import SummaryStatsEncoder
+            from sharpen.agents.sac.networks import SummaryStatsEncoder
         except ImportError:
             pytest.skip("torch not available")
 

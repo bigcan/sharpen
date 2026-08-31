@@ -33,8 +33,8 @@ import torch
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent.parent))
 
-from finrl_pro_ds.agents.common.batch_renorm import BatchRenorm1d
-from finrl_pro_ds.agents.sac.sac_agent import SACAgent, normalize_crossq_config
+from sharpen.agents.common.batch_renorm import BatchRenorm1d
+from sharpen.agents.sac.sac_agent import SACAgent, normalize_crossq_config
 
 
 # ---------------------------------------------------------------------------
@@ -198,7 +198,7 @@ class TestConstruction:
         assert baseline_agent.critic_optimizer.param_groups[0]["betas"] == (0.9, 0.999)
 
     def test_dsac_refuses_the_combination(self, network_config):
-        from finrl_pro_ds.agents.sac.dsac_agent import DistributionalSACAgent
+        from sharpen.agents.sac.dsac_agent import DistributionalSACAgent
         with pytest.raises(NotImplementedError, match="not supported by DistributionalSACAgent"):
             DistributionalSACAgent(
                 network_config=network_config, n_quantiles=4, quantile_embed_dim=8,
@@ -513,14 +513,14 @@ class TestTrainerWiring:
                           features_per_scale=8, episode_length=20)
 
     def test_flag_reaches_the_agent(self):
-        from finrl_pro_ds.training.sac_trainer import SACTrainer
+        from sharpen.training.sac_trainer import SACTrainer
         trainer = SACTrainer(self._fake_env(), self._trainer_config(True),
                              device="cpu", run_name="crossq_wiring")
         assert trainer.agent.crossq is True
         assert trainer.agent.target_critic1 is None
 
     def test_absent_flag_builds_baseline_sac(self):
-        from finrl_pro_ds.training.sac_trainer import SACTrainer
+        from sharpen.training.sac_trainer import SACTrainer
         trainer = SACTrainer(self._fake_env(), self._trainer_config(None),
                              device="cpu", run_name="baseline_wiring")
         assert trainer.agent.crossq is False
@@ -529,7 +529,7 @@ class TestTrainerWiring:
     def test_tau_is_not_rescaled_under_crossq(self):
         """The UTD tau schedule is meaningless without a Polyak update; leaving
         it on would print a tau in the logs that nothing reads."""
-        from finrl_pro_ds.training.sac_trainer import SACTrainer
+        from sharpen.training.sac_trainer import SACTrainer
         base = SACTrainer(self._fake_env(), self._trainer_config(None, update_interval=4),
                           device="cpu", run_name="baseline_tau")
         cq = SACTrainer(self._fake_env(), self._trainer_config(True, update_interval=4),
@@ -537,9 +537,9 @@ class TestTrainerWiring:
         assert base.agent.tau != pytest.approx(0.005)  # auto-scaled
         assert cq.agent.tau == pytest.approx(0.005)    # untouched
 
-    @patch("finrl_pro_ds.training.sac_trainer.wandb")
+    @patch("sharpen.training.sac_trainer.wandb")
     def test_training_loop_runs_end_to_end(self, mock_wandb):
-        from finrl_pro_ds.training.sac_trainer import SACTrainer
+        from sharpen.training.sac_trainer import SACTrainer
         mock_wandb.log = MagicMock()
         trainer = SACTrainer(self._fake_env(), self._trainer_config(True),
                              device="cpu", run_name="crossq_train")

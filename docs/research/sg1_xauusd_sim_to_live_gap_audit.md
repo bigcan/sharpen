@@ -32,17 +32,17 @@ $ docker --context finrl-desktop ps | grep sg1-xauusd
 Container stderr/stdout logs reveal clean initialization under the new `VS v2 Phase 2` ensemble, followed by the bootstrap anomaly and subsequent normal step execution:
 
 ```log
-2026-05-20 23:46:50 | INFO     | finrl_pro_ds.crypto.live.live_obs_builder | S509: loaded norm warmup buffer fold=7 train_end=2025-02-01 00:00:00 scales=[3, 15, 60]
-2026-05-20 23:46:50 | INFO     | finrl_pro_ds.crypto.live.live_engine | ActionDriftTracker active: baseline=YES window=1000 warmup=500
-2026-05-20 23:46:58 | INFO     | finrl_pro_ds.crypto.live.live_obs_builder | LiveObsBuilder bootstrapping: fetching 30000 1-min bars for XAUUSD...
-2026-05-20 23:47:07 | INFO     | finrl_pro_ds.crypto.live.live_obs_builder | Warmup OK — scale 3min: 6838 bars (need 360, 100% converged)
-2026-05-20 23:47:07 | INFO     | finrl_pro_ds.crypto.live.live_obs_builder | Warmup OK — scale 15min: 1369 bars (need 360, 100% converged)
-2026-05-20 23:47:07 | WARNING  | finrl_pro_ds.crypto.live.live_obs_builder | WARMUP INCOMPLETE — scale 60min: 95% converged (343/360 bars). Agent features on this scale are unreliable. Increase bootstrap_bars to >= 23400.
-2026-05-20 23:47:07 | INFO     | finrl_pro_ds.crypto.live.live_obs_builder | LiveObsBuilder bootstrapped: 20468 1-min bars, scales=[3, 15, 60], features ready
-2026-05-20 23:47:07 | WARNING  | finrl_pro_ds.crypto.live.live_engine | Feature warmup incomplete (min quality 95%). Skipping first 10 trading bars. Quality per scale: {3: 1.0, 15: 1.0, 60: 0.9527777777777777}
+2026-05-20 23:46:50 | INFO     | sharpen.crypto.live.live_obs_builder | S509: loaded norm warmup buffer fold=7 train_end=2025-02-01 00:00:00 scales=[3, 15, 60]
+2026-05-20 23:46:50 | INFO     | sharpen.crypto.live.live_engine | ActionDriftTracker active: baseline=YES window=1000 warmup=500
+2026-05-20 23:46:58 | INFO     | sharpen.crypto.live.live_obs_builder | LiveObsBuilder bootstrapping: fetching 30000 1-min bars for XAUUSD...
+2026-05-20 23:47:07 | INFO     | sharpen.crypto.live.live_obs_builder | Warmup OK — scale 3min: 6838 bars (need 360, 100% converged)
+2026-05-20 23:47:07 | INFO     | sharpen.crypto.live.live_obs_builder | Warmup OK — scale 15min: 1369 bars (need 360, 100% converged)
+2026-05-20 23:47:07 | WARNING  | sharpen.crypto.live.live_obs_builder | WARMUP INCOMPLETE — scale 60min: 95% converged (343/360 bars). Agent features on this scale are unreliable. Increase bootstrap_bars to >= 23400.
+2026-05-20 23:47:07 | INFO     | sharpen.crypto.live.live_obs_builder | LiveObsBuilder bootstrapped: 20468 1-min bars, scales=[3, 15, 60], features ready
+2026-05-20 23:47:07 | WARNING  | sharpen.crypto.live.live_engine | Feature warmup incomplete (min quality 95%). Skipping first 10 trading bars. Quality per scale: {3: 1.0, 15: 1.0, 60: 0.9527777777777777}
 ...
-2026-05-21 00:18:16 | INFO     | finrl_pro_ds.crypto.live.live_engine | Position quantized: target=-0.4850 → actual=-0.4963 (contract rounding)
-2026-05-21 00:21:19 | INFO     | finrl_pro_ds.crypto.live.live_engine | Position quantized: target=0.1586 → actual=0.1803 (contract rounding)
+2026-05-21 00:18:16 | INFO     | sharpen.crypto.live.live_engine | Position quantized: target=-0.4850 → actual=-0.4963 (contract rounding)
+2026-05-21 00:21:19 | INFO     | sharpen.crypto.live.live_engine | Position quantized: target=0.1586 → actual=0.1803 (contract rounding)
 ```
 
 ---
@@ -294,10 +294,10 @@ By applying `action = self._quantize_action(action, price)` at the beginning of 
 To prevent incomplete warmup quality on startup for traditional assets, `LiveObsBuilder.bootstrap()` was modified to account for weekend trading halts.
 
 > [!NOTE]
-> SHIPPED 2026-05-21. The implementation lives in `finrl_pro_ds/crypto/live/live_obs_builder.py` (class-level `_CALENDAR_EXPANSION_FACTOR` map + `compute_bootstrap_calendar_minutes()` helper + updated `bootstrap()`); the four live launchers (`scripts/run_live.py`, `run_live_ctrader.py`, `run_live_ib.py`, `run_live_dxtrade.py`) now forward `features.asset_class` to the builder.  Coverage: `tests/crypto/test_live_obs_bootstrap_calendar.py` (7 tests).
+> SHIPPED 2026-05-21. The implementation lives in `sharpen/crypto/live/live_obs_builder.py` (class-level `_CALENDAR_EXPANSION_FACTOR` map + `compute_bootstrap_calendar_minutes()` helper + updated `bootstrap()`); the four live launchers (`scripts/run_live.py`, `run_live_ctrader.py`, `run_live_ib.py`, `run_live_dxtrade.py`) now forward `features.asset_class` to the builder.  Coverage: `tests/crypto/test_live_obs_bootstrap_calendar.py` (7 tests).
 
 ```python
-# Shipped (finrl_pro_ds/crypto/live/live_obs_builder.py)
+# Shipped (sharpen/crypto/live/live_obs_builder.py)
 _CALENDAR_EXPANSION_FACTOR: dict[str, float] = {
     "crypto": 1.0,
     "cfd_gold": 1.45,

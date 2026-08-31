@@ -10,7 +10,7 @@ from __future__ import annotations
 import numpy as np
 import pytest
 
-from finrl_pro_ds.crucible.data import (
+from sharpen.crucible.data import (
     DataConnector,
     EdgarConnector,
     GdeltConnector,

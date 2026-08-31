@@ -37,8 +37,8 @@ from sklearn.ensemble import RandomForestClassifier
 from sklearn.metrics import roc_auc_score, accuracy_score, brier_score_loss
 from sklearn.calibration import calibration_curve
 
-from finrl_pro_ds.data.parquet_handler import ParquetDataHandler
-from finrl_pro_ds.data.feature_engineering import MICRO_FEATURE_COLS, MACRO_FEATURE_COLS
+from sharpen.data.parquet_handler import ParquetDataHandler
+from sharpen.data.feature_engineering import MICRO_FEATURE_COLS, MACRO_FEATURE_COLS
 
 
 # ============================================================================

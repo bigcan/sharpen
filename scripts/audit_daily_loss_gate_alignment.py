@@ -2,11 +2,11 @@
 
 The sim and live daily-loss rules disagree by construction:
 
-  - Sim  (`finrl_pro_ds/envs/risk_shaping_wrapper.py:229-245`):
+  - Sim  (`sharpen/envs/risk_shaping_wrapper.py:229-245`):
         Instant termination on `daily_loss > max_daily_loss_pct`.
         Single-point `current_equity`; no smoothing, no persistence.
 
-  - Live (`finrl_pro_ds/crypto/live/live_engine.py:1959-2057`):
+  - Live (`sharpen/crypto/live/live_engine.py:1959-2057`):
         3-bar `_pv_buffer` median + 2-bar consecutive raw-breach
         persistence; the persistence guard was added in S448 after
         XAUUSD 2026-04-13 ran past FTMO's 10% DD line (raw -11.74%
@@ -65,7 +65,7 @@ DEFAULT_PROJECT = "FinRL-Pro-DS"
 
 # Every-bar keys (must all be populated on every `_log_step` call so that
 # scan_history's row filter does not drop non-traded bars).  See
-# `_log_step` in `finrl_pro_ds/crypto/live/live_engine.py` for the schema.
+# `_log_step` in `sharpen/crypto/live/live_engine.py` for the schema.
 # `_timestamp` is WandB's synthetic per-row epoch; included so that
 # `_reconstruct_daily_loss` can anchor UTC days directly when present,
 # rather than falling back to the configurable bar-interval estimate.
@@ -142,7 +142,7 @@ def _reconstruct_daily_loss(
     """Reconstruct UTC-anchored daily_loss_pct from raw portfolio_value.
 
     Mirrors `_check_daily_loss` in
-    `finrl_pro_ds/crypto/live/live_engine.py:1976-2008`: anchor on the first
+    `sharpen/crypto/live/live_engine.py:1976-2008`: anchor on the first
     PV reading of each UTC day and recompute the raw return per bar.
 
     Timestamp resolution preference:

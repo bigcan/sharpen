@@ -25,8 +25,8 @@ import pandas as pd
 ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT))
 
-from finrl_pro_ds.signals.eval_harness import _ls_weights, compute_scores  # noqa: E402
-from finrl_pro_ds.signals.library.alphas101 import SIGNALS as ALPHAS  # noqa: E402
+from sharpen.signals.eval_harness import _ls_weights, compute_scores  # noqa: E402
+from sharpen.signals.library.alphas101 import SIGNALS as ALPHAS  # noqa: E402
 
 PANEL_CACHE = ROOT / "data" / "raw" / "equity_panel" / "_top100_panel.pkl"
 BY = {s.spec.name: s for s in ALPHAS}

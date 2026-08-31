@@ -14,12 +14,12 @@ import dataclasses
 
 import numpy as np
 
-from finrl_pro_ds.crucible.data.altdata_bridge import bridge_altdata_feature_slots
-from finrl_pro_ds.crucible.data.taifex_positioning import TaifexPositioningConnector
-from finrl_pro_ds.crucible.data.taiwan_altdata import TAIWAN_ALTDATA_ALIASES
-from finrl_pro_ds.crucible.data.twse_institutional import TwseInstitutionalConnector
-from finrl_pro_ds.signals.features import make_synthetic_panel
-from finrl_pro_ds.signals.generation.grammar import available_terminals
+from sharpen.crucible.data.altdata_bridge import bridge_altdata_feature_slots
+from sharpen.crucible.data.taifex_positioning import TaifexPositioningConnector
+from sharpen.crucible.data.taiwan_altdata import TAIWAN_ALTDATA_ALIASES
+from sharpen.crucible.data.twse_institutional import TwseInstitutionalConnector
+from sharpen.signals.features import make_synthetic_panel
+from sharpen.signals.generation.grammar import available_terminals
 
 
 def _t86_transport(date: str, ticker: str):

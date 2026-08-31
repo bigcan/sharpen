@@ -31,7 +31,7 @@ import numpy as np
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(PROJECT_ROOT))
 
-from finrl_pro_ds.crypto.data.crypto_array_builder import (  # noqa: E402
+from sharpen.crypto.data.crypto_array_builder import (  # noqa: E402
     build_funding_arb_arrays,
 )
 from scripts.funding_arb_runner import (  # noqa: E402

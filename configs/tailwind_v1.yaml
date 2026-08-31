@@ -15,7 +15,7 @@
 # Combined as a FUND-OF-FUNDS (mirrors the momentum + rates-carry wiring): each sleeve is
 # driven through the env independently (per-asset vol-target + gross cap on its OWN
 # universe), then risk-parity-combined (trailing-causal inverse-vol, monthly meta, LEAK-2
-# safe). Consumed by finrl_pro_ds.paper.TwoSleeveExecutor + the paper_soak gates.
+# safe). Consumed by sharpen.paper.TwoSleeveExecutor + the paper_soak gates.
 #
 # MODE AXIS (review item 1): this is the OWN-CAPITAL profile (~10% per-asset vol, BAB retained).
 # The CHALLENGE profile is now RESOLVED by the challenge simulator

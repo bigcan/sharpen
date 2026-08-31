@@ -56,18 +56,18 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 import tailwind_forward_path_render as tfr  # noqa: E402
 import xsec_momentum_falsification as mom  # noqa: E402
 
-from finrl_pro_ds.crypto.eval.statistics import (  # noqa: E402
+from sharpen.crypto.eval.statistics import (  # noqa: E402
     block_bootstrap_sharpe_ci,
     deflated_sharpe_ratio,
     excess_kurtosis,
     skewness,
 )
-from finrl_pro_ds.data.cross_asset_loader import (  # noqa: E402
+from sharpen.data.cross_asset_loader import (  # noqa: E402
     build_two_sleeve_arrays,
     load_two_sleeve_data,
 )
-from finrl_pro_ds.paper import TwoSleeveExecutor  # noqa: E402
-from finrl_pro_ds.prop.challenge_simulator import FirmRules, SizingPolicy  # noqa: E402
+from sharpen.paper import TwoSleeveExecutor  # noqa: E402
+from sharpen.prop.challenge_simulator import FirmRules, SizingPolicy  # noqa: E402
 
 ANN = mom.ANN
 CHALLENGE_CFG = ROOT / "configs" / "tailwind_v1_challenge.yaml"
@@ -81,7 +81,7 @@ def sh(s: pd.Series) -> float:
 def build_executor_series(cfg: dict) -> tuple[pd.Series, dict, dict]:
     """Drive the REAL TwoSleeveExecutor on the real 18-ETF union and return the combined
     book's daily net-return series (index = calendar dates), the oracle dict, and the
-    per-sleeve/alpha detail. This is production code (``finrl_pro_ds.paper.two_sleeve``),
+    per-sleeve/alpha detail. This is production code (``sharpen.paper.two_sleeve``),
     not a reconstruction -- gross cap, execution lag and slippage are whatever the real
     ``MultiAssetAllocatorEnv`` + ``PaperState`` apply, not an approximation of them."""
     data = load_two_sleeve_data(cfg, force_refetch=False, require_fresh=False)

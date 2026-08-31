@@ -45,8 +45,8 @@ ROOT = Path(__file__).resolve().parents[2]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
-from finrl_pro_ds.envs.allocator_factory import dynamic_sleeve_alphas  # noqa: E402
-from finrl_pro_ds.signals.generation.fitness import (  # noqa: E402
+from sharpen.envs.allocator_factory import dynamic_sleeve_alphas  # noqa: E402
+from sharpen.signals.generation.fitness import (  # noqa: E402
     _CAND,
     _combined_book,
     FitnessConfig,

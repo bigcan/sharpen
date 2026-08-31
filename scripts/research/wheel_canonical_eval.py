@@ -26,8 +26,8 @@ import numpy as np
 import pandas as pd
 import yfinance as yf
 
-from finrl_pro_ds.crypto.eval import statistics as st
-from finrl_pro_ds.signals.costs import max_drawdown
+from sharpen.crypto.eval import statistics as st
+from sharpen.signals.costs import max_drawdown
 
 PPY = 252
 _RF_ANN = None

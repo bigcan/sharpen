@@ -23,13 +23,13 @@ import numpy as np
 import pandas as pd
 import yfinance as yf
 
-from finrl_pro_ds.crypto.options_vrp_sim import (
+from sharpen.crypto.options_vrp_sim import (
     SimConfig,
     returns_from_pnl as _returns_from_pnl,
     simulate_asset,
 )
-from finrl_pro_ds.crypto.data import deribit_options_loader as dol
-from finrl_pro_ds.crypto.data import options_array_builder as oab
+from sharpen.crypto.data import deribit_options_loader as dol
+from sharpen.crypto.data import options_array_builder as oab
 
 logging.basicConfig(level=logging.WARNING)
 OUT = Path("results/options_vrp")

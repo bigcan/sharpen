@@ -9,7 +9,7 @@ Validates the orchestration layer added by S371 and patched in S480:
   - NopPruner on the study propagates to workers
   - Trial counts: total_trials_completed == --target_trials (no over- or under-shoot)
 
-This deliberately bypasses ``finrl_pro_ds.hpo.objective.make_objective`` so it
+This deliberately bypasses ``sharpen.hpo.objective.make_objective`` so it
 runs in seconds and needs no CUDA / data files. The real worker
 (``scripts/distributed_hpo_worker.py``) wraps the same Optuna calls around a
 heavy training objective; once this smoke passes, mechanics are validated.
@@ -62,7 +62,7 @@ storage = RDBStorage(
     failed_trial_callback=RetryFailedTrialCallback(max_retry=1),
 )
 
-# Mirror finrl_pro_ds/hpo/sampler.py distributed=True
+# Mirror sharpen/hpo/sampler.py distributed=True
 sampler = optuna.samplers.TPESampler(
     seed=None, n_startup_trials=2, multivariate=True, constant_liar=True,
 )

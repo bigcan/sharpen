@@ -20,7 +20,7 @@ from __future__ import annotations
 import numpy as np
 import pandas as pd
 
-from finrl_pro_ds.crypto.live.live_obs_builder import LiveObsBuilder
+from sharpen.crypto.live.live_obs_builder import LiveObsBuilder
 
 _SCALES = [3, 15, 60]
 _BASE = min(_SCALES)
@@ -76,7 +76,7 @@ def test_overlapping_fetches_do_not_duplicate_or_inflate_volume():
     assert ts.is_monotonic_increasing
 
     # (b) resampled volume == clean ground truth (no double counting)
-    from finrl_pro_ds.data.multiscale_handler import _resample_ohlcv
+    from sharpen.data.multiscale_handler import _resample_ohlcv
     got = bld._scale_dfs[_BASE]
     clean = _resample_ohlcv(full[full["timestamp"].isin(ts)], _BASE)
     merged = got.merge(clean, on="timestamp", suffixes=("_got", "_clean"))

@@ -26,8 +26,8 @@ import pandas as pd
 import yfinance as yf
 from scipy.stats import norm
 
-from finrl_pro_ds.crypto.eval import statistics as st
-from finrl_pro_ds.signals.costs import max_drawdown
+from sharpen.crypto.eval import statistics as st
+from sharpen.signals.costs import max_drawdown
 
 _SPY_CACHE: dict = {}
 

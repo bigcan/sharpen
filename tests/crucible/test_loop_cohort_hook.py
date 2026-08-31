@@ -9,15 +9,15 @@ from __future__ import annotations
 import numpy as np
 import pandas as pd
 
-from finrl_pro_ds.crucible import TrialLedger
-from finrl_pro_ds.crucible.agentic import (
+from sharpen.crucible import TrialLedger
+from sharpen.crucible.agentic import (
     HypothesisAuthor,
     LibrarySeedProposer,
     run_hypothesis_loop,
 )
-from finrl_pro_ds.signals.features import Panel
-from finrl_pro_ds.signals.generation.cohort import CohortConfig
-from finrl_pro_ds.signals.generation.fitness import FitnessConfig
+from sharpen.signals.features import Panel
+from sharpen.signals.generation.cohort import CohortConfig
+from sharpen.signals.generation.fitness import FitnessConfig
 
 T, N = 480, 12
 _CFG = FitnessConfig(embargo=10)

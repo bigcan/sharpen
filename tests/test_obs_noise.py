@@ -1,4 +1,4 @@
-"""Unit tests for ``finrl_pro_ds.eval.obs_noise`` (v2.7-B B1, S553-cont-25).
+"""Unit tests for ``sharpen.eval.obs_noise`` (v2.7-B B1, S553-cont-25).
 
 Covers the pure core: the OHLC noise function (OBSNOISE-1..4 + MATH-OBS-1),
 sigma<->bps mapping (MATH-OBS-2), the (fold,sigma,k) seed derivation
@@ -22,7 +22,7 @@ ROOT = Path(__file__).resolve().parents[1]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
-from finrl_pro_ds.eval.obs_noise import (  # noqa: E402
+from sharpen.eval.obs_noise import (  # noqa: E402
     DEFAULT_NOISE_BASE_SEED,
     OHLC_COLS,
     PF_CAP,

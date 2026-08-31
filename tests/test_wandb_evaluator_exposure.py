@@ -14,7 +14,7 @@ import numpy as np
 import pandas as pd
 import pytest
 
-from finrl_pro_ds.analytics.wandb_evaluator import WandbFinRLEvaluator
+from sharpen.analytics.wandb_evaluator import WandbFinRLEvaluator
 
 
 def _frame(positions=None, n=200, seed=0):

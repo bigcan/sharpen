@@ -42,7 +42,7 @@ REMOTE_WORKSPACE = "/workspace/DeepScalper"
 DEPLOY_EXCLUDES = [
     "mlruns", "logs", "wandb", "results", "checkpoints", ".git", ".venv",
     "venv", "__pycache__", "market_data.parquet", "btc_lob_jan2023.parquet",
-    "finrl_pro_ds.egg-info", "hpo.db", "hpo.db-journal",
+    "sharpen.egg-info", "finrl_pro_ds.egg-info", "hpo.db", "hpo.db-journal",
 ]
 
 DEFAULT_IMAGE = "pytorch/pytorch:2.5.1-cuda12.4-cudnn9-devel"
@@ -410,7 +410,7 @@ def cmd_deploy(args):
     print(f"  Auto-tags: {platform_tags}")
 
     # Generate run name from config filename
-    from finrl_pro_ds.utils.naming import generate_run_name
+    from sharpen.utils.naming import generate_run_name
     full_run_name = generate_run_name(args.config)
 
     wandb_key = os.getenv("WANDB_API_KEY", "")
@@ -500,7 +500,7 @@ def cmd_deploy(args):
         "mount -o remount,size=2G /dev/shm || echo 'WARN: /dev/shm remount failed (non-fatal)'",
         fresh_hpo_cmd,
         "pip uninstall finrl-pro-ds -y || true",
-        "rm -rf finrl_pro_ds.egg-info build dist",
+        "rm -rf sharpen.egg-info finrl_pro_ds.egg-info build dist",
         f"unzip -o {zip_name}",
         f"rm -f {zip_name}",
         "pip install -q --upgrade -r requirements.txt",

@@ -33,19 +33,19 @@ ROOT = Path(__file__).resolve().parents[2]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
-from finrl_pro_ds.crucible import CRUCIBLE_VERSION, DataCatalog, TrialLedger, gates_hash  # noqa: E402
-from finrl_pro_ds.crucible.agentic import (  # noqa: E402
+from sharpen.crucible import CRUCIBLE_VERSION, DataCatalog, TrialLedger, gates_hash  # noqa: E402
+from sharpen.crucible.agentic import (  # noqa: E402
     HypothesisAuthor,
     LibrarySeedProposer,
     LlmProposer,
     run_hypothesis_loop,
 )
-from finrl_pro_ds.signals.features import Panel  # noqa: E402
-from finrl_pro_ds.signals.generation.config import (  # noqa: E402
+from sharpen.signals.features import Panel  # noqa: E402
+from sharpen.signals.generation.config import (  # noqa: E402
     load_generation_config,
     load_generation_meta,
 )
-from finrl_pro_ds.signals.generation.grammar import available_terminals  # noqa: E402
+from sharpen.signals.generation.grammar import available_terminals  # noqa: E402
 
 log = logging.getLogger("crucible_hypothesis_loop")
 DEFAULT_GATES = ROOT / "configs" / "signal_eval.gates.yaml"
@@ -77,7 +77,7 @@ def _synthetic_panel(t: int, n: int, *, seed: int = 0) -> Panel:
 
 def _proxy_base_sleeves(panel: Panel, hold: int = 21) -> dict[str, np.ndarray]:
     """Inline TSMOM + reversal proxy books (stand-in so the loop runs end-to-end on synthetic)."""
-    from finrl_pro_ds.signals.eval_harness import _ls_weights
+    from sharpen.signals.eval_harness import _ls_weights
 
     c = panel.close
     fwd1 = panel.forward_returns(1)
@@ -131,25 +131,25 @@ def main() -> int:
         return 0
 
     if args.mode == "synthetic":
-        from finrl_pro_ds.signals.generation.base_sleeves import unit_components
+        from sharpen.signals.generation.base_sleeves import unit_components
         panel = _synthetic_panel(args.t, args.n)
         base = _proxy_base_sleeves(panel, hold=ek["hold_horizon"])
         base_components = {k: unit_components(v) for k, v in base.items()}   # F14 no-op on proxy
         panel_key = "synthetic"
     elif meta["panel"] == "taiwan":
-        from finrl_pro_ds.data.taiwan_panel_loader import load_taiwan_panel
-        from finrl_pro_ds.signals.generation.base_sleeves import taiwan_base_sleeves
+        from sharpen.data.taiwan_panel_loader import load_taiwan_panel
+        from sharpen.signals.generation.base_sleeves import taiwan_base_sleeves
         panel = load_taiwan_panel(args.start, args.end)
         base, base_components = taiwan_base_sleeves(
             panel, hold_horizon=ek["hold_horizon"], cost_bps=ek["cost_bps"],
             start=args.start, end=args.end, return_components=True)   # F14 overlay-cost fix
         panel_key = "taiwan"
     elif meta["panel"] == "taiwan_smallcap":
-        from finrl_pro_ds.crucible.data.taiwan_smallcap_panel import (
+        from sharpen.crucible.data.taiwan_smallcap_panel import (
             ALL_CHANNELS,
             build_taiwan_smallcap_panel,
         )
-        from finrl_pro_ds.signals.generation.base_sleeves import taiwan_base_sleeves
+        from sharpen.signals.generation.base_sleeves import taiwan_base_sleeves
         panel = build_taiwan_smallcap_panel(channels=ALL_CHANNELS)
         # start=None => the sleeve takes the PANEL's own first bar, so the comparator covers every
         # bar the candidate marks (this panel starts 2005, args.start defaults to 2008).
@@ -158,8 +158,8 @@ def main() -> int:
             start=None, end=args.end, return_components=True)         # F14 overlay-cost fix
         panel_key = "taiwan_smallcap"
     elif meta["panel"] == "cross_asset":
-        from finrl_pro_ds.data.cross_asset_panel_loader import load_cross_asset_panel
-        from finrl_pro_ds.signals.generation.base_sleeves import production_base_sleeves
+        from sharpen.data.cross_asset_panel_loader import load_cross_asset_panel
+        from sharpen.signals.generation.base_sleeves import production_base_sleeves
         panel = load_cross_asset_panel(args.start, args.end,
                                        config_path=ROOT / "configs" / "cross_asset_momentum.yaml")
         base, base_components = production_base_sleeves(

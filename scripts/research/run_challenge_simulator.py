@@ -27,7 +27,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 import audit_tailwind_book as at             # noqa: E402  (build_defensive_net)
 import portfolio_frontier as pf              # noqa: E402
 
-from finrl_pro_ds.prop.challenge_simulator import (  # noqa: E402
+from sharpen.prop.challenge_simulator import (  # noqa: E402
     FirmRules, SizingPolicy, evaluate, sweep,
 )
 

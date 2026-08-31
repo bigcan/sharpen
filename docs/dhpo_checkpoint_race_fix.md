@@ -7,12 +7,12 @@
 Study `sg1_xauusd_ftmo_rehpo_20260419` ran 6 workers (3 replicas per GPU × 2 GPUs). All three replicas on a host share the same cwd (`/workspace/DeepScalper`) and the same checkpoint destination:
 
 ```python
-# finrl_pro_ds/training/sac_trainer.py:42,140
+# sharpen/training/sac_trainer.py:42,140
 self.run_name = run_name or "sac_run"
 self.ckpt_dir = os.path.join("checkpoints", self.run_name)
 ```
 
-`make_objective` (`finrl_pro_ds/hpo/objective.py:348`) constructs `SACTrainer(env, config, device=device, hpo_mode=True)` with **no `run_name`** → every trial in every replica targets `checkpoints/sac_run/checkpoint_final.pth`. Each trial completion overwrites the previous one.
+`make_objective` (`sharpen/hpo/objective.py:348`) constructs `SACTrainer(env, config, device=device, hpo_mode=True)` with **no `run_name`** → every trial in every replica targets `checkpoints/sac_run/checkpoint_final.pth`. Each trial completion overwrites the previous one.
 
 ## Impact on S487 SG-1 XAUUSD re-HPO
 
@@ -29,14 +29,14 @@ self.ckpt_dir = os.path.join("checkpoints", self.run_name)
 
 ## Proposed fix
 
-Two-part patch, both in `finrl_pro_ds/hpo/objective.py` (no changes to `SACTrainer` core).
+Two-part patch, both in `sharpen/hpo/objective.py` (no changes to `SACTrainer` core).
 
 ### Part 1 — Trial-unique `run_name` in HPO mode
 
 In `make_objective`, construct the trainer with a `run_name` that encodes `study_name`, `worker_id`, and `trial.number`:
 
 ```python
-# finrl_pro_ds/hpo/objective.py, around line 348
+# sharpen/hpo/objective.py, around line 348
 study_name = getattr(trial.study, "study_name", "hpo")
 worker_id = os.environ.get("DHPO_WORKER_ID", "local")
 hpo_run_name = f"{study_name}/worker_{worker_id}/trial_{trial.number:04d}"

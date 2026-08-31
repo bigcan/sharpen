@@ -37,7 +37,7 @@ import yaml
 from scipy.stats import spearmanr
 from sklearn.linear_model import Ridge
 
-from finrl_pro_ds.data.multiscale_handler import MultiScaleOHLCVHandler
+from sharpen.data.multiscale_handler import MultiScaleOHLCVHandler
 
 ROOT = Path(__file__).resolve().parents[2]
 log = logging.getLogger("tx_canary")

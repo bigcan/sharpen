@@ -15,8 +15,8 @@ from unittest.mock import MagicMock
 
 import numpy as np
 
-from finrl_pro_ds.data.parquet_handler import ParquetDataHandler
-from finrl_pro_ds.envs.deep_scalper_env import DeepScalperEnv, RunningMeanStd
+from sharpen.data.parquet_handler import ParquetDataHandler
+from sharpen.envs.deep_scalper_env import DeepScalperEnv, RunningMeanStd
 
 
 def _make_env(config_overrides=None, handler=None):

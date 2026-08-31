@@ -18,7 +18,7 @@ import asyncio
 import collections
 from datetime import datetime, timezone
 
-from finrl_pro_ds.crypto.live.live_engine import LiveTradingEngine
+from sharpen.crypto.live.live_engine import LiveTradingEngine
 
 
 def _make_engine(limit: float = 0.04, start_value: float = 10_000.0) -> LiveTradingEngine:

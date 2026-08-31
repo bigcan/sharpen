@@ -19,13 +19,13 @@ import yaml as _yaml
 
 ROOT = Path(__file__).resolve().parents[2]
 OUT = ROOT / "results" / "portfolio_frontier"
-sys.path.insert(0, str(ROOT))                              # finrl_pro_ds (bare-script run)
+sys.path.insert(0, str(ROOT))                              # sharpen (bare-script run)
 sys.path.insert(0, str(Path(__file__).resolve().parent))  # sibling research modules
 import xsec_momentum_falsification as mom   # noqa: E402
 import carry_falsification as carry          # noqa: E402
 import portfolio_frontier as pf              # noqa: E402
 
-from finrl_pro_ds.crypto.eval.statistics import (  # noqa: E402
+from sharpen.crypto.eval.statistics import (  # noqa: E402
     block_bootstrap_sharpe_ci,
     deflated_sharpe_ratio,
     excess_kurtosis,

@@ -1,4 +1,4 @@
-# FinRL-Pro-DS
+# Sharpen
 
 **RL Quant Trading Development Platform**
 
@@ -16,7 +16,7 @@ An institutional-grade research and deployment platform for reinforcement learni
 | Workstream | Env | Asset(s) | Timeframe | Status |
 |------------|-----|----------|-----------|--------|
 | **Cross-asset TSMOM** | linear (no RL) | ~18 ETFs / 4 asset classes | daily | **Sole live edge.** Linear time-series momentum, net Sharpe ~0.60, low SPY correlation. Gated at paper (DSR 0.918 < 0.95). |
-| **Crucible** (`crucible-v2.8`) | `finrl_pro_ds/crucible/` + `signals/` | research, multi-asset | — | **Active R&D thrust.** Continuous agentic alpha-mining: free-data connectors (FRED/COT/EDGAR/GDELT/Stooq/TWSE/TAIFEX) → pre-registered hypotheses → deflated funnel → forward lockbox. P0–P5 shipped; 0 survivors cleared lockbox yet. |
+| **Crucible** (`crucible-v2.8`) | `sharpen/crucible/` + `signals/` | research, multi-asset | — | **Active R&D thrust.** Continuous agentic alpha-mining: free-data connectors (FRED/COT/EDGAR/GDELT/Stooq/TWSE/TAIFEX) → pre-registered hypotheses → deflated funnel → forward lockbox. P0–P5 shipped; 0 survivors cleared lockbox yet. |
 | **GMGP1** | V7 ContinuousSwing (SAC) | Gold / XAUUSD / BTC | 15 min | FTMO + Velotrade contender; paper trading live |
 | **SG-1** | V7 ContinuousSwing (SAC) | XAUUSD / BTC | 3 min | Intraday diversity strategy; Arm B ablation in progress |
 
@@ -37,8 +37,8 @@ Python 3.11+ · PyTorch 2.8+ · Gymnasium · Optuna · Weights & Biases · Parqu
 Requires **Python 3.11+** and a CUDA-capable GPU (tested on RTX 4090 / 5090).
 
 ```bash
-git clone https://github.com/Chiwin-Technology/FinRL-Pro-DS.git
-cd FinRL-Pro-DS
+git clone https://github.com/Chiwin-Technology/sharpen.git
+cd sharpen
 python -m venv .venv
 source .venv/bin/activate   # Windows: .\.venv\Scripts\Activate.ps1
 pip install -e .[dev]
@@ -91,7 +91,7 @@ python scripts/auto_collect_checkpoints.py      # polls WandB, SFTPs from GPUHub
 
 ## Alpha-Mining Platform (Crucible)
 
-`finrl_pro_ds/crucible/` (`crucible-v2.8`) is a continuous agentic alpha-discovery system built on top of the `finrl_pro_ds/signals/` DSL + deflated evaluation funnel: free-data connectors (FRED, CFTC COT, SEC EDGAR, GDELT, Stooq, TWSE, TAIFEX) feed an agent that proposes pre-registered hypotheses (blind to verdicts), which are mined, deflated, and forward-incubated in a lockbox before any human Tier-2 audit. Full architecture: `docs/claude_md_reference.md`.
+`sharpen/crucible/` (`crucible-v2.8`) is a continuous agentic alpha-discovery system built on top of the `sharpen/signals/` DSL + deflated evaluation funnel: free-data connectors (FRED, CFTC COT, SEC EDGAR, GDELT, Stooq, TWSE, TAIFEX) feed an agent that proposes pre-registered hypotheses (blind to verdicts), which are mined, deflated, and forward-incubated in a lockbox before any human Tier-2 audit. Full architecture: `docs/claude_md_reference.md`.
 
 ```bash
 # Continuous nightly-tick discovery loop
@@ -104,14 +104,14 @@ python scripts/research/crucible_governance.py --lockbox <path> --gov <path> --o
 python scripts/research/crucible_reproduce.py results/crucible_orchestrator/<mode>/<tick_ts>
 ```
 
-**Prediction-market research (Polymarket)** has moved to its own repo: [`Chiwin-Technology/polymarket-updown-research`](https://github.com/Chiwin-Technology/polymarket-updown-research) (spun off 2026-07-05 — it was always self-contained, zero `finrl_pro_ds` imports).
+**Prediction-market research (Polymarket)** has moved to its own repo: [`Chiwin-Technology/polymarket-updown-research`](https://github.com/Chiwin-Technology/polymarket-updown-research) (spun off 2026-07-05 — it was always self-contained, zero `sharpen` imports).
 
 ---
 
 ## Project Layout
 
 ```
-finrl_pro_ds/
+sharpen/
 ├── agents/        # SAC, IQN, BDQ, PPO, DSAC implementations
 ├── envs/          # V7 ContinuousSwing, legacy V5/V6
 ├── crypto/        # CryptoPerp, FundingArb envs + execution (Bybit, Binance)
@@ -125,7 +125,7 @@ finrl_pro_ds/
 configs/  scripts/  tests/  docs/  docker/live/
 ```
 
-**Boundary:** Only modify `finrl_pro_ds/`, `scripts/`, `configs/`, `tests/`, `docs/`. Never touch `FinRLPodracer/` or `Podracer/`.
+**Boundary:** Only modify `sharpen/`, `scripts/`, `configs/`, `tests/`, `docs/`. Never touch `FinRLPodracer/` or `Podracer/`.
 
 ---
 

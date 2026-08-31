@@ -41,7 +41,7 @@ import numpy as np
 ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT))
 
-from finrl_pro_ds.crucible.data.us_equity_panel import build_us_equity_panel  # noqa: E402
+from sharpen.crucible.data.us_equity_panel import build_us_equity_panel  # noqa: E402
 
 OUT = ROOT / "results" / "signal_eval" / "crucible_equity_breadth"
 

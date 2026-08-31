@@ -6,7 +6,7 @@ import math
 
 import pytest
 
-from finrl_pro_ds.monitoring.cost_drift import (
+from sharpen.monitoring.cost_drift import (
     CostDriftStatus,
     CostDriftTracker,
 )

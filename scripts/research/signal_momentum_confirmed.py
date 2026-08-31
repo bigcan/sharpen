@@ -38,11 +38,11 @@ sys.path.insert(0, str(ROOT))
 sys.path.insert(0, str(Path(__file__).resolve().parent))   # import the cont-77 sibling engine
 
 import signal_lead_distress_filter as R  # noqa: E402  (run_book/augment/synth_cohort/sr/ens_eff)
-from finrl_pro_ds.data import cross_asset_loader as cal  # noqa: E402,F401
-from finrl_pro_ds.signals import Gates  # noqa: E402
-from finrl_pro_ds.signals.eval_harness import compute_scores, tier2_capturability  # noqa: E402
-from finrl_pro_ds.signals.features import Panel  # noqa: E402
-from finrl_pro_ds.signals.spec import SignalSpec  # noqa: E402
+from sharpen.data import cross_asset_loader as cal  # noqa: E402,F401
+from sharpen.signals import Gates  # noqa: E402
+from sharpen.signals.eval_harness import compute_scores, tier2_capturability  # noqa: E402
+from sharpen.signals.features import Panel  # noqa: E402
+from sharpen.signals.spec import SignalSpec  # noqa: E402
 
 OOS = np.datetime64("2021-01-01")
 EVAL = np.datetime64("2015-01-01")

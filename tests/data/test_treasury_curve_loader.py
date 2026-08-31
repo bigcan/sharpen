@@ -11,8 +11,8 @@ from __future__ import annotations
 import numpy as np
 import pandas as pd
 
-from finrl_pro_ds.data import treasury_curve_loader as tcl
-from finrl_pro_ds.features import rates_carry as rc
+from sharpen.data import treasury_curve_loader as tcl
+from sharpen.features import rates_carry as rc
 
 
 def _raw_curve_frame(n: int = 300, neg: int = 0, extreme: int = 0, seed: int = 3) -> pd.DataFrame:

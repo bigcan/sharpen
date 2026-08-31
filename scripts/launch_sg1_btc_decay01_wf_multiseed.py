@@ -56,7 +56,7 @@ LAUNCHER = PROJECT_ROOT / "scripts" / "launch_l1_multiseed.py"
 VALIDATOR = PROJECT_ROOT / "scripts" / "validate_config.py"
 
 sys.path.insert(0, str(PROJECT_ROOT))
-from finrl_pro_ds.data.splitter import RollingWindowSplitter  # noqa: E402
+from sharpen.data.splitter import RollingWindowSplitter  # noqa: E402
 
 logging.basicConfig(
     level=logging.INFO,

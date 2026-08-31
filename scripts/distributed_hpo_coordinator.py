@@ -57,7 +57,7 @@ REMOTE_WORKSPACE = "/workspace/DeepScalper"
 DEPLOY_EXCLUDES = [
     "mlruns", "logs", "wandb", "results", "checkpoints", ".git", ".venv",
     "venv", "__pycache__", "market_data.parquet", "btc_lob_jan2023.parquet",
-    "finrl_pro_ds.egg-info", "hpo.db", "hpo.db-journal",
+    "sharpen.egg-info", "finrl_pro_ds.egg-info", "hpo.db", "hpo.db-journal",
 ]
 
 WANDB_ENTITY = "bigcan-chiwin-technology"
@@ -518,7 +518,7 @@ def deploy_to_worker(
             path_export,
             "ulimit -n 65536",
             f"{pip_cmd} uninstall finrl-pro-ds -y || true",
-            "rm -rf finrl_pro_ds.egg-info build dist",
+            "rm -rf sharpen.egg-info finrl_pro_ds.egg-info build dist",
             f"unzip -o {zip_name}",
             f"rm -f {zip_name}",
             f"{pip_cmd} install -q --upgrade -r requirements.txt",
@@ -1015,7 +1015,7 @@ def main():
     # Step 1: Create shared Optuna study
     # =========================================================================
     import optuna
-    from finrl_pro_ds.hpo.sampler import create_sampler
+    from sharpen.hpo.sampler import create_sampler
 
     logger.info("Creating Optuna study '%s' (PostgreSQL-backed)...", args.study_name)
 

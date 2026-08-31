@@ -34,8 +34,8 @@ warnings.filterwarnings("ignore", category=RuntimeWarning)
 ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT))
 
-from finrl_pro_ds.data.equity_panel_loader import load_sp500_panel  # noqa: E402
-from finrl_pro_ds.signals import (  # noqa: E402
+from sharpen.data.equity_panel_loader import load_sp500_panel  # noqa: E402
+from sharpen.signals import (  # noqa: E402
     Gates,
     Multiplicity,
     SignalSpec,
@@ -43,14 +43,14 @@ from finrl_pro_ds.signals import (  # noqa: E402
     load_multiplicity_gates,
     write_scorecard,
 )
-from finrl_pro_ds.signals.eval_harness import (  # noqa: E402
+from sharpen.signals.eval_harness import (  # noqa: E402
     compute_scores,
     tier1_gross_power,
     tier2_capturability,
     tier4_deflation,
 )
-from finrl_pro_ds.signals.features import Panel  # noqa: E402
-from finrl_pro_ds.signals.library.alphas101 import SIGNALS as ALPHAS  # noqa: E402
+from sharpen.signals.features import Panel  # noqa: E402
+from sharpen.signals.library.alphas101 import SIGNALS as ALPHAS  # noqa: E402
 
 MCAP = ROOT / "data" / "raw" / "equity_panel" / "sp500_mktcap_rank.csv"
 OUT = ROOT / "results" / "signal_eval" / "xlg_megacap_gate"

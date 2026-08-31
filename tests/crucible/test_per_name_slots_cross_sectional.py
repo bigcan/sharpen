@@ -13,10 +13,10 @@ from __future__ import annotations
 import numpy as np
 import pytest
 
-from finrl_pro_ds.signals.eval_harness import assert_causal
-from finrl_pro_ds.signals.features import make_synthetic_panel
-from finrl_pro_ds.signals.generation.dsl_signal import DslSignal, eval_on_panel
-from finrl_pro_ds.signals.generation.grammar import (
+from sharpen.signals.eval_harness import assert_causal
+from sharpen.signals.features import make_synthetic_panel
+from sharpen.signals.generation.dsl_signal import DslSignal, eval_on_panel
+from sharpen.signals.generation.grammar import (
     INPUTS,
     available_terminals,
     cross_sectional_terminals,
@@ -106,7 +106,7 @@ def test_per_name_genome_is_SCORED_end_to_end_by_the_cross_sectional_search():
         sys.path.insert(0, str(root / "scripts"))
     from research.crucible_calibration import _panel_ts, _proxy_base_sleeves, load_calib
 
-    from finrl_pro_ds.signals.generation.evolve import evolve
+    from sharpen.signals.generation.evolve import evolve
 
     cc = load_calib(root / "configs" / "crucible_calibration.gates.yaml",
                     root / "configs" / "signal_eval.gates.yaml")
@@ -126,7 +126,7 @@ def test_per_name_genome_is_SCORED_end_to_end_by_the_cross_sectional_search():
 def test_build_panel_feature_slot_shapes_and_absent_names(monkeypatch):
     """The bridge assembly: per-ticker series stack into (T,N) in `tickers` order, and a ticker with
     no request becomes an ALL-NaN column — never a 0.0, which would be a tradeable value."""
-    from finrl_pro_ds.crucible.data import panel_bridge as pb
+    from sharpen.crucible.data import panel_bridge as pb
 
     bars = (np.datetime64("2020-01-01") + np.arange(5)).astype("datetime64[ns]")
     seen: list[str] = []

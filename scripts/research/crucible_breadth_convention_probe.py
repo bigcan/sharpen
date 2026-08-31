@@ -52,7 +52,7 @@ sys.path.insert(0, str(ROOT))
 
 import pandas as pd  # noqa: E402
 
-from finrl_pro_ds.signals.eval_harness import _ls_weights  # noqa: E402
+from sharpen.signals.eval_harness import _ls_weights  # noqa: E402
 
 PANEL = ROOT / "data" / "raw" / "equity_panel" / "_pit_union.pkl"
 MEMBERS = Path(r"C:\tmp\sp500_pit_members.csv")

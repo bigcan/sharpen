@@ -43,9 +43,9 @@ import yaml
 
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
 
-from finrl_pro_ds.hpo.env_factory import make_env  # noqa: E402
-from finrl_pro_ds.data.splitter import RollingWindowSplitter  # noqa: E402
-from finrl_pro_ds.reporting import compute_eval_distribution  # noqa: E402
+from sharpen.hpo.env_factory import make_env  # noqa: E402
+from sharpen.data.splitter import RollingWindowSplitter  # noqa: E402
+from sharpen.reporting import compute_eval_distribution  # noqa: E402
 from scripts.sg1_arm_gate_backtest import (  # noqa: E402
     _build_sac_agent,
     _prep_backtest_config,

@@ -50,10 +50,10 @@ from scripts.research.taiwan_txo_vrp_scout import (  # noqa: E402
 )
 # Reuse the project-canonical, audited multiple-testing controls (promoted from the options-VRP
 # sleeve) — do NOT reimplement DSR/PSR here. All Sharpe inputs are PER-PERIOD (per cycle).
-from finrl_pro_ds.crypto.eval.statistics import (  # noqa: E402
+from sharpen.crypto.eval.statistics import (  # noqa: E402
     deflated_sharpe_ratio, excess_kurtosis, skewness,
 )
-from finrl_pro_ds.crypto.eval.statistics import sharpe_ratio as _per_period_sharpe  # noqa: E402
+from sharpen.crypto.eval.statistics import sharpe_ratio as _per_period_sharpe  # noqa: E402
 
 log = logging.getLogger("txo_vrp_validation")
 _ND = NormalDist()
@@ -251,7 +251,7 @@ def build_cycles(chains: pd.DataFrame, settle: pd.DataFrame, tx_daily: pd.DataFr
 
 # --------------------------------------------------------------------------- #
 # Deflated Sharpe Ratio — thin wrapper over the audited canonical implementation
-# (finrl_pro_ds.crypto.eval.statistics). All Sharpe inputs are PER-CYCLE.
+# (sharpen.crypto.eval.statistics). All Sharpe inputs are PER-CYCLE.
 # --------------------------------------------------------------------------- #
 def _per_cycle_sr(r: np.ndarray) -> float:
     """Per-cycle Sharpe = mean/std(ddof=1) (periods_per_year=1 => non-annualized)."""

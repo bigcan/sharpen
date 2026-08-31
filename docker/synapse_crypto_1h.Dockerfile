@@ -49,7 +49,7 @@ RUN pip install --upgrade pip && \
     "nest_asyncio>=1.5.0"
 
 # 3. Install local package
-COPY finrl_pro_ds /app/finrl_pro_ds
+COPY sharpen /app/sharpen
 RUN pip install -e .
 
 # 4. Copy scripts and configs

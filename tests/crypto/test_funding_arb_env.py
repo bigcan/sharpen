@@ -17,7 +17,7 @@ from __future__ import annotations
 
 import numpy as np
 
-from finrl_pro_ds.crypto.envs.funding_arb_env import FundingArbEnv
+from sharpen.crypto.envs.funding_arb_env import FundingArbEnv
 
 # ---------------------------------------------------------------------------
 # Fixtures

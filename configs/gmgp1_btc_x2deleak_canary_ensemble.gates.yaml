@@ -106,7 +106,7 @@ gates:
 
   # === X3 FIXED-LOT STRESS SUB-REPORT (canary-trust fix, audit P7-01/P7-03/P7-10) ===
   # Read by sg1_btc_velotrade_ensemble_eval.run_wf_ensemble ->
-  # finrl_pro_ds/eval/fixed_lot_stress.compute_stress_subreport. Replays the graded
+  # sharpen/eval/fixed_lot_stress.compute_stress_subreport. Replays the graded
   # rule's full per-fold path at FIXED lot with NO prop-firm early-term truncation,
   # then gates the honest worst trailing DD + peak leverage. A real breach flips
   # OVERALL=FAIL; an early-terminated fold -> INCOMPLETE_NEEDS_REROLLOUT (never a pass).

@@ -63,7 +63,7 @@ def load_overlay_config(config_path: str | Path) -> dict:
     effective config — the overlay config stays DRY (just the overlay blocks + a base_book
     pointer; universe/sleeves/env/data/features come from the linear 2-sleeve book).
     """
-    from finrl_pro_ds.config_utils import deep_merge
+    from sharpen.config_utils import deep_merge
 
     config_path = Path(config_path)
     cfg = yaml.safe_load(config_path.read_text(encoding="utf-8"))
@@ -384,11 +384,11 @@ def main() -> int:
         config.setdefault("training", {})["num_envs"] = args.num_envs
 
     # 2) Load the union bundle + compute the FIXED target (the immutable overlay input).
-    from finrl_pro_ds.data.cross_asset_loader import (
+    from sharpen.data.cross_asset_loader import (
         build_two_sleeve_arrays,
         load_two_sleeve_data,
     )
-    from finrl_pro_ds.paper import TwoSleeveExecutor
+    from sharpen.paper import TwoSleeveExecutor
 
     log.info("loading two-sleeve data (union=%d assets)...", config["universe"]["n_assets"])
     data = load_two_sleeve_data(config, force_refetch=args.force_refetch)
@@ -412,7 +412,7 @@ def main() -> int:
     # 3) Build the training vector env (V7-wrapped scheduler) + size the net from its obs.
     import gymnasium as gym
 
-    from finrl_pro_ds.envs.execution_overlay_factory import (
+    from sharpen.envs.execution_overlay_factory import (
         evaluate_execution_overlay,
         make_execution_env,
     )
@@ -446,7 +446,7 @@ def main() -> int:
     # 4) Train the overlay (DistributionalSAC, CVaR on tail-IS).
     import torch
 
-    from finrl_pro_ds.training.sac_trainer import SACTrainer
+    from sharpen.training.sac_trainer import SACTrainer
 
     device = args.device or ("cuda" if torch.cuda.is_available() else "cpu")
     if args.run_name:
@@ -464,7 +464,7 @@ def main() -> int:
     # Full runs log to WandB (SACTrainer.train calls wandb.log at log_interval when not hpo_mode);
     # the smoke path runs hpo_mode=True and stays WandB-free. init_wandb mirrors run_full_pipeline.
     if not args.smoke:
-        from finrl_pro_ds.logging import init_wandb
+        from sharpen.logging import init_wandb
 
         init_wandb(config, fallback_name=run_name, tags=args.tags)
     trainer = SACTrainer(vec_env, config, device=device, run_name=run_name, hpo_mode=args.smoke)

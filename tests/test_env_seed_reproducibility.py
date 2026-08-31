@@ -38,7 +38,7 @@ import numpy as np
 import pandas as pd
 import pytest
 
-from finrl_pro_ds.hpo.env_factory import create_vector_env, make_env
+from sharpen.hpo.env_factory import create_vector_env, make_env
 
 _SCALES = [15, 60, 240]
 _WINDOW = 30
@@ -234,7 +234,7 @@ def test_envs_never_draw_from_the_global_rng():
     import pathlib
     import re
 
-    root = pathlib.Path(__file__).resolve().parents[1] / "finrl_pro_ds"
+    root = pathlib.Path(__file__).resolve().parents[1] / "sharpen"
     env_files = sorted((root / "envs").glob("*.py")) + sorted((root / "crypto" / "envs").glob("*.py"))
     assert env_files, "no env modules found — the guard would pass vacuously"
 

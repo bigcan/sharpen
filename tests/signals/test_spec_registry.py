@@ -4,7 +4,7 @@ from __future__ import annotations
 import numpy as np
 import pytest
 
-from finrl_pro_ds.signals import SignalSpec, clear_registry, get_registry, register
+from sharpen.signals import SignalSpec, clear_registry, get_registry, register
 
 
 def test_content_hash_deterministic_and_sensitive() -> None:

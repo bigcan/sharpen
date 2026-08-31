@@ -16,7 +16,7 @@ from __future__ import annotations
 import numpy as np
 import pytest
 
-from finrl_pro_ds.envs.execution_scheduler_env import (
+from sharpen.envs.execution_scheduler_env import (
     MARKET_DIM,
     PRIVATE_DIM,
     ExecutionSchedulerEnv,
@@ -319,7 +319,7 @@ def test_daily_drift_completion_tracks_latest_target():
 def test_propfirm_wrapper_composes():
     """The env exposes the contract PropFirmWrapperV7 needs; augment_obs appends 3 dims to
     private and step flows info['portfolio_value']."""
-    from finrl_pro_ds.envs.prop_firm_wrapper import PropFirmWrapperV7
+    from sharpen.envs.prop_firm_wrapper import PropFirmWrapperV7
     base = ExecutionSchedulerEnv(**_synthetic())
     env = PropFirmWrapperV7(base, augment_obs=True, max_trailing_drawdown_pct=0.05,
                             static_peak=True)

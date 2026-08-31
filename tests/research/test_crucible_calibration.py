@@ -14,7 +14,7 @@ import numpy as np
 import pytest
 
 import scripts.research.crucible_calibration as calib
-from finrl_pro_ds.signals.generation.fitness import FitnessConfig
+from sharpen.signals.generation.fitness import FitnessConfig
 
 # A strict, shipped-like gate (the real thresholds) vs a trivially-lax one (accepts ~everything).
 _STRICT = FitnessConfig(embargo=10)
@@ -105,8 +105,8 @@ def test_e2_lax_gate_detects_everything() -> None:
 def test_planted_base_is_tunable_and_beta0_is_null() -> None:
     """The plant's realized marginal ΔSR must rise monotonically-ish with beta and be ~0 at beta=0
     (else the power curve is uninterpretable). Uses the same direct gate path E2 uses."""
-    from finrl_pro_ds.signals.generation.evolve import _overlay_returns
-    from finrl_pro_ds.signals.generation.fitness import _combined_book, combination_fitness
+    from sharpen.signals.generation.evolve import _overlay_returns
+    from sharpen.signals.generation.fitness import _combined_book, combination_fitness
 
     def realized(beta: float) -> float:
         deltas = []

@@ -25,7 +25,7 @@ import numpy as np
 import pandas as pd
 from scipy.stats import spearmanr
 
-from finrl_pro_ds.crypto.data.multiscale_crypto_handler import MultiScaleCryptoHandler
+from sharpen.crypto.data.multiscale_crypto_handler import MultiScaleCryptoHandler
 
 CACHE = "data/crypto_cache/silver_ohlcv.parquet"
 SCALES = [1, 4, 24]

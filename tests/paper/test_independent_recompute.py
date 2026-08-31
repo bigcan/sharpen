@@ -19,8 +19,8 @@ from pathlib import Path
 import numpy as np
 import pytest
 
-from finrl_pro_ds.envs.allocator_factory import drive_with_conviction, monthly_rebal_conviction
-from finrl_pro_ds.paper import ParityHarness, evaluate_paper_soak_gates
+from sharpen.envs.allocator_factory import drive_with_conviction, monthly_rebal_conviction
+from sharpen.paper import ParityHarness, evaluate_paper_soak_gates
 
 ROOT = Path(__file__).resolve().parents[2]
 OHLCV_CACHE = ROOT / "results" / "xsec_momentum" / "ohlcv_daily.parquet"
@@ -132,7 +132,7 @@ def test_independent_recompute_real_etf_growing_window(cfg, gates_cfg):
     A drift of 0 here is load-bearing: the conviction was re-assembled independently, not
     fed from the oracle."""
     try:
-        from finrl_pro_ds.data import cross_asset_loader as loader
+        from sharpen.data import cross_asset_loader as loader
         data = loader.load_cross_asset_data(cfg)             # offline: cached clean parquet
         close = data["close"]
         arrays = loader.build_allocator_arrays(

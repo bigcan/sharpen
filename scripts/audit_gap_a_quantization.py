@@ -17,9 +17,9 @@ docs/research/sg1_xauusd_sim_to_live_gap_audit.md §4.1 (Solution A
      HOLD (build the wrapper), or INSUFFICIENT_N (re-run when n grows).
 
 Single-source-of-truth on quantization mechanics:
-    finrl_pro_ds/cfd/execution/ctrader_broker.py:107-113  (lot specs)
-    finrl_pro_ds/crypto/live/live_engine.py:1180-1196     (post-fill sync)
-    finrl_pro_ds/crypto/live/live_engine.py:2697-2762     (_log_step → WandB)
+    sharpen/cfd/execution/ctrader_broker.py:107-113  (lot specs)
+    sharpen/crypto/live/live_engine.py:1180-1196     (post-fill sync)
+    sharpen/crypto/live/live_engine.py:2697-2762     (_log_step → WandB)
 
 Usage:
     python scripts/audit_gap_a_quantization.py \\

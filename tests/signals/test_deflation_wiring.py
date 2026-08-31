@@ -8,12 +8,12 @@ from __future__ import annotations
 
 import numpy as np
 
-from finrl_pro_ds.crypto.eval.statistics import (
+from sharpen.crypto.eval.statistics import (
     deflated_sharpe_ratio,
     excess_kurtosis,
     skewness,
 )
-from finrl_pro_ds.signals import cross_sectional_ic
+from sharpen.signals import cross_sectional_ic
 
 
 def _ic_series() -> tuple[np.ndarray, float, int]:

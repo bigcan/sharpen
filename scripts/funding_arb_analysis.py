@@ -30,7 +30,7 @@ import pandas as pd
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(PROJECT_ROOT))
 
-from finrl_pro_ds.crypto.eval.statistics import (  # noqa: E402
+from sharpen.crypto.eval.statistics import (  # noqa: E402
     bootstrap_sharpe_ci,
     probabilistic_sharpe_ratio,
 )

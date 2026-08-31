@@ -11,9 +11,9 @@ import yaml
 # Add project root to path
 sys.path.append(os.getcwd())
 
-from finrl_pro_ds.agents.ppo_scalper.ppo_agent import PPOAgent
-from finrl_pro_ds.data.parquet_handler import ParquetDataHandler
-from finrl_pro_ds.envs.deep_scalper_env import DeepScalperEnv
+from sharpen.agents.ppo_scalper.ppo_agent import PPOAgent
+from sharpen.data.parquet_handler import ParquetDataHandler
+from sharpen.envs.deep_scalper_env import DeepScalperEnv
 
 
 def load_config(path):

@@ -31,12 +31,12 @@ from pathlib import Path
 
 import numpy as np
 
-from finrl_pro_ds.crucible.agentic.proposer import _CS_SEED_BANK
-from finrl_pro_ds.crucible.data.us_equity_panel import build_us_equity_panel
-from finrl_pro_ds.signals.generation.config import load_generation_config
-from finrl_pro_ds.signals.generation.evolve import _candidate_returns
-from finrl_pro_ds.signals.library._alpha_formulas import FORMULAS
-from finrl_pro_ds.signals.library.alphas101 import SKIP
+from sharpen.crucible.agentic.proposer import _CS_SEED_BANK
+from sharpen.crucible.data.us_equity_panel import build_us_equity_panel
+from sharpen.signals.generation.config import load_generation_config
+from sharpen.signals.generation.evolve import _candidate_returns
+from sharpen.signals.library._alpha_formulas import FORMULAS
+from sharpen.signals.library.alphas101 import SKIP
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(name)s %(message)s")
 log = logging.getLogger("hold_tradeoff")

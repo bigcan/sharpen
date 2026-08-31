@@ -37,7 +37,7 @@ import pandas as pd
 REPO_ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(REPO_ROOT))
 
-from finrl_pro_ds.reporting import compute_eval_distribution  # noqa: E402
+from sharpen.reporting import compute_eval_distribution  # noqa: E402
 
 DEFAULT_INPUT_ROOT = REPO_ROOT / "results" / "sg1_xauusd_vs_v2_phase2_wf_ensemble"
 DEFAULT_OUTPUT = REPO_ROOT / "baselines" / "sg1_xauusd_vs_v2_phase2_fold_07" / "ensemble_report.json"

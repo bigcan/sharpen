@@ -54,7 +54,7 @@ def validate_config(config: dict, args) -> dict:
     """Validate config and apply CLI overrides."""
 
     # --- Checkpoint / bundle existence (solo / v2.3 bundle / legacy ensemble) ---
-    from finrl_pro_ds.live import resolve_agent_paths
+    from sharpen.live import resolve_agent_paths
     resolve_agent_paths(config, logger=logger)
 
     # --- OANDA credentials ---
@@ -109,19 +109,19 @@ def validate_config(config: dict, args) -> dict:
 
 def build_components(config: dict):
     """Instantiate all live trading components for OANDA EUR/USD CFD."""
-    from finrl_pro_ds.cfd.data.oanda_data_loader import OandaDataLoader
-    from finrl_pro_ds.cfd.execution.oanda_broker import OandaBroker
-    from finrl_pro_ds.cfd.live.cfd_bar_clock import CFDBarClock
-    from finrl_pro_ds.crypto.live.live_engine import LiveTradingEngine
-    from finrl_pro_ds.crypto.live.live_obs_builder import (
+    from sharpen.cfd.data.oanda_data_loader import OandaDataLoader
+    from sharpen.cfd.execution.oanda_broker import OandaBroker
+    from sharpen.cfd.live.cfd_bar_clock import CFDBarClock
+    from sharpen.crypto.live.live_engine import LiveTradingEngine
+    from sharpen.crypto.live.live_obs_builder import (
         LiveObsBuilder,
         resolve_norm_warmup_path,
     )
-    from finrl_pro_ds.crypto.mlops.crypto_risk_manager import (
+    from sharpen.crypto.mlops.crypto_risk_manager import (
         CryptoRiskConfig,
         CryptoRiskManager,
     )
-    from finrl_pro_ds.live import build_agent
+    from sharpen.live import build_agent
 
     # --- Agent (solo / v2.3 bundle / legacy ensemble) ---
     agent = build_agent(config, logger=logger)
@@ -202,7 +202,7 @@ def build_components(config: dict):
     # --- PRISM Overlay (optional L2; falsified S413+ but kept wireable) ---
     prism_cfg = config.get("prism", {})
     if prism_cfg.get("enabled", False):
-        from finrl_pro_ds.crypto.live.prism_overlay import PRISMOverlay
+        from sharpen.crypto.live.prism_overlay import PRISMOverlay
         engine._prism_overlay = PRISMOverlay(prism_cfg)
         logger.info(
             "PRISM L2 overlay enabled: %s",
@@ -276,7 +276,7 @@ def main():
 
     # Apply deploy overlays (Step 5 prop-firm decoupling). CLI flag wins
     # over STRATEGY_OVERLAY env var.
-    from finrl_pro_ds.config_utils import apply_overlays, parse_overlay_env
+    from sharpen.config_utils import apply_overlays, parse_overlay_env
     overlay_specs = args.overlay or parse_overlay_env(os.environ.get("STRATEGY_OVERLAY"))
     if overlay_specs:
         project_root = Path(__file__).resolve().parents[1]

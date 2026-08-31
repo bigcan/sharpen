@@ -1,4 +1,4 @@
-"""Unit tests for the §5 corrected single-hypothesis contract (finrl_pro_ds/crucible/corrected_contract.py,
+"""Unit tests for the §5 corrected single-hypothesis contract (sharpen/crucible/corrected_contract.py,
 S553-cont-139). Pins the F1 FIX (the sign-inverted diversifier the funnel rejects now passes), the binding
 LORD++ gate (F13 fix), the retained guards, and config-from-YAML. Design:
 .agent/artifacts/corrected_contract_architecture.md.
@@ -11,12 +11,12 @@ from pathlib import Path
 import numpy as np
 import pandas as pd
 
-from finrl_pro_ds.crucible.corrected_contract import (
+from sharpen.crucible.corrected_contract import (
     CorrectedConfig,
     corrected_contract_fitness,
     fresh_lord_level,
 )
-from finrl_pro_ds.signals.generation.fitness import FitnessConfig, combination_fitness
+from sharpen.signals.generation.fitness import FitnessConfig, combination_fitness
 
 _GATES = Path(__file__).resolve().parents[2] / "configs" / "crucible_corrected_contract.gates.yaml"
 _CFG = FitnessConfig(embargo=10)          # MECHANICS (combiner + CPCV); matches the pinned seal tests

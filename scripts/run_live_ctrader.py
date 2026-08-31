@@ -53,7 +53,7 @@ def validate_config(config: dict, args) -> dict:
     """Validate and patch config with CLI overrides."""
 
     # --- Checkpoint existence (solo / v2.3 bundle / legacy ensemble) ---
-    from finrl_pro_ds.live import resolve_agent_paths
+    from sharpen.live import resolve_agent_paths
     resolve_agent_paths(config, logger=logger)
 
     # --- cTrader credentials ---
@@ -101,15 +101,15 @@ def validate_config(config: dict, args) -> dict:
 
 def build_components(config: dict):
     """Instantiate all live trading components for cTrader XAUUSD CFD."""
-    from finrl_pro_ds.cfd.execution.ctrader_broker import CTraderBroker
-    from finrl_pro_ds.cfd.live.cfd_bar_clock import CFDBarClock
-    from finrl_pro_ds.crypto.live.live_engine import LiveTradingEngine
-    from finrl_pro_ds.crypto.live.live_obs_builder import LiveObsBuilder, resolve_norm_warmup_path
-    from finrl_pro_ds.crypto.mlops.crypto_risk_manager import (
+    from sharpen.cfd.execution.ctrader_broker import CTraderBroker
+    from sharpen.cfd.live.cfd_bar_clock import CFDBarClock
+    from sharpen.crypto.live.live_engine import LiveTradingEngine
+    from sharpen.crypto.live.live_obs_builder import LiveObsBuilder, resolve_norm_warmup_path
+    from sharpen.crypto.mlops.crypto_risk_manager import (
         CryptoRiskConfig,
         CryptoRiskManager,
     )
-    from finrl_pro_ds.live import build_agent
+    from sharpen.live import build_agent
 
     # --- Agent (solo / v2.3 bundle / legacy ensemble) ---
     agent = build_agent(config, logger=logger)
@@ -194,7 +194,7 @@ def build_components(config: dict):
     # --- PRISM Overlay (optional L2 position sizing) ---
     prism_cfg = config.get("prism", {})
     if prism_cfg.get("enabled", False):
-        from finrl_pro_ds.crypto.live.prism_overlay import PRISMOverlay
+        from sharpen.crypto.live.prism_overlay import PRISMOverlay
         engine._prism_overlay = PRISMOverlay(prism_cfg)
         logger.info(f"PRISM L2 overlay enabled: {prism_cfg.get('base_url', 'http://prism-api:8001')}")
 
@@ -203,7 +203,7 @@ def build_components(config: dict):
 
 async def main_async(config: dict) -> None:
     """Async main: connect cTrader, wire data loader, start engine."""
-    from finrl_pro_ds.cfd.data.ctrader_data_loader import CTraderDataLoader
+    from sharpen.cfd.data.ctrader_data_loader import CTraderDataLoader
 
     engine, broker = build_components(config)
 
@@ -295,7 +295,7 @@ def main():
     # Apply deploy overlays (Step 5 prop-firm decoupling). CLI flag wins
     # over STRATEGY_OVERLAY env var so an interactive operator can override
     # what the docker-compose bakes in.
-    from finrl_pro_ds.config_utils import apply_overlays, parse_overlay_env
+    from sharpen.config_utils import apply_overlays, parse_overlay_env
     overlay_specs = args.overlay or parse_overlay_env(os.environ.get("STRATEGY_OVERLAY"))
     if overlay_specs:
         project_root = Path(__file__).resolve().parents[1]

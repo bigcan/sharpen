@@ -30,9 +30,9 @@ import yaml
 
 sys.path.append(os.getcwd())
 
-from finrl_pro_ds.analytics.pyfolio_analyzer import PyfolioAnalyzer
-from finrl_pro_ds.data.parquet_handler import ParquetDataHandler
-from finrl_pro_ds.envs.deep_scalper_env import DeepScalperEnv
+from sharpen.analytics.pyfolio_analyzer import PyfolioAnalyzer
+from sharpen.data.parquet_handler import ParquetDataHandler
+from sharpen.envs.deep_scalper_env import DeepScalperEnv
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger("Baselines")
@@ -243,7 +243,7 @@ def policy_momentum(obs, info, step, env):
         macro = macro[0]
     # logret_5 is the 1st macro feature (index 0) in v2 feature engineering
     # Check feature_engineering.py for exact ordering
-    from finrl_pro_ds.data.feature_engineering import MACRO_FEATURE_COLS
+    from sharpen.data.feature_engineering import MACRO_FEATURE_COLS
     cols = list(MACRO_FEATURE_COLS)
     logret_5_idx = None
     for i, c in enumerate(cols):
@@ -271,7 +271,7 @@ def policy_mean_reversion(obs, info, step, env):
     # Get last timestep features
     last_micro = micro[-1] if micro.ndim == 2 else micro
 
-    from finrl_pro_ds.data.feature_engineering import MICRO_FEATURE_COLS
+    from sharpen.data.feature_engineering import MICRO_FEATURE_COLS
     cols = list(MICRO_FEATURE_COLS)
     basis_idx = None
     for i, c in enumerate(cols):

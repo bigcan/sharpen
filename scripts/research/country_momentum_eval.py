@@ -4,7 +4,7 @@ Pre-registration: `docs/research/country_momentum_preregistration_2026-07-31.md`
 empty Results section BEFORE this ran).
 
 Builds a Panel from free yfinance country-ETF closes and scores both signals with the SAME
-`finrl_pro_ds/signals/` scorecard used for every Taiwan probe — no statistic re-implemented, so the
+`sharpen/signals/` scorecard used for every Taiwan probe — no statistic re-implemented, so the
 results are directly comparable to P1/R1/R2/S1.
 """
 from __future__ import annotations
@@ -21,15 +21,15 @@ ROOT = Path(__file__).resolve().parents[2]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
-from finrl_pro_ds.signals.features import Panel  # noqa: E402
-from finrl_pro_ds.signals.multiplicity import Multiplicity  # noqa: E402
-from finrl_pro_ds.signals.scorecard import (  # noqa: E402
+from sharpen.signals.features import Panel  # noqa: E402
+from sharpen.signals.multiplicity import Multiplicity  # noqa: E402
+from sharpen.signals.scorecard import (  # noqa: E402
     Gates,
     evaluate_batch,
     to_markdown,
     write_scorecard,
 )
-from finrl_pro_ds.signals.spec import SignalSpec  # noqa: E402
+from sharpen.signals.spec import SignalSpec  # noqa: E402
 
 log = logging.getLogger("country_momentum")
 

@@ -10,9 +10,9 @@ from __future__ import annotations
 import numpy as np
 import pytest
 
-from finrl_pro_ds.data.fundamentals import FundamentalPanel
-from finrl_pro_ds.signals.features import make_synthetic_panel
-from finrl_pro_ds.signals.library import ballast as bs
+from sharpen.data.fundamentals import FundamentalPanel
+from sharpen.signals.features import make_synthetic_panel
+from sharpen.signals.library import ballast as bs
 
 
 @pytest.fixture

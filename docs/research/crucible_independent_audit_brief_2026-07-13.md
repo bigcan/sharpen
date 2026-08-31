@@ -94,7 +94,7 @@ Two hard invariants constrain any fix you propose:
 ## 3. The gate you must scrutinize first (prime suspect for explanation C)
 
 The PROMISING decision is a **single conjunction of five independent hurdles**, every one of which must
-pass (`finrl_pro_ds/signals/generation/fitness.py::combination_fitness`, thresholds from
+pass (`sharpen/signals/generation/fitness.py::combination_fitness`, thresholds from
 `configs/*.gates.yaml::generation`; current values shown):
 
 ```
@@ -180,13 +180,13 @@ results in `results/crucible_calibration/`) that drives the **real** shipped gat
   `docs/research/crucible_crossmarket_pooling_stage0_{preregistration,result}_2026-07-13.md`
 
 **Code — the machine itself**
-- Gate/fitness: `finrl_pro_ds/signals/generation/fitness.py` (the 5-leg gate — §3)
-- Deflated Sharpe: `finrl_pro_ds/crypto/eval/statistics.py::deflated_sharpe_ratio`
-- Evaluation harness / CPCV: `finrl_pro_ds/signals/eval_harness.py`, `finrl_pro_ds/signals/gates.py`
-- DSL grammar & search: `finrl_pro_ds/signals/generation/{grammar.py,dsl_signal.py,evolve.py}`,
-  `finrl_pro_ds/signals/library/` (operators, alpha101)
-- Cohort/ensemble (disabled): `finrl_pro_ds/signals/generation/{cohort.py,cohort_eval.py,cohort_mc.py}`
-- Orchestration, proposer, moat, connectors: `finrl_pro_ds/crucible/` (`agentic/llm_proposer.py`,
+- Gate/fitness: `sharpen/signals/generation/fitness.py` (the 5-leg gate — §3)
+- Deflated Sharpe: `sharpen/crypto/eval/statistics.py::deflated_sharpe_ratio`
+- Evaluation harness / CPCV: `sharpen/signals/eval_harness.py`, `sharpen/signals/gates.py`
+- DSL grammar & search: `sharpen/signals/generation/{grammar.py,dsl_signal.py,evolve.py}`,
+  `sharpen/signals/library/` (operators, alpha101)
+- Cohort/ensemble (disabled): `sharpen/signals/generation/{cohort.py,cohort_eval.py,cohort_mc.py}`
+- Orchestration, proposer, moat, connectors: `sharpen/crucible/` (`agentic/llm_proposer.py`,
   `orchestrator/substrate.py`, `data/*`)
 - Gate thresholds: `configs/crucible_{cohort,lockbox,power}.gates.yaml`,
   `configs/signal_eval.gates.yaml` (the frozen funnel — `gates_hash 519158fa1450`)

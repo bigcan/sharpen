@@ -2,7 +2,7 @@
 
 > **Created:** 2026-06-23 | **Session:** 553-cont-71
 > **Status:** PROPOSED (awaiting operator sign-off — see §13 Open Questions)
-> **Scope:** New module `finrl_pro_ds/signals/` — a standardized harness for discovering
+> **Scope:** New module `sharpen/signals/` — a standardized harness for discovering
 > equity single-name **cross-sectional predictive signals** (alpha factors), ranked by
 > **deflated gross Information Coefficient**. Consolidates the per-probe falsification
 > skeleton into one reusable signal-plug interface + ranked Signal Scorecard.
@@ -38,7 +38,7 @@ breaking changes.
 - **Operator-locked this session:** universe = liquid US single-name equity X-section;
   primary mode = cross-sectional rank; top-line rank key = **deflated gross IC-IR**.
 - **Reuse thesis (recon complete):** ~90% of the evaluator already exists, scattered across
-  `scripts/research/*_falsification.py` and `finrl_pro_ds/crypto/eval/statistics.py`. This
+  `scripts/research/*_falsification.py` and `sharpen/crypto/eval/statistics.py`. This
   doc cites the exact reusable functions; the build is mostly *consolidation*, not new math.
 - **Honesty precedents to honor:** the cont-58 audit flagged "0.601 Sharpe with no DSR on a
   multiple-comparison winner" → DSR is mandatory here. The VRP sleeve "needs paid-data
@@ -80,7 +80,7 @@ fwd_ret[t,:])` across names at day `t`. Everything in T1/T4 derives from it:
 
 ## 4. Interface Contracts
 
-### 4.1 `finrl_pro_ds/signals/spec.py` — pre-registration
+### 4.1 `sharpen/signals/spec.py` — pre-registration
 
 ```python
 @dataclass(frozen=True, slots=True)
@@ -101,7 +101,7 @@ class SignalSpec:
   committed before results exist (anti-p-hacking; mirrors spec commits like `6efc6a17`).
 - **Invariant:** `expected_sign == 0` ⇒ ranking uses **|IC|** and a two-sided p-value.
 
-### 4.2 `finrl_pro_ds/signals/protocol.py` — the plug
+### 4.2 `sharpen/signals/protocol.py` — the plug
 
 ```python
 class Signal(Protocol):
@@ -118,7 +118,7 @@ class Signal(Protocol):
 - **Precondition:** `panel` validated (OHLC sanity, coverage) before `compute`.
 - **Postcondition:** output shape `== (panel.T, panel.N)`; dtype float64; `±inf` forbidden.
 
-### 4.3 `finrl_pro_ds/signals/registry.py`
+### 4.3 `sharpen/signals/registry.py`
 
 ```python
 _REGISTRY: dict[str, type[Signal]] = {}
@@ -151,7 +151,7 @@ class Panel:
 - Generalizes the crypto `(T,N)` `bclose`/`active` pattern that `_xs_ic` already consumes
   (`cmgp1_x2_leak_ic_probe_v2.py:104-118`).
 
-### 4.5 `finrl_pro_ds/signals/eval_harness.py` — the tiers
+### 4.5 `sharpen/signals/eval_harness.py` — the tiers
 
 ```python
 def tier0_hygiene(sig: Signal, panel: Panel, gates: Gates) -> HygieneResult
@@ -204,7 +204,7 @@ dsr = deflated_sharpe_ratio(
 )["dsr"]                                            # = P(true IC-IR > 0 after deflation)
 ```
 
-### 4.6 `finrl_pro_ds/signals/scorecard.py`
+### 4.6 `sharpen/signals/scorecard.py`
 
 ```python
 @dataclass
@@ -331,21 +331,21 @@ L/S returns (n_days,) ⟂ FactorBook (n_days, k) ─OLS resid IC─▶ marginal 
 
 | Module | Impact | Changes |
 |---|---|---|
-| `finrl_pro_ds/crypto/eval/statistics.py` | **Import only** | none — call DSR/PSR/MinTRL/bootstrap with `periods_per_year=252` |
+| `sharpen/crypto/eval/statistics.py` | **Import only** | none — call DSR/PSR/MinTRL/bootstrap with `periods_per_year=252` |
 | `scripts/research/cmgp1_x2_leak_ic_probe_v2.py` | Port `_xs_ic`/`_pooled_ic` | extract → `signals/_ic.py` (shared); leave probe importing the shared fn |
 | `scripts/research/r1_illiquidity_probe.py` | Port `bh_fdr`/`one_sided_p`/`block_bootstrap_ic` | extract → `signals/_ic.py` |
 | `scripts/research/xsec_momentum_falsification.py` | Reuse `COST_MODELS`, `max_dd`, vol-scaled weight pattern | new `signals/costs.py` promotes the template |
 | `scripts/research/fable/fable_oracle.py` | Reuse `backtest_weights`, `profit_factor` | import for T2 |
-| `finrl_pro_ds/data/multiscale_handler.py` | Pattern reference (causal resample, `(T,N)`) | none |
+| `sharpen/data/multiscale_handler.py` | Pattern reference (causal resample, `(T,N)`) | none |
 | `tests/prism_research/test_pathA_walk_forward.py` | Generalize tripwire | new `tests/signals/test_causality_tripwire.py` |
-| **NEW** `finrl_pro_ds/signals/*` | new package | 7 files |
+| **NEW** `sharpen/signals/*` | new package | 7 files |
 | **NEW** `configs/signal_eval.gates.yaml` | new config | pre-registered gates |
 | **NEW** `scripts/research/eval_signals.py` | new CLI | batch driver |
 | **NEW** `tests/signals/*` | new tests | 6 files |
 
 **Import directions traced:** `signals/` imports `crypto.eval.statistics` + shared `_ic`;
 nothing in `crypto/`, `agents/`, `envs/` imports `signals/` (leaf package — no cycles, no risk
-to training/live paths). Respects the CLAUDE.md boundary (only touches `finrl_pro_ds/`,
+to training/live paths). Respects the CLAUDE.md boundary (only touches `sharpen/`,
 `scripts/`, `configs/`, `tests/`).
 
 ---

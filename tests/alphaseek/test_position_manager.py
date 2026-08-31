@@ -9,7 +9,7 @@ Validates faithful replication of TradeSimulator._step() position logic:
 
 import pytest
 
-from finrl_pro_ds.alphaseek.position_manager import DiscretePositionManager
+from sharpen.alphaseek.position_manager import DiscretePositionManager
 
 
 @pytest.fixture

@@ -28,7 +28,7 @@ def load_processed_data(path: str, feature_config: dict) -> pd.DataFrame:
     project_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
     sys.path.insert(0, project_root)
 
-    from finrl_pro_ds.data.parquet_handler import ParquetDataHandler
+    from sharpen.data.parquet_handler import ParquetDataHandler
 
     handler = ParquetDataHandler(
         file_path=path,
@@ -178,7 +178,7 @@ def main():
     }
 
     sys.path.insert(0, project_root)
-    from finrl_pro_ds.data.feature_engineering import (
+    from sharpen.data.feature_engineering import (
         get_macro_feature_cols,
         get_micro_feature_cols,
     )

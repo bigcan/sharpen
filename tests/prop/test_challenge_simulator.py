@@ -1,4 +1,4 @@
-"""Tests for the prop-firm challenge simulator (finrl_pro_ds/prop/challenge_simulator).
+"""Tests for the prop-firm challenge simulator (sharpen/prop/challenge_simulator).
 
 Deterministic (seeded); covers the breach/target/timeout logic, the scalar<->vectorized
 agreement (the vectorized core is load-bearing), bank-and-derisk, vol normalization, and
@@ -8,7 +8,7 @@ from __future__ import annotations
 
 import numpy as np
 
-from finrl_pro_ds.prop.challenge_simulator import (
+from sharpen.prop.challenge_simulator import (
     DAILY_BREACH,
     DD_BREACH,
     PASS,

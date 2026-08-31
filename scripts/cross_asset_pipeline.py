@@ -58,8 +58,8 @@ PROJECT_ROOT = Path(__file__).resolve().parent.parent
 if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
-from finrl_pro_ds.data import cross_asset_loader as loader  # noqa: E402
-from finrl_pro_ds.envs import allocator_factory as factory  # noqa: E402
+from sharpen.data import cross_asset_loader as loader  # noqa: E402
+from sharpen.envs import allocator_factory as factory  # noqa: E402
 
 logger = logging.getLogger("cross_asset_pipeline")
 

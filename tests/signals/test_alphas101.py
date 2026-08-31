@@ -3,11 +3,11 @@ from __future__ import annotations
 
 import numpy as np
 
-from finrl_pro_ds.signals import make_synthetic_panel
-from finrl_pro_ds.signals.eval_harness import assert_causal
-from finrl_pro_ds.signals.library import operators as op
-from finrl_pro_ds.signals.library._alpha_formulas import FORMULAS
-from finrl_pro_ds.signals.library.alphas101 import SIGNALS, DSLAlpha
+from sharpen.signals import make_synthetic_panel
+from sharpen.signals.eval_harness import assert_causal
+from sharpen.signals.library import operators as op
+from sharpen.signals.library._alpha_formulas import FORMULAS
+from sharpen.signals.library.alphas101 import SIGNALS, DSLAlpha
 
 
 def _ctx(p):

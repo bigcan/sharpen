@@ -13,7 +13,7 @@ import math
 
 import pytest
 
-from finrl_pro_ds.crucible.orchestrator.substrate import (
+from sharpen.crucible.orchestrator.substrate import (
     PowerGuard,
     SubstratePower,
     _power_holdout_bars,
@@ -202,7 +202,7 @@ def test_power_guard_is_a_plain_config_record() -> None:
 def _tiny_panel(*, extra_bar: bool = False, mutate: bool = False, feat=None):
     import numpy as np
 
-    from finrl_pro_ds.signals.features import Panel
+    from sharpen.signals.features import Panel
     rng = np.random.default_rng(0)
     tt = 40 + (1 if extra_bar else 0)
     nn = 3
@@ -217,7 +217,7 @@ def _tiny_panel(*, extra_bar: bool = False, mutate: bool = False, feat=None):
 
 
 def test_panel_content_hash_pins_bars_window_and_slots() -> None:
-    from finrl_pro_ds.crucible.orchestrator.substrate import folded_snapshot_hash, panel_content_hash
+    from sharpen.crucible.orchestrator.substrate import folded_snapshot_hash, panel_content_hash
     base = panel_content_hash(_tiny_panel())
     assert base == panel_content_hash(_tiny_panel())                 # deterministic
     assert base != panel_content_hash(_tiny_panel(extra_bar=True))   # a new price bar flips it

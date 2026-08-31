@@ -4,13 +4,13 @@ from __future__ import annotations
 import numpy as np
 import pandas as pd
 
-from finrl_pro_ds.data.cross_asset_panel_loader import (
+from sharpen.data.cross_asset_panel_loader import (
     _class_ids,
     load_cross_asset_panel,
     load_cross_asset_universe,
 )
-from finrl_pro_ds.signals.eval_harness import assert_causal
-from finrl_pro_ds.signals.generation import DslSignal
+from sharpen.signals.eval_harness import assert_causal
+from sharpen.signals.generation import DslSignal
 
 _TICKERS = ["SPY", "TLT", "GLD", "FXE"]
 _CLASSES = {"SPY": "equity", "TLT": "rates", "GLD": "commodity", "FXE": "fx"}

@@ -3,7 +3,7 @@
 Connects to a shared Optuna PostgreSQL study (created by the coordinator) and
 pulls trials dynamically until the global target is reached or SIGTERM is
 received.  Uses the **identical** objective function as serial HPO via
-``finrl_pro_ds.hpo.objective.make_objective``.
+``sharpen.hpo.objective.make_objective``.
 
 All project invariants are preserved:
   - LEAK-1: EMA-Z normalization reset at split boundaries (via objective)
@@ -46,9 +46,9 @@ from optuna.trial import TrialState  # noqa: E402
 
 import wandb  # noqa: E402
 
-from finrl_pro_ds.hpo.objective import make_objective  # noqa: E402
-from finrl_pro_ds.hpo.sampler import create_sampler  # noqa: E402
-from finrl_pro_ds.logging import init_wandb, is_consolidated  # noqa: E402
+from sharpen.hpo.objective import make_objective  # noqa: E402
+from sharpen.hpo.sampler import create_sampler  # noqa: E402
+from sharpen.logging import init_wandb, is_consolidated  # noqa: E402
 
 # ---------------------------------------------------------------------------
 # Logging

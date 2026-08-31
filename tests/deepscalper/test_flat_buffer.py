@@ -10,7 +10,7 @@ Covers:
 import numpy as np
 import pytest
 
-from finrl_pro_ds.agents.deepscalper.flat_replay_buffer import FlatReplayBuffer
+from sharpen.agents.deepscalper.flat_replay_buffer import FlatReplayBuffer
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -305,7 +305,7 @@ class TestFlatBufferAgentIntegration:
 
     def test_agent_uses_flat_buffer(self):
         """Agent with use_per=False should create FlatReplayBuffer."""
-        from finrl_pro_ds.agents.deepscalper.bdq_agent import DeepScalperBDQ
+        from sharpen.agents.deepscalper.bdq_agent import DeepScalperBDQ
 
         network_config = {
             "micro_config": {"input_size": 30, "private_input_size": 5,
@@ -325,7 +325,7 @@ class TestFlatBufferAgentIntegration:
 
     def test_train_step_with_flat_buffer(self):
         """train_step should produce finite loss with FlatReplayBuffer."""
-        from finrl_pro_ds.agents.deepscalper.bdq_agent import DeepScalperBDQ
+        from sharpen.agents.deepscalper.bdq_agent import DeepScalperBDQ
 
         network_config = {
             "micro_config": {"input_size": 30, "private_input_size": 5,
@@ -354,7 +354,7 @@ class TestFlatBufferAgentIntegration:
 
     def test_multi_step_training_flat(self):
         """50 train steps should all produce finite loss."""
-        from finrl_pro_ds.agents.deepscalper.bdq_agent import DeepScalperBDQ
+        from sharpen.agents.deepscalper.bdq_agent import DeepScalperBDQ
 
         network_config = {
             "micro_config": {"input_size": 30, "private_input_size": 5,

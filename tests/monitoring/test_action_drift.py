@@ -5,12 +5,12 @@ from __future__ import annotations
 import numpy as np
 import pytest
 
-from finrl_pro_ds.monitoring.action_drift import (
+from sharpen.monitoring.action_drift import (
     ActionDriftTracker,
     DriftStatus,
     _marginal_kl_from_hists,
 )
-from finrl_pro_ds.reporting import compute_eval_distribution
+from sharpen.reporting import compute_eval_distribution
 
 
 # ---------- KL helper --------------------------------------------------------
@@ -49,7 +49,7 @@ def test_ctor_rejects_bad_regime_cutpoints():
 
 def test_ctor_logs_warning_without_baseline(caplog):
     import logging
-    with caplog.at_level(logging.WARNING, logger="finrl_pro_ds.monitoring.action_drift"):
+    with caplog.at_level(logging.WARNING, logger="sharpen.monitoring.action_drift"):
         ActionDriftTracker(None, window_bars=100, min_bars_before_check=50)
     assert any("without baseline" in r.getMessage() for r in caplog.records)
 

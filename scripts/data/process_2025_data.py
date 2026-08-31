@@ -25,7 +25,7 @@ sys.path.insert(0, str(PROJECT_ROOT))
 
 import pandas as pd  # noqa: E402
 
-from finrl_pro_ds.data.feature_engineering import (  # noqa: E402
+from sharpen.data.feature_engineering import (  # noqa: E402
     DeepScalperFeatureEngineer,
 )
 

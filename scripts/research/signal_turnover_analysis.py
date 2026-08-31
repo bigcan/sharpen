@@ -23,14 +23,14 @@ warnings.filterwarnings("ignore", category=RuntimeWarning)  # all-NaN slice mean
 ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT))
 
-from finrl_pro_ds.data.equity_panel_loader import load_sp500_panel  # noqa: E402
-from finrl_pro_ds.signals import Gates, SignalSpec  # noqa: E402
-from finrl_pro_ds.signals.eval_harness import (  # noqa: E402
+from sharpen.data.equity_panel_loader import load_sp500_panel  # noqa: E402
+from sharpen.signals import Gates, SignalSpec  # noqa: E402
+from sharpen.signals.eval_harness import (  # noqa: E402
     compute_scores,
     tier1_gross_power,
     tier2_capturability,
 )
-from finrl_pro_ds.signals.library.alphas101 import SIGNALS as ALPHAS  # noqa: E402
+from sharpen.signals.library.alphas101 import SIGNALS as ALPHAS  # noqa: E402
 
 SCORECARD = ROOT / "results" / "signal_eval" / "sp500_alpha101_full" / "scorecard.json"
 HORIZONS = (5, 10, 21, 42, 63)

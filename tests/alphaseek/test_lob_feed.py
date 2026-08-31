@@ -4,7 +4,7 @@ import time
 
 import pytest
 
-from finrl_pro_ds.alphaseek.lob_feed import _FEATURE_DEPTH, BybitLOBFeed
+from sharpen.alphaseek.lob_feed import _FEATURE_DEPTH, BybitLOBFeed
 
 
 class TestOBToSnapshot:

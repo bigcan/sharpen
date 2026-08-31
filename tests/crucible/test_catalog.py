@@ -5,7 +5,7 @@ from pathlib import Path
 
 import pytest
 
-from finrl_pro_ds.crucible.catalog import CatalogEntry, DataCatalog
+from sharpen.crucible.catalog import CatalogEntry, DataCatalog
 
 
 def _entry(source: str, series: str, ac: str = "macro") -> CatalogEntry:

@@ -1,4 +1,4 @@
-"""Unit tests for ``finrl_pro_ds.eval.sensitivity_audit`` (v2.6 C2, S553).
+"""Unit tests for ``sharpen.eval.sensitivity_audit`` (v2.6 C2, S553).
 
 Covers: pure metric helpers, grid construction, edge-stability resolver,
 verdict block serializer + writer. The impure ``run_cell`` is exercised
@@ -20,7 +20,7 @@ ROOT = Path(__file__).resolve().parents[1]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
-from finrl_pro_ds.eval.sensitivity_audit import (  # noqa: E402
+from sharpen.eval.sensitivity_audit import (  # noqa: E402
     PF_CAP,
     PF_XCHECK_DIVERGENCE_HALT,
     PF_XCHECK_REPORT_ONLY,
@@ -157,7 +157,7 @@ def test_run_cell_pf_xcheck_params_default_to_module_constants():
     behavior while the orchestrator overrides them from the gates overlay."""
     import inspect
 
-    from finrl_pro_ds.eval.sensitivity_audit import run_cell
+    from sharpen.eval.sensitivity_audit import run_cell
 
     sig = inspect.signature(run_cell)
     assert sig.parameters["pf_xcheck_report_only"].default is PF_XCHECK_REPORT_ONLY

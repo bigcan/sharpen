@@ -32,7 +32,7 @@ try:
 except ImportError:
     load_dotenv = None
 
-from finrl_pro_ds.cfd.execution.ctrader_broker import CTraderBroker
+from sharpen.cfd.execution.ctrader_broker import CTraderBroker
 
 logging.basicConfig(
     level=logging.INFO,

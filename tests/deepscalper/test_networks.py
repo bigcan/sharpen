@@ -3,16 +3,16 @@ from unittest.mock import MagicMock
 
 import torch
 
-from finrl_pro_ds.agents.deepscalper.networks import (
+from sharpen.agents.deepscalper.networks import (
     DeepScalperNetwork,
     MacroEncoder,
     MicroEncoder,
     MicroEncoderMLP,
     MicroEncoderTCN,
 )
-from finrl_pro_ds.data.parquet_handler import ParquetDataHandler
-from finrl_pro_ds.data.feature_engineering import NUM_MACRO_FEATURES, NUM_MICRO_FEATURES
-from finrl_pro_ds.envs.deep_scalper_env import DeepScalperEnv
+from sharpen.data.parquet_handler import ParquetDataHandler
+from sharpen.data.feature_engineering import NUM_MACRO_FEATURES, NUM_MICRO_FEATURES
+from sharpen.envs.deep_scalper_env import DeepScalperEnv
 
 
 class TestDeepScalperNetworks(unittest.TestCase):

@@ -15,9 +15,9 @@ import numpy as np
 import pandas as pd
 import pytest
 
-from finrl_pro_ds.signals.features import Panel
-from finrl_pro_ds.signals.generation.cohort import CohortConfig
-from finrl_pro_ds.signals.generation.cohort_eval import (
+from sharpen.signals.features import Panel
+from sharpen.signals.generation.cohort import CohortConfig
+from sharpen.signals.generation.cohort_eval import (
     CohortVerdict,
     _cohort_holdout_guard,
     _frozen_weight_book,
@@ -27,8 +27,8 @@ from finrl_pro_ds.signals.generation.cohort_eval import (
     evaluate_cohort,
     pool_content_hash,
 )
-from finrl_pro_ds.signals.generation.evolve import _candidate_returns, _overlay_returns
-from finrl_pro_ds.signals.generation.fitness import FitnessConfig, _combined_book
+from sharpen.signals.generation.evolve import _candidate_returns, _overlay_returns
+from sharpen.signals.generation.fitness import FitnessConfig, _combined_book
 
 T, N = 600, 12
 _CFG = FitnessConfig()          # defaults — the funnel's real combiner/CPCV knobs
@@ -154,9 +154,9 @@ def test_holdout_guard_delta_is_annualized_not_per_period() -> None:
     _ann_sharpe → _per_period_sharpe inside _cohort_holdout_guard MUST fail this."""
     import pytest
 
-    from finrl_pro_ds.signals.eval_harness import _ann_sharpe
-    from finrl_pro_ds.signals.generation.cohort import _with_redundancy
-    from finrl_pro_ds.signals.generation.cohort_eval import (
+    from sharpen.signals.eval_harness import _ann_sharpe
+    from sharpen.signals.generation.cohort import _with_redundancy
+    from sharpen.signals.generation.cohort_eval import (
         _alpha_paths,
         _frozen_weight_book,
         _last_confirmed_month_end_idx,
@@ -248,8 +248,8 @@ def test_evaluate_cohort_pure_noise_not_promising() -> None:
 def _stub_failing_floor(monkeypatch: pytest.MonkeyPatch, spy) -> None:
     """Stub the analytic pre-filter to report the floor NOT cleared, and route the MC null to
     ``spy``. Seed-independent: the assertions are about ORCHESTRATION, not a pool's statistics."""
-    import finrl_pro_ds.signals.generation.cohort_eval as ce
-    from finrl_pro_ds.signals.generation.cohort import CohortEvidence
+    import sharpen.signals.generation.cohort_eval as ce
+    from sharpen.signals.generation.cohort import CohortEvidence
 
     stub_ev = CohortEvidence(
         members=("ov-a", "ov-b", "ov-c"), n_members=3, n_candidates_seen=6,
@@ -283,7 +283,7 @@ def test_analytic_floor_is_ADVISORY_by_default_and_mc_still_runs(
     ``cohort_hlz_t_min``, which pass 0/170 lifetime, so gating on it made the MC null unreachable
     (docs/research/crucible_zero_alpha_root_cause_2026-08-09.md §5b Finding 5). The floor result is
     still carried on the verdict for provenance."""
-    from finrl_pro_ds.signals.generation.cohort_mc import McNullResult
+    from sharpen.signals.generation.cohort_mc import McNullResult
 
     slots = _noise_slots(6, seed=13)
     panel = _panel(slots)
@@ -474,9 +474,9 @@ def test_holdout_guard_freezes_last_confirmed_month_end() -> None:
     back to `[-1]` MUST fail this: the guard would book the holdout under partial-month alpha, so its
     returned delta would equal the alpha[-1] book delta, not the alpha[last-ME] book delta (the two
     frozen vectors are asserted to differ, so the assertion is non-vacuous)."""
-    from finrl_pro_ds.signals.eval_harness import _ann_sharpe
-    from finrl_pro_ds.signals.generation.cohort import _with_redundancy
-    from finrl_pro_ds.signals.generation.cohort_eval import _alpha_paths, _frozen_weight_book
+    from sharpen.signals.eval_harness import _ann_sharpe
+    from sharpen.signals.generation.cohort import _with_redundancy
+    from sharpen.signals.generation.cohort_eval import _alpha_paths, _frozen_weight_book
 
     n = 430
     ts_full = _daily_ts("2012-01-02", n)
@@ -529,9 +529,9 @@ def test_holdout_guard_month_end_span_is_noop() -> None:
     month-end, freezing at the last confirmed month-end IS the final bar, so the fix is a NO-OP —
     it returns exactly what the old `[-1]` freeze returned. Guards against the fix perturbing the
     happy path."""
-    from finrl_pro_ds.signals.eval_harness import _ann_sharpe
-    from finrl_pro_ds.signals.generation.cohort import _with_redundancy
-    from finrl_pro_ds.signals.generation.cohort_eval import _alpha_paths, _frozen_weight_book
+    from sharpen.signals.eval_harness import _ann_sharpe
+    from sharpen.signals.generation.cohort import _with_redundancy
+    from sharpen.signals.generation.cohort_eval import _alpha_paths, _frozen_weight_book
 
     ts_full = _daily_ts("2012-01-02", 430)             # ends 2013-03-06
     idx = pd.date_range("2012-01-02", periods=430, freq="D")

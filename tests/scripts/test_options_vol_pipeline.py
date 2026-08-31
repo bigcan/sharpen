@@ -23,8 +23,8 @@ from pathlib import Path
 import numpy as np
 import pandas as pd
 
-from finrl_pro_ds.crypto import options_pricing as op
-from finrl_pro_ds.crypto import options_vrp_sim as ovs  # sim core promoted from the script (MS-ADR-9)
+from sharpen.crypto import options_pricing as op
+from sharpen.crypto import options_vrp_sim as ovs  # sim core promoted from the script (MS-ADR-9)
 
 _ROOT = Path(__file__).resolve().parents[2]
 

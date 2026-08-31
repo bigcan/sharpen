@@ -19,7 +19,7 @@ import json
 import numpy as np
 import pytest
 
-from finrl_pro_ds.signals import (
+from sharpen.signals import (
     Gates,
     HypothesisLedger,
     Multiplicity,

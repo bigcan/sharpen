@@ -21,7 +21,7 @@ from unittest.mock import MagicMock
 
 import pytest
 
-from finrl_pro_ds.crypto.live.live_engine import _init_agreement_decay_tracker
+from sharpen.crypto.live.live_engine import _init_agreement_decay_tracker
 
 
 def _write_baseline(path: Path, *, rule: str, include_fix2_marker: bool) -> None:
