@@ -54,7 +54,7 @@ logger = logging.getLogger(__name__)
 # Constants
 # ---------------------------------------------------------------------------
 DERIBIT_BASE = "https://www.deribit.com/api/v2/public/"
-USER_AGENT = "finrl-pro-ds/vrp-harvest (Phase0 loader)"
+USER_AGENT = "sharpen/vrp-harvest (Phase0 loader)"
 
 # DVOL index history begins 2021-04-01 on Deribit's public endpoint.
 DVOL_INCEPTION = "2021-04-01"
