@@ -499,7 +499,7 @@ def cmd_deploy(args):
         "ulimit -n 65536",
         "mount -o remount,size=2G /dev/shm || echo 'WARN: /dev/shm remount failed (non-fatal)'",
         fresh_hpo_cmd,
-        "pip uninstall finrl-pro-ds -y || true",
+        "pip uninstall sharpen finrl-pro-ds -y || true",
         "rm -rf sharpen.egg-info finrl_pro_ds.egg-info build dist",
         f"unzip -o {zip_name}",
         f"rm -f {zip_name}",

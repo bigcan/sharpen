@@ -312,13 +312,13 @@ def deploy(args):
         f"{'rm -f hpo.db* && echo STEP: WIPE HPO DB' if args.fresh_hpo else 'echo STEP: RETAIN HPO DB'}",
         "echo 'STEP: UNINSTALL'",
         # CRITICAL: Clean everything to avoid stale deps
-        "/root/miniconda3/bin/pip uninstall finrl-pro-ds -y || true",
+        "/root/miniconda3/bin/pip uninstall sharpen finrl-pro-ds -y || true",
         "rm -rf sharpen.egg-info finrl_pro_ds.egg-info build dist",
         "echo 'STEP: UNZIP'",
         f"unzip -o {zip_name}",
         f"rm -f {zip_name}",
-        # Verify setup.py content
-        "grep -C 2 'install_requires' setup.py || echo 'setup.py missing'",
+        # Verify packaging metadata arrived (pyproject is the sole source since setup.py was removed)
+        "grep -C 2 'dependencies' pyproject.toml || echo 'WARN: pyproject.toml missing'",
         "echo 'STEP: INSTALL REQS'",
         # Base Image is PyTorch 2.8.0 + CUDA 12.8
         "/root/miniconda3/bin/pip install -q --upgrade -r requirements.txt",
