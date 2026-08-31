@@ -7,6 +7,7 @@ Supports multiple instances via instances.json (--instance flag).
 import argparse
 import json
 import os
+import re
 import sys
 from pathlib import Path
 
@@ -66,6 +67,46 @@ def resolve_instance(instance_name=None):
         }
 
 
+# Inline `KEY=value` assignments whose KEY looks like a secret. Matches the shape actually used
+# at the call site: `WANDB_API_KEY=... python train.py ...`.
+_SECRET_ASSIGN_RE = re.compile(
+    r"\b([A-Za-z0-9_]*(?:API_KEY|APIKEY|TOKEN|SECRET|PASSWORD|PASSWD|PWD)[A-Za-z0-9_]*)"
+    r"\s*=\s*(\S+)",
+)
+_REDACTED = "***REDACTED***"
+
+
+def _known_secret_values() -> list[str]:
+    """Literal secret values this process can see — env keys plus every instance password."""
+    vals = [os.getenv(k) for k in ("WANDB_API_KEY", "GPUHUB_PASSWORD", "VAST_API_KEY")]
+    if INSTANCES_FILE.exists():
+        try:
+            with open(INSTANCES_FILE, encoding="utf-8") as f:
+                registry = json.load(f)
+            vals += [i.get("password") for i in registry.get("instances", {}).values()]
+        except (OSError, json.JSONDecodeError, AttributeError):
+            pass
+    # 8 chars is the floor at which a value is specific enough to substring-replace safely.
+    return [v for v in vals if v and len(v) >= 8]
+
+
+def redact(text: str) -> str:
+    """Mask secrets before anything reaches stdout.
+
+    Two vectors, both of which leaked a live WandB key on 2026-08-25 (randd_log S553-cont-165):
+      1. this module echoed the full command, so `WANDB_API_KEY=... python ...` was printed verbatim;
+      2. remote output itself carried it — `ps aux` on the instance prints full process cmdlines.
+    So both the echoed command AND returned output go through here. Value-masking is exact-substring
+    only, so it cannot mangle unrelated output.
+    """
+    if not text:
+        return text
+    out = _SECRET_ASSIGN_RE.sub(lambda m: f"{m.group(1)}={_REDACTED}", text)
+    for v in _known_secret_values():
+        out = out.replace(v, _REDACTED)
+    return out
+
+
 def remote_cmd(command: str, timeout: int = 60, instance_name: str = None) -> str:
     """
     Execute a command on the remote GPU server.
@@ -91,18 +132,18 @@ def remote_cmd(command: str, timeout: int = 60, instance_name: str = None) -> st
         ssh.connect(host, port=port, username='root', password=password, timeout=30)
 
         # Execute command
-        print(f"[{inst['name']}] Executing: {command}")
+        print(f"[{inst['name']}] Executing: {redact(command)}")
         stdin, stdout, stderr = ssh.exec_command(command, timeout=timeout)
 
         out = stdout.read().decode('utf-8', errors='replace')
         err = stderr.read().decode('utf-8', errors='replace')
 
-        # Combine output
+        # Combine output. Redacted because remote output can echo the key back (`ps aux`).
         result = out
         if err:
             result += f"\n[STDERR]\n{err}"
 
-        return result
+        return redact(result)
 
     except paramiko.AuthenticationException:
         return "ERROR: SSH authentication failed. Check password."
