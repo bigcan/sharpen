@@ -172,3 +172,8 @@ Thumbs.db
 
 # Claude Code local settings and worktrees
 .claude/
+
+# Selftest artifact: scripts/research/taiwan_txo_vrp_validation.py writes its report to
+# `$TMPDIR/_txo_vrp_validation_selftest`, and TMPDIR is unset on Windows, so the fallback
+# is the repo root. Two tests in tests/research invoke it, so a plain test run litters here.
+_txo_vrp_validation_selftest/
