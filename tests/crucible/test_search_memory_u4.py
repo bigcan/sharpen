@@ -17,8 +17,8 @@ from pathlib import Path
 
 import pytest
 
-from finrl_pro_ds.crucible.ledger import TrialLedger, TrialRecord
-from finrl_pro_ds.crucible.search_memory import (
+from sharpen.crucible.ledger import TrialLedger, TrialRecord
+from sharpen.crucible.search_memory import (
     REJECTION_DECISIVE,
     REJECTION_UNDERPOWERED,
     SearchMemoryConfig,
@@ -58,7 +58,7 @@ def test_semantic_hash_does_not_collapse_order_dependent_operators() -> None:
 
 
 def test_canonical_formula_round_trips_through_the_grammar() -> None:
-    from finrl_pro_ds.signals.generation.grammar import parse
+    from sharpen.signals.generation.grammar import parse
     for f in ("add(volume, close)", "mul(rank(volume), rank(close))", "sub(close, delay(close, 5))"):
         parse(canonical_formula(f))          # must not raise — canonical output is valid DSL
 
@@ -202,8 +202,8 @@ def test_readmit_parked_rebuilds_specs_and_refuses_un_preregistered_rows(tmp_pat
     old hypothesis look fresh), (b) REFUSE a parked row with no ``spec_json`` — that genome was never
     pre-registered, and handing it to ``author.preregister`` would write one (CR-2 laundering), and
     (c) honour ``max_readmissions`` and short-circuit when the substrate carries no power stamp."""
-    from finrl_pro_ds.crucible.orchestrator.orchestrator import _readmit_parked
-    from finrl_pro_ds.crucible.orchestrator.substrate import PreparedSubstrate, SubstratePower
+    from sharpen.crucible.orchestrator.orchestrator import _readmit_parked
+    from sharpen.crucible.orchestrator.substrate import PreparedSubstrate, SubstratePower
 
     class _Sub:                                              # minimal stand-in for the Substrate fields
         def __init__(self, ledger):
@@ -304,11 +304,11 @@ def test_loop_classifies_a_real_holdout_rejection(tmp_path: Path, mde: float, ex
     exercise it (its power stamp was the unmeasured ``+inf`` sentinel, which fail-safes to no
     classification at all, and no prereg seed cleared the train pre-filter there)."""
     import scripts.research.crucible_calibration as cal
-    from finrl_pro_ds.crucible.agentic.hypothesis import HypothesisAuthor
-    from finrl_pro_ds.crucible.agentic.loop import run_hypothesis_loop
-    from finrl_pro_ds.crucible.agentic.proposer import LibrarySeedProposer
-    from finrl_pro_ds.crucible.corrected_contract import CorrectedConfig
-    from finrl_pro_ds.signals.generation.config import load_generation_config
+    from sharpen.crucible.agentic.hypothesis import HypothesisAuthor
+    from sharpen.crucible.agentic.loop import run_hypothesis_loop
+    from sharpen.crucible.agentic.proposer import LibrarySeedProposer
+    from sharpen.crucible.corrected_contract import CorrectedConfig
+    from sharpen.signals.generation.config import load_generation_config
 
     cfg, ek = load_generation_config("configs/signal_eval.gates.yaml")
     ek = {**ek, "pop_size": 20, "n_generations": 2}
@@ -352,11 +352,11 @@ def test_every_holdout_adjudicated_rejection_carries_a_class(tmp_path: Path) -> 
     ``rejection_class IS NULL``.** That is exactly the bit ``is_readmissible`` / ``killed_families``
     need to tell "tested and killed" from "the substrate could not say"."""
     import scripts.research.crucible_calibration as cal
-    from finrl_pro_ds.crucible.agentic.hypothesis import HypothesisAuthor, candidate_hash
-    from finrl_pro_ds.crucible.agentic.loop import run_hypothesis_loop
-    from finrl_pro_ds.crucible.agentic.proposer import LibrarySeedProposer
-    from finrl_pro_ds.crucible.corrected_contract import CorrectedConfig
-    from finrl_pro_ds.signals.generation.config import load_generation_config
+    from sharpen.crucible.agentic.hypothesis import HypothesisAuthor, candidate_hash
+    from sharpen.crucible.agentic.loop import run_hypothesis_loop
+    from sharpen.crucible.agentic.proposer import LibrarySeedProposer
+    from sharpen.crucible.corrected_contract import CorrectedConfig
+    from sharpen.signals.generation.config import load_generation_config
 
     cfg, ek = load_generation_config("configs/signal_eval.gates.yaml")
     # Enough search pressure that offspring — which are NOT holdout-eligible under prereg_only —
@@ -411,11 +411,11 @@ def test_a_candidate_that_never_reached_the_holdout_stays_unclassified(tmp_path:
     stamping it with a rejection class would manufacture a negative result no test produced — the
     file-drawer error the funnel exists to avoid, run in reverse. It must stay NULL."""
     import scripts.research.crucible_calibration as cal
-    from finrl_pro_ds.crucible.agentic.hypothesis import HypothesisAuthor, candidate_hash
-    from finrl_pro_ds.crucible.agentic.loop import run_hypothesis_loop
-    from finrl_pro_ds.crucible.agentic.proposer import LibrarySeedProposer
-    from finrl_pro_ds.crucible.corrected_contract import CorrectedConfig
-    from finrl_pro_ds.signals.generation.config import load_generation_config
+    from sharpen.crucible.agentic.hypothesis import HypothesisAuthor, candidate_hash
+    from sharpen.crucible.agentic.loop import run_hypothesis_loop
+    from sharpen.crucible.agentic.proposer import LibrarySeedProposer
+    from sharpen.crucible.corrected_contract import CorrectedConfig
+    from sharpen.signals.generation.config import load_generation_config
 
     cfg, ek = load_generation_config("configs/signal_eval.gates.yaml")
     ek = {**ek, "pop_size": 24, "n_generations": 3}

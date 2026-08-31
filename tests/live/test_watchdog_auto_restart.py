@@ -187,7 +187,7 @@ def test_restart_failure_does_not_record_success(wd):
 # `reason == "drift_crit"`. An `agreement_decay_crit` kill_file would
 # fall through and the watchdog would bounce the container, defeating
 # Protocol v2.2 §8.3 operator-only re-enable semantics. Fix: use the
-# canonical `CRIT_REASONS` tuple from `finrl_pro_ds.monitoring.kill_file`
+# canonical `CRIT_REASONS` tuple from `sharpen.monitoring.kill_file`
 # (currently `{drift_crit, agreement_decay_crit}`) so adding a new
 # write_kill_file reason there auto-widens this guard.
 
@@ -286,7 +286,7 @@ def test_no_kill_file_does_not_block_auto_restart(wd):
 def test_crit_reasons_constant_matches_kill_file_canonical():
     """Watchdog imports the canonical CRIT_REASONS from kill_file.py; if
     a new reason is added there, this assertion catches the drift."""
-    from finrl_pro_ds.monitoring.kill_file import CRIT_REASONS as canonical
+    from sharpen.monitoring.kill_file import CRIT_REASONS as canonical
     sys.modules.pop("watchdog_docker", None)
     mod = importlib.import_module("watchdog_docker")
     assert mod.CRIT_REASONS == canonical, (

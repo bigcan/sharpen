@@ -2,7 +2,7 @@
 
 **Status:** **BUILT AND SHIPPED — system is at `crucible-v13.1`** (P0–P5 roadmap complete). §§0–11 are the original design spec (written 2026-07-01, last revised 2026-07-14 at `crucible-v2.6`) and remain accurate for the **loop shape**; the **decision layer** has moved twelve times since and is assembled in **§12**, which supersedes any verdict-semantics statement above it. **Revised per independent Fable-5 review** (`.agent/artifacts/crucible_spec_fable_review.md`, 2026-07-01) — two critical design fixes folded in; see §11.
 **Author:** research session 553-cont-97 (2026-07-01); §12 assembled S553-cont-158 (2026-08-11)
-**Supersedes naming:** the alpha-mining research system (`finrl_pro_ds/signals/*` + generation + combiner) is now officially named **Crucible**.
+**Supersedes naming:** the alpha-mining research system (`sharpen/signals/*` + generation + combiner) is now officially named **Crucible**.
 **Related memory:** `project_alpha_mining_kb_method_s553`, `project_alpha_generation_c3_built_s553`, `project_dynamic_sleeve_combiner_c1_built_s553`, `project_signal_eval_system_s553`, `project_small_operator_strategy_reframe_s553`, `project_alpha_mining_expert_review_findings_s553`.
 
 ---
@@ -23,7 +23,7 @@ This single fact governs the entire design. Two hard-won lessons from the resear
 ## 1. Scope
 
 ### In scope
-- A continuous (scheduled) closed-loop discovery pipeline built **on top of** the existing `finrl_pro_ds/signals/` funnel, C1 combiner, and C3 generation — reusing them as libraries, not rewriting them.
+- A continuous (scheduled) closed-loop discovery pipeline built **on top of** the existing `sharpen/signals/` funnel, C1 combiner, and C3 generation — reusing them as libraries, not rewriting them.
 - An **agentic orchestration layer** (LLM-driven) for hypothesis proposal, data-source discovery, run triage, and reporting — with hard governance guardrails.
 - A **free financial-data acquisition subsystem** (market + alternative), with quality/point-in-time gating and a central data catalog.
 - A **versioning scheme** (`crucible-vN`) for the system, its gates, its data snapshots, and every discovery artifact — reproducibility by construction.
@@ -102,7 +102,7 @@ An LLM agent, given (a) the current data catalog, (b) the **agent-visible** slic
 
 **Stage 5 — COMBINE + REPORT → LOCKBOX (CR-8).**
 Survivors are tested for marginal contribution via the C1 combiner (`dynamic_sleeve_alphas`), written as a **discovery card**, and **enrolled into the incubation lockbox** — an automatic forward paper-track that judges the candidate on data arriving *after* its proposal timestamp. The agent may write a *human-facing* narrative — but verdict fields are copied verbatim from the scorer.
-- Reuses: `envs/allocator_factory.py` (`dynamic_sleeve_alphas`, `combiner_alphas`); the paper-executor infra (`finrl_pro_ds/paper/`, `project_paper_rung1_audit_verdict_s553`) for incubation.
+- Reuses: `envs/allocator_factory.py` (`dynamic_sleeve_alphas`, `combiner_alphas`); the paper-executor infra (`sharpen/paper/`, `project_paper_rung1_audit_verdict_s553`) for incubation.
 - New: discovery-card schema + ledger DB (§6) + lockbox enrollment (§6.2).
 
 **Human gate (unchanged, mandatory).** A survivor that clears **incubation** notifies the operator. Promotion requires human-initiated Tier-2 (`deep_strategy_audit.js`). No exceptions.
@@ -213,7 +213,7 @@ Replacement — **two levels:**
 
 ### 6.2 The lockbox — incubation on forward data (CR-8, the highest-leverage mechanism)
 
-A candidate that clears the within-run funnel is **PROMISING**, not "discovered." It is enrolled into an **incubation lockbox**: an automatic forward paper-track (built on `finrl_pro_ds/paper/`) that accrues out-of-sample evidence **only on bars timestamped after `proposal_ts`** — data that provably did not exist when the hypothesis was written, and (for a live-arriving stream) that the LLM's training corpus could not have memorized.
+A candidate that clears the within-run funnel is **PROMISING**, not "discovered." It is enrolled into an **incubation lockbox**: an automatic forward paper-track (built on `sharpen/paper/`) that accrues out-of-sample evidence **only on bars timestamped after `proposal_ts`** — data that provably did not exist when the hypothesis was written, and (for a live-arriving stream) that the LLM's training corpus could not have memorized.
 
 Why this is the keystone fix:
 - **Kills the death spiral** — forward data is fresh, uncontaminated by prior tests, so evidence quality does not decay with the number of past trials.
@@ -260,7 +260,7 @@ Reordered per Fable: the **overlay/conditioner path (CR-9) precedes the connecto
 | **P1b** | Data acquisition: `DataConnector` + **FRED/ALFRED** + **CFTC COT** through the data-quality gate (incl. **as-of-join reconstruction tripwire**) into the catalog. | clean_ohlcv, medallion | connectors, PIT gate, join tripwire, catalog | Macro/positioning panel loads PIT-clean **and passes the as-of-join negative test** (not "T0 hygiene" — a category error; T0 counts OHLC violations). |
 | **P2** | Agentic hypothesis loop (manual): Hypothesis Author (sees only `ledger_agent_view`) → pre-registered overlay/CS specs → C3 mine → T0–T5 → discovery card. | grammar, evolve, eval_harness, scorecard | agent prompts, spec-gen, card schema | End-to-end on synthetic data yields 0 PROMISING (null-safety, like `--mode synthetic`). |
 | **P3** | Continuous orchestrator: **nightly** eligibility, `substrate_dirty` gate (§10.1), cost-bounded, versioned ticks; **GPUHub burst** (route HPO→gpuhub-1); **per-substrate online-FDR** wealth (§6.1) wired to the ledger. | scheduling, `feedback_hpo_gpuhub1_nonhpo_gpuhub2` | orchestrator, budgeter, `substrate_dirty` flag, FDR ledger, burst router | 4 unattended nights complete (mining only when dirty), versioned, reproducible, within budget; a clean-panel night correctly no-ops; FDR wealth accounted. |
-| **P4** | **Lockbox (CR-8):** auto forward paper-incubation of PROMISING survivors on post-proposal data; card eligible for human gate only after incubation clears. | `finrl_pro_ds/paper/` | lockbox enrollment + incubation criterion | A seeded survivor enrolls and accrues forward OOS evidence; no human gate before incubation clears. |
+| **P4** | **Lockbox (CR-8):** auto forward paper-incubation of PROMISING survivors on post-proposal data; card eligible for human gate only after incubation clears. | `sharpen/paper/` | lockbox enrollment + incubation criterion | A seeded survivor enrolls and accrues forward OOS evidence; no human gate before incubation clears. |
 | **P5** ✅ SHIPPED | Breadth (GDELT/SEC EDGAR/Stooq + Data Scout) + governance polish: survivor → human notification → Tier-2 handoff; `crucible reproduce`. **Shipped `crucible-v2.6` (MINOR):** three connectors (`crucible/data/{stooq,gdelt,edgar}.py`) — EDGAR is the cleanest true-PIT source (filing-acceptance `filed` timestamp AS the release; amendments replay as revisions through `asof_join`); the `DataScout` Stage-1 ACQUIRE driver (`crucible/agentic/scout.py` — survey → quality gate → **as-of-join tripwire** → reviewable `ScoutReport`; registration a SEPARATE reviewed step; rejects a PIT-leaking source); `crucible/governance/` (Tier-2 handoff packet carrying the verbatim verdict + forward evidence + the EXACT human-run `deep_strategy_audit` command, an injectable `Notifier` seam, once-only `GovernanceStore` idempotency, run AROUND the funnel so `run_orchestrator_tick` core is byte-untouched); and `crucible reproduce` (`crucible/reproduce.py` + CLI — verify a past run re-derives verdicts + the four pins bit-identically, version/gate drift = hard mismatch). **Invariants:** every piece touches NO gate byte and reads NO verdict (CR-1) → funnel `gates_hash` frozen at `crucible-v2.0` (test asserts `519158fa1450`); the governance layer NEVER promotes or runs the audit (CLAUDE.md — human-initiated Tier-2 only). Non-DSL-legal ids (Stooq `^spx`, EDGAR `cik:concept`) are flagged `terminal_dsl_legal=False` for `SlotRequest` aliasing, exactly like COT. | deep_strategy_audit.js, P1 interface | more connectors, handoff, reproduce CLI | New uncorrelated domain reaches Stage 4 clean; reproduce verifies a past run. ✅ `tests/crucible/test_p5_connectors.py`, `test_scout.py`, `test_governance.py`, `test_reproduce_p5.py`. |
 
 **MVP = P0 + P1a + P1b + P2** (versioned, macro/positioning *reachable* by the funnel via the overlay path, one manual agentic loop). Continuous autonomy is P3; the lockbox that makes discovery honest is P4.
@@ -313,7 +313,7 @@ COT publishes **weekly** (Fri for Tue); most FRED macro series update monthly/we
 | Governance gate | `.claude/workflows/deep_strategy_audit.js` (Tier-2) |
 | Scheduling | existing `scripts/` + cron/workflow harness |
 
-**Net new code:** DataConnector interface + connectors, PIT/quality gate for non-OHLCV **+ as-of-join reconstruction tripwire**, central catalog, **split ledger (`trial_ledger` + `ledger_agent_view`)**, **per-substrate online-FDR (alpha-investing/LORD) accounting**, **`Panel` feature slots + grammar terminal registry + `candidate_type` overlay/conditioner path**, **`delta_p05_min` gate repair**, **incubation lockbox (forward paper-track on `finrl_pro_ds/paper/`)**, discovery-card schema, run manifest + `reproduce`, agent prompts/roles, cost-bounded orchestrator, versioning tags/hashes.
+**Net new code:** DataConnector interface + connectors, PIT/quality gate for non-OHLCV **+ as-of-join reconstruction tripwire**, central catalog, **split ledger (`trial_ledger` + `ledger_agent_view`)**, **per-substrate online-FDR (alpha-investing/LORD) accounting**, **`Panel` feature slots + grammar terminal registry + `candidate_type` overlay/conditioner path**, **`delta_p05_min` gate repair**, **incubation lockbox (forward paper-track on `sharpen/paper/`)**, discovery-card schema, run manifest + `reproduce`, agent prompts/roles, cost-bounded orchestrator, versioning tags/hashes.
 
 ---
 
@@ -336,7 +336,7 @@ Review: `.agent/artifacts/crucible_spec_fable_review.md`. Verdict: governance so
 
 ## 12. Decision contract as of `crucible-v13.1` (assembled 2026-08-11, updated 2026-08-12)
 
-§§0–11 above were frozen 2026-07-14, when the system was at `crucible-v2.6`, and they describe the **loop shape** — which is still accurate: no bump since has changed the stage graph. What they do not describe is the **decision layer**, which has changed twelve times since (v3.0 → v13.1). Until now that record lived only in the `finrl_pro_ds/crucible/version.py` module docstring plus the audit reports, so no single artifact showed a screen and the gate it feeds side by side. That is not a documentation nicety: the same defect — *a cheap upstream screen silently blocking the gate that is the actual test* — has now shipped four separate times (§12.5), and each instance was found by measurement long after the fact.
+§§0–11 above were frozen 2026-07-14, when the system was at `crucible-v2.6`, and they describe the **loop shape** — which is still accurate: no bump since has changed the stage graph. What they do not describe is the **decision layer**, which has changed twelve times since (v3.0 → v13.1). Until now that record lived only in the `sharpen/crucible/version.py` module docstring plus the audit reports, so no single artifact showed a screen and the gate it feeds side by side. That is not a documentation nicety: the same defect — *a cheap upstream screen silently blocking the gate that is the actual test* — has now shipped four separate times (§12.5), and each instance was found by measurement long after the fact.
 
 **Authority order.** `version.py` is the per-bump *rationale* record (why, what class, whether CRU-1 is claimed) and remains canonical for that. The gates YAMLs are the *numeric* contract and remain canonical for thresholds — never restate a threshold in prose, here or anywhere. This section is the *assembled* view: what decides a verdict today, in order.
 

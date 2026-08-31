@@ -45,14 +45,14 @@ import yaml as _yaml
 ROOT = Path(__file__).resolve().parents[2]
 OUT = ROOT / "results" / "tailwind_v1"
 OUT.mkdir(parents=True, exist_ok=True)
-sys.path.insert(0, str(ROOT))                              # finrl_pro_ds (bare-script run)
+sys.path.insert(0, str(ROOT))                              # sharpen (bare-script run)
 sys.path.insert(0, str(Path(__file__).resolve().parent))   # sibling research modules
 
 import audit_tailwind_book as atb              # noqa: E402
 import portfolio_frontier as pf                # noqa: E402
 import xsec_momentum_falsification as mom      # noqa: E402
 
-from finrl_pro_ds.crypto.eval.statistics import block_bootstrap_sharpe_ci  # noqa: E402
+from sharpen.crypto.eval.statistics import block_bootstrap_sharpe_ci  # noqa: E402
 
 GATES_PATH = ROOT / "configs" / "tailwind_v1_stage4.gates.yaml"
 REPORT_PATH = OUT / "oos_report.json"

@@ -48,7 +48,7 @@ features:
   scales: [3, 15, 60]
   window_size: 30
   features_per_scale: 8
-  asset_class: "cfd_forex"             # FX-major (not "cfd_gold"); verify finrl_pro_ds.data.feature_engineering supports
+  asset_class: "cfd_forex"             # FX-major (not "cfd_gold"); verify sharpen.data.feature_engineering supports
 
 signal_gate:
   # XAUUSD S479-calibrated thresholds inherited as placeholders. Re-calibrate

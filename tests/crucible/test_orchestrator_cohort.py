@@ -7,16 +7,16 @@ import numpy as np
 import pandas as pd
 import pytest
 
-from finrl_pro_ds.crucible import (
+from sharpen.crucible import (
     OrchestratorStore,
     Substrate,
     TrialLedger,
     run_orchestrator_tick,
 )
-from finrl_pro_ds.crucible.orchestrator.substrate import PreparedSubstrate
-from finrl_pro_ds.signals.features import Panel
-from finrl_pro_ds.signals.generation.cohort import CohortConfig
-from finrl_pro_ds.signals.generation.fitness import FitnessConfig
+from sharpen.crucible.orchestrator.substrate import PreparedSubstrate
+from sharpen.signals.features import Panel
+from sharpen.signals.generation.cohort import CohortConfig
+from sharpen.signals.generation.fitness import FitnessConfig
 
 GATES = "configs/signal_eval.gates.yaml"
 T, N = 480, 12

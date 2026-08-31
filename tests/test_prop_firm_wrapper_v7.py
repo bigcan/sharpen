@@ -3,7 +3,7 @@ import gymnasium as gym
 import numpy as np
 import pytest
 
-from finrl_pro_ds.envs.prop_firm_wrapper import PropFirmWrapperV7
+from sharpen.envs.prop_firm_wrapper import PropFirmWrapperV7
 
 
 # ---------------------------------------------------------------------------

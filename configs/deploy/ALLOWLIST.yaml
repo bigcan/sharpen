@@ -1,7 +1,7 @@
 # Overlay key-allowlist — source of truth for firm/phase deploy overlays.
 #
 # Loaded by scripts/deploy_bare_metal.py (enforced pre-merge via
-# finrl_pro_ds.config_utils.deep_merge(..., allowlist=...)) and by
+# sharpen.config_utils.deep_merge(..., allowlist=...)) and by
 # scripts/validate_config.py::check_overlay_allowlist.
 #
 # Rationale: base training config carries the trained policy contract

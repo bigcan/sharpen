@@ -27,16 +27,16 @@ if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
-from finrl_pro_ds.signals.features import Panel  # noqa: E402
-from finrl_pro_ds.signals.multiplicity import Multiplicity  # noqa: E402
-from finrl_pro_ds.signals.scorecard import (  # noqa: E402
+from sharpen.signals.features import Panel  # noqa: E402
+from sharpen.signals.multiplicity import Multiplicity  # noqa: E402
+from sharpen.signals.scorecard import (  # noqa: E402
     Gates,
     evaluate_batch,
     to_markdown,
     write_scorecard,
 )
-from finrl_pro_ds.crucible.data import taiwan_smallcap_panel as tsp  # noqa: E402
-from finrl_pro_ds.signals.spec import SignalSpec  # noqa: E402
+from sharpen.crucible.data import taiwan_smallcap_panel as tsp  # noqa: E402
+from sharpen.signals.spec import SignalSpec  # noqa: E402
 import taiwan_smallcap_altdata_eval as base  # noqa: E402
 
 log = logging.getLogger("taiwan_smallcap_inst")

@@ -16,8 +16,8 @@ from unittest.mock import AsyncMock, MagicMock
 
 import numpy as np
 
-from finrl_pro_ds.crypto.execution.bybit_perp_broker import BybitPerpBroker
-from finrl_pro_ds.crypto.execution.exchange_perp_broker import ExchangePerpBroker
+from sharpen.crypto.execution.bybit_perp_broker import BybitPerpBroker
+from sharpen.crypto.execution.exchange_perp_broker import ExchangePerpBroker
 
 
 def _fake_position_record(notional: float = 5000.0, side: str = "long") -> dict:

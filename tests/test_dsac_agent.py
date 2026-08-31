@@ -9,9 +9,9 @@ import numpy as np
 import pytest
 import torch
 
-from finrl_pro_ds.agents.sac.distributional_networks import DistributionalSACCriticNetwork
-from finrl_pro_ds.agents.sac.dsac_agent import DistributionalSACAgent
-from finrl_pro_ds.agents.sac.sac_agent import SACAgent
+from sharpen.agents.sac.distributional_networks import DistributionalSACCriticNetwork
+from sharpen.agents.sac.dsac_agent import DistributionalSACAgent
+from sharpen.agents.sac.sac_agent import SACAgent
 
 
 # ---------------------------------------------------------------------------
@@ -76,7 +76,7 @@ class TestDSACConstruction:
         assert isinstance(dsac_agent.target_critic2, DistributionalSACCriticNetwork)
 
     def test_actor_is_inherited(self, dsac_agent):
-        from finrl_pro_ds.agents.sac.networks import SACActorNetwork
+        from sharpen.agents.sac.networks import SACActorNetwork
         assert isinstance(dsac_agent.actor, SACActorNetwork)
 
     def test_is_subclass_of_sac(self, dsac_agent):

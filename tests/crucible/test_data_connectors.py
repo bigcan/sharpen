@@ -10,8 +10,8 @@ from __future__ import annotations
 import numpy as np
 import pytest
 
-from finrl_pro_ds.crucible.catalog import DataCatalog
-from finrl_pro_ds.crucible.data import (
+from sharpen.crucible.catalog import DataCatalog
+from sharpen.crucible.data import (
     CftcCotConnector,
     DataConnector,
     FredConnector,

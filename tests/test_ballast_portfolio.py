@@ -12,7 +12,7 @@ import dataclasses
 import numpy as np
 import pytest
 
-from finrl_pro_ds.portfolio.long_only import (
+from sharpen.portfolio.long_only import (
     PortfolioConfig,
     _apply_name_cap,
     _apply_sector_cap,
@@ -21,7 +21,7 @@ from finrl_pro_ds.portfolio.long_only import (
     performance,
     target_weights,
 )
-from finrl_pro_ds.signals.features import make_synthetic_panel
+from sharpen.signals.features import make_synthetic_panel
 
 
 @pytest.fixture

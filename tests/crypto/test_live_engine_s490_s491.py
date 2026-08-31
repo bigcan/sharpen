@@ -25,7 +25,7 @@ import collections
 from datetime import datetime, timezone
 from pathlib import Path
 
-from finrl_pro_ds.crypto.live.live_engine import LiveTradingEngine
+from sharpen.crypto.live.live_engine import LiveTradingEngine
 
 
 # ---------------------------------------------------------------------------

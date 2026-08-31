@@ -1,8 +1,8 @@
 """Phase 4 Step 3 — CohortCard: verbatim verdict copy (CR-1), caps at PROMISING, JSON round-trip."""
 from __future__ import annotations
 
-from finrl_pro_ds.crucible.agentic.cohort_card import CohortCard, card_from_verdict
-from finrl_pro_ds.signals.generation.cohort_eval import CohortVerdict
+from sharpen.crucible.agentic.cohort_card import CohortCard, card_from_verdict
+from sharpen.signals.generation.cohort_eval import CohortVerdict
 
 
 def _verdict(verdict: str = "PROMISING") -> CohortVerdict:

@@ -15,14 +15,14 @@ import numpy as np
 import pandas as pd
 import pytest
 
-from finrl_pro_ds.envs.execution_overlay_factory import (
+from sharpen.envs.execution_overlay_factory import (
     drive_execution_episodes,
     evaluate_execution_overlay,
     make_execution_env,
     neutral_baseline_action,
     rebalance_steps_from_timestamps,
 )
-from finrl_pro_ds.envs.execution_scheduler_env import (
+from sharpen.envs.execution_scheduler_env import (
     MARKET_DIM,
     PRIVATE_DIM,
     ExecutionSchedulerEnv,

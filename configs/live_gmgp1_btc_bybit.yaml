@@ -28,7 +28,7 @@
 # Soak clock for S495 Step 6 (≥30-live-day calendar gate before V7 deletion)
 # RESETS at this cutover. Bybit testnet uses ccxt set_sandbox_mode(True) →
 # api-testnet.bybit.com. Auth via BYBIT_TESTNET_API_KEY/SECRET env vars (see
-# ExchangePerpBroker resolution at finrl_pro_ds/crypto/execution/exchange_perp_broker.py:114-122).
+# ExchangePerpBroker resolution at sharpen/crypto/execution/exchange_perp_broker.py:114-122).
 exchange:
   name: "bybit"                     # Bybit MAINNET DEMO TRADING (S527-cont; testnet abandoned — broken indexPrice + thin book)
   testnet: false                    # was true (S526 testnet) → false (S527-cont mainnet-demo cutover)

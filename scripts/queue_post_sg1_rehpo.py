@@ -58,7 +58,7 @@ logging.basicConfig(
 logger = logging.getLogger("queue")
 
 # HPs in SG-1 broad trial.params to copy into GMGP1 narrow-mode seed.
-# Matches `finrl_pro_ds/hpo/objective.py` SAC broad path (lines 109-128).
+# Matches `sharpen/hpo/objective.py` SAC broad path (lines 109-128).
 SAC_HP_KEYS = (
     "lr_actor", "lr_critic", "lr_alpha",
     "tau", "gamma", "initial_alpha",

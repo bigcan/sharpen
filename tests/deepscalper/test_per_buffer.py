@@ -9,7 +9,7 @@ Covers:
 import numpy as np
 import pytest
 
-from finrl_pro_ds.agents.deepscalper.per_buffer import PrioritizedReplayBuffer, SumTree
+from sharpen.agents.deepscalper.per_buffer import PrioritizedReplayBuffer, SumTree
 
 # ---------------------------------------------------------------------------
 # 1. SumTree Unit Tests
@@ -228,7 +228,7 @@ class TestPrioritizedReplayBuffer:
 
 def _make_per_agent():
     """Create a BDQ agent with PER enabled for testing."""
-    from finrl_pro_ds.agents.deepscalper.bdq_agent import DeepScalperBDQ
+    from sharpen.agents.deepscalper.bdq_agent import DeepScalperBDQ
 
     network_config = {
         "micro_config": {"input_size": 30, "private_input_size": 5,
@@ -372,8 +372,8 @@ class TestBDQWithPER:
 
     def test_backward_compat_no_per(self):
         """Agent with use_per=False should use FlatReplayBuffer."""
-        from finrl_pro_ds.agents.deepscalper.bdq_agent import DeepScalperBDQ
-        from finrl_pro_ds.agents.deepscalper.flat_replay_buffer import FlatReplayBuffer
+        from sharpen.agents.deepscalper.bdq_agent import DeepScalperBDQ
+        from sharpen.agents.deepscalper.flat_replay_buffer import FlatReplayBuffer
 
         network_config = {
             "micro_config": {"input_size": 30, "private_input_size": 5,

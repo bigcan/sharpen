@@ -16,8 +16,8 @@ from pathlib import Path
 import numpy as np
 import pytest
 
-from finrl_pro_ds.envs.allocator_factory import linear_core_weights
-from finrl_pro_ds.paper import (
+from sharpen.envs.allocator_factory import linear_core_weights
+from sharpen.paper import (
     ParityHarness,
     evaluate_paper_soak_gates,
     serialize_verdict,
@@ -128,7 +128,7 @@ def test_parity_real_etf_data(cfg, gates_cfg):
     """Parity ≈ 0 on the real validated ETF universe (exercises NaN/warmup/zero-price
     and extreme-participation paths the synthetic data does not)."""
     try:
-        from finrl_pro_ds.data import cross_asset_loader as loader
+        from sharpen.data import cross_asset_loader as loader
         data = loader.load_cross_asset_data(cfg)            # offline: uses the cached clean parquet
         close = data["close"]
         arrays = loader.build_allocator_arrays(

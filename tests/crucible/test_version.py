@@ -7,7 +7,7 @@ from pathlib import Path
 
 import pytest
 
-from finrl_pro_ds.crucible.version import (
+from sharpen.crucible.version import (
     CRUCIBLE_BASELINE_VERSION,
     CRUCIBLE_VERSION,
     gates_hash,

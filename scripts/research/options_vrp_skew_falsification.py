@@ -34,14 +34,14 @@ import numpy as np
 import pandas as pd
 import yaml
 
-from finrl_pro_ds.crypto.data import deribit_options_loader as dol
-from finrl_pro_ds.crypto.data import tardis_options_chain_loader as tcl
-from finrl_pro_ds.crypto.eval.statistics import (
+from sharpen.crypto.data import deribit_options_loader as dol
+from sharpen.crypto.data import tardis_options_chain_loader as tcl
+from sharpen.crypto.eval.statistics import (
     block_bootstrap_sortino_ci,
     sortino_ratio,
 )
-from finrl_pro_ds.crypto.features import options_vol_features as ovf
-from finrl_pro_ds.crypto.options_pricing import leg_delta, leg_price, leg_vega
+from sharpen.crypto.features import options_vol_features as ovf
+from sharpen.crypto.options_pricing import leg_delta, leg_price, leg_vega
 
 logger = logging.getLogger(__name__)
 RESULTS_DIR = Path("results/options_vrp")

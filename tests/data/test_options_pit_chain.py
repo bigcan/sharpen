@@ -14,8 +14,8 @@ from __future__ import annotations
 import numpy as np
 import pandas as pd
 
-from finrl_pro_ds.crypto.data import deribit_options_loader as dol
-from finrl_pro_ds.crypto.features import options_vol_features as ovf
+from sharpen.crypto.data import deribit_options_loader as dol
+from sharpen.crypto.features import options_vol_features as ovf
 
 
 def test_to_ms_roundtrip_is_utc():

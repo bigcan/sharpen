@@ -17,7 +17,7 @@ Formally falsified so far: BTC only (n=1 clean asset — gold died of data corru
 
 ## 2. Why this is the right cheap test
 
-- Reuses the **actual de-leaked feature pipeline**: `finrl_pro_ds/data/multiscale_handler.py` (`_resample_ohlcv`, `_compute_scale_features`, and the X2-causal `_scale_index_map` searchsorted fix at `multiscale_handler.py:360-370`). Zero feature reimplementation ⇒ no fidelity gap between probe and architecture.
+- Reuses the **actual de-leaked feature pipeline**: `sharpen/data/multiscale_handler.py` (`_resample_ohlcv`, `_compute_scale_features`, and the X2-causal `_scale_index_map` searchsorted fix at `multiscale_handler.py:360-370`). Zero feature reimplementation ⇒ no fidelity gap between probe and architecture.
 - A regularized linear + gradient-boosted probe on the exact observation content is the **beat-linear gate floor** mandated by the Fable verdict: if the linear/GBM baseline finds nothing OOS on an asset, there is no sanctioned reason to point SAC at it. (Canary precedent: on BTC, trained SAC realized-IC matched the ~0 linear conclusion — RL did not find what linear missed.)
 - Cost: ~1 day wall-clock (data fetch + CPU probe), $0 GPU. A NO-GO kills the lever pre-GPU; a GO names the asset and bounds expectations before any training spend.
 

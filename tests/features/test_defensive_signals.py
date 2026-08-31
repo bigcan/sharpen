@@ -4,7 +4,7 @@ from __future__ import annotations
 import numpy as np
 import pandas as pd
 
-from finrl_pro_ds.features import defensive_signals as dfs
+from sharpen.features import defensive_signals as dfs
 
 _T = 500
 _TICKERS = ["A", "B", "C", "D", "E", "F"]

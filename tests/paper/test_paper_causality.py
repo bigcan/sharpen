@@ -12,7 +12,7 @@ from __future__ import annotations
 import numpy as np
 import pandas as pd
 
-from finrl_pro_ds.paper import ParityHarness
+from sharpen.paper import ParityHarness
 
 from .conftest import allocator_arrays
 

@@ -16,7 +16,7 @@ from statistics import NormalDist
 
 import numpy as np
 
-from finrl_pro_ds.crypto.eval.statistics import (
+from sharpen.crypto.eval.statistics import (
     block_bootstrap_sharpe_ci,
     block_bootstrap_sortino_ci,
     deflated_sharpe_ratio,
@@ -145,7 +145,7 @@ def test_block_bootstrap_sortino_none_on_short_series():
 def test_pbo_skill_free_population_near_half():
     """A skill-free population (pure noise) ⇒ the IS-best is random OOS ⇒ PBO ≈ 0.5."""
     import numpy as np
-    from finrl_pro_ds.crypto.eval.statistics import probability_of_backtest_overfitting
+    from sharpen.crypto.eval.statistics import probability_of_backtest_overfitting
     rng = np.random.default_rng(0)
     out = probability_of_backtest_overfitting(rng.standard_normal((1200, 40)), n_splits=10)
     assert out is not None and 0.30 <= out["pbo"] <= 0.70
@@ -155,7 +155,7 @@ def test_pbo_skill_free_population_near_half():
 def test_pbo_dominant_config_is_low():
     """One config consistently superior across all blocks ⇒ IS-best is also OOS-best ⇒ PBO low."""
     import numpy as np
-    from finrl_pro_ds.crypto.eval.statistics import probability_of_backtest_overfitting
+    from sharpen.crypto.eval.statistics import probability_of_backtest_overfitting
     rng = np.random.default_rng(1)
     m = rng.standard_normal((1200, 40))
     m[:, 0] += 0.25                                       # a genuine, persistent edge
@@ -165,7 +165,7 @@ def test_pbo_dominant_config_is_low():
 
 def test_pbo_degenerate_returns_none():
     import numpy as np
-    from finrl_pro_ds.crypto.eval.statistics import probability_of_backtest_overfitting
+    from sharpen.crypto.eval.statistics import probability_of_backtest_overfitting
     assert probability_of_backtest_overfitting(np.zeros((100, 1)), n_splits=10) is None   # N<2
     assert probability_of_backtest_overfitting(np.zeros((5, 10)), n_splits=10) is None     # T<n_splits
     assert probability_of_backtest_overfitting(np.zeros((100, 10)), n_splits=7) is None    # odd

@@ -54,31 +54,31 @@ import numpy as np
 ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT))
 
-from finrl_pro_ds.crucible.corrected_contract import (  # noqa: E402
+from sharpen.crucible.corrected_contract import (  # noqa: E402
     CorrectedConfig,
     corrected_contract_fitness,
     fresh_lord_level,
 )
-from finrl_pro_ds.signals.generation.config import (  # noqa: E402
+from sharpen.signals.generation.config import (  # noqa: E402
     load_generation_config,
     load_generation_meta,
 )
-from finrl_pro_ds.signals.generation.grammar import node_count, parse  # noqa: E402
-from finrl_pro_ds.signals.generation.evolve import (  # noqa: E402
+from sharpen.signals.generation.grammar import node_count, parse  # noqa: E402
+from sharpen.signals.generation.evolve import (  # noqa: E402
     _candidate_returns,
     _panel_market_returns,
     _passes_cheap_prefilter,
     _split,
 )
-from finrl_pro_ds.signals.generation.fitness import combination_fitness  # noqa: E402
+from sharpen.signals.generation.fitness import combination_fitness  # noqa: E402
 
 log = logging.getLogger("prereg_forensics")
 
 
 def build_us_equity(cfg, ek, meta):
     """Rebuild the panel + base book exactly as `crucible_orchestrator.prepare()` did."""
-    from finrl_pro_ds.crucible.data.us_equity_panel import build_us_equity_panel
-    from finrl_pro_ds.signals.generation.base_sleeves import us_equity_base_sleeves
+    from sharpen.crucible.data.us_equity_panel import build_us_equity_panel
+    from sharpen.signals.generation.base_sleeves import us_equity_base_sleeves
     panel = build_us_equity_panel()
     base_hold = meta.get("base_hold_horizon") or ek["hold_horizon"]
     base, _ = us_equity_base_sleeves(panel, hold_horizon=int(base_hold),

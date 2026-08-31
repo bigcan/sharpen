@@ -4,7 +4,7 @@ from __future__ import annotations
 import numpy as np
 import pytest
 
-from finrl_pro_ds.signals.library import operators as op
+from sharpen.signals.library import operators as op
 
 
 def test_delay_and_delta() -> None:

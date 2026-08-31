@@ -43,12 +43,12 @@ sys.path.insert(0, str(PROJECT_ROOT))
 
 import pandas as pd  # noqa: E402
 
-from finrl_pro_ds.crypto.analytics.crypto_report import (  # noqa: E402
+from sharpen.crypto.analytics.crypto_report import (  # noqa: E402
     CryptoPerformanceReport,
 )
-from finrl_pro_ds.crypto.data.crypto_array_builder import build_env_arrays  # noqa: E402
-from finrl_pro_ds.crypto.eval.statistics import calmar_ratio, sortino_ratio  # noqa: E402
-from finrl_pro_ds.crypto.execution.arbitrator import SoftmaxArbitrator  # noqa: E402
+from sharpen.crypto.data.crypto_array_builder import build_env_arrays  # noqa: E402
+from sharpen.crypto.eval.statistics import calmar_ratio, sortino_ratio  # noqa: E402
+from sharpen.crypto.execution.arbitrator import SoftmaxArbitrator  # noqa: E402
 from scripts.crypto_backtest_runner import (  # noqa: E402
     _compute_result_metrics,
     _evaluate_agent_on_env,
@@ -1011,7 +1011,7 @@ def main():
     try:
         import wandb
         if not os.environ.get("WANDB_DISABLED"):
-            from finrl_pro_ds.utils.naming import generate_run_name
+            from sharpen.utils.naming import generate_run_name
             run_name = args.run_name or generate_run_name(args.config or "sync_1h_hpo")
             tags = list(args.tags or []) + ["sync-1h", "hpo", "s166"]
             wandb.init(

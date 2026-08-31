@@ -2,7 +2,7 @@
 
 - **Workstream:** `C3_alpha_generation_base_sleeves`
 - **Subsystem:** Component 3 "cost-aware automated alpha generation" (AlphaForge mine→deflate→combine), advisory-only, harness caps at PROMISING.
-- **Trigger:** the two base sleeves a candidate must improve were switched from an inline TSMOM/reversal PROXY to the PRODUCTION linear-core streams (new module `finrl_pro_ds/signals/generation/base_sleeves.py`).
+- **Trigger:** the two base sleeves a candidate must improve were switched from an inline TSMOM/reversal PROXY to the PRODUCTION linear-core streams (new module `sharpen/signals/generation/base_sleeves.py`).
 - **Method:** Tier-2 deep lifecycle audit — finder + skeptic per pillar (GP1–GP8), skeptic-adjudicated severity. NOT diff-scoped; correctness re-derived regardless of what changed.
 - **Date:** 2026-06-30
 - **Prior verdicts re-tested (not trusted):** Math PASS (1 LOW), Tier-1 Audit PASS-WITH-NOTES (2 LOW), live noise calibration "0 PROMISING / 4,495 genomes".

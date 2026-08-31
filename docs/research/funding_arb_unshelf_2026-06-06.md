@@ -17,7 +17,7 @@ Artifacts: `scripts/research/funding_arb_carry_falsification.py`, `results/fundi
 
 ### 2.1 The env is causally CLEAN (the key distinction from the falsified directional strategies)
 
-Adversarial leak trace of `finrl_pro_ds/crypto/envs/funding_arb_env.py` + `crypto/data/crypto_array_builder.py` + `crypto/features/funding_arb_features.py` across all six LEAK-2 vectors — **no material look-ahead found (~96% confidence):**
+Adversarial leak trace of `sharpen/crypto/envs/funding_arb_env.py` + `crypto/data/crypto_array_builder.py` + `crypto/features/funding_arb_features.py` across all six LEAK-2 vectors — **no material look-ahead found (~96% confidence):**
 
 | Vector | Verdict | Evidence |
 |---|---|---|

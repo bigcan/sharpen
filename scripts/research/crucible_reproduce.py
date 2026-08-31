@@ -28,8 +28,8 @@ ROOT = Path(__file__).resolve().parents[2]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
-from finrl_pro_ds.crucible import RunManifest  # noqa: E402
-from finrl_pro_ds.crucible.reproduce import reproduce  # noqa: E402
+from sharpen.crucible import RunManifest  # noqa: E402
+from sharpen.crucible.reproduce import reproduce  # noqa: E402
 
 log = logging.getLogger("crucible_reproduce")
 

@@ -63,26 +63,26 @@ try:
 except ModuleNotFoundError:
     pass
 
-from finrl_pro_ds.crucible import DataCatalog  # noqa: E402
-from finrl_pro_ds.crucible.agentic.proposer import (  # noqa: E402
+from sharpen.crucible import DataCatalog  # noqa: E402
+from sharpen.crucible.agentic.proposer import (  # noqa: E402
     LibrarySeedProposer,
     ProposalContext,
 )
-from finrl_pro_ds.crucible.data.altdata_bridge import (  # noqa: E402
+from sharpen.crucible.data.altdata_bridge import (  # noqa: E402
     COT_TERMINAL_ASSET_CLASS,
     bridge_altdata_feature_slots,
 )
-from finrl_pro_ds.data.cross_asset_panel_loader import load_cross_asset_panel  # noqa: E402
-from finrl_pro_ds.signals.features import Panel  # noqa: E402
-from finrl_pro_ds.signals.generation.base_sleeves import production_base_sleeves  # noqa: E402
-from finrl_pro_ds.signals.generation.cohort import measure_pool_diversity  # noqa: E402
-from finrl_pro_ds.signals.generation.cohort_eval import assemble_overlay_pool  # noqa: E402
-from finrl_pro_ds.signals.generation.config import (  # noqa: E402
+from sharpen.data.cross_asset_panel_loader import load_cross_asset_panel  # noqa: E402
+from sharpen.signals.features import Panel  # noqa: E402
+from sharpen.signals.generation.base_sleeves import production_base_sleeves  # noqa: E402
+from sharpen.signals.generation.cohort import measure_pool_diversity  # noqa: E402
+from sharpen.signals.generation.cohort_eval import assemble_overlay_pool  # noqa: E402
+from sharpen.signals.generation.config import (  # noqa: E402
     load_cohort_config,
     load_generation_config,
 )
-from finrl_pro_ds.signals.generation.fitness import _combined_book  # noqa: E402
-from finrl_pro_ds.signals.generation.grammar import available_terminals  # noqa: E402
+from sharpen.signals.generation.fitness import _combined_book  # noqa: E402
+from sharpen.signals.generation.grammar import available_terminals  # noqa: E402
 
 log = logging.getLogger("measure_altdata_pool_diversity")
 

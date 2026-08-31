@@ -1,4 +1,4 @@
-"""Tests for finrl_pro_ds/features/cross_asset_signals.py.
+"""Tests for sharpen/features/cross_asset_signals.py.
 
 Two guards (Phase 1 of the cross-sectional pivot, S553-cont-33):
   1. CAUSALITY TRIPWIRE (LEAK-2) — perturbing future bars must not move any signal at
@@ -17,7 +17,7 @@ import numpy as np
 import pandas as pd
 import pytest
 
-from finrl_pro_ds.features import cross_asset_signals as cas
+from sharpen.features import cross_asset_signals as cas
 
 ROOT = Path(__file__).resolve().parents[2]
 PRICE_CACHE = ROOT / "results" / "xsec_momentum" / "prices_daily.parquet"

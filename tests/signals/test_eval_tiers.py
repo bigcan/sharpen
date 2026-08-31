@@ -3,8 +3,8 @@ from __future__ import annotations
 
 import numpy as np
 
-from finrl_pro_ds.signals import Gates, SignalSpec
-from finrl_pro_ds.signals.eval_harness import (
+from sharpen.signals import Gates, SignalSpec
+from sharpen.signals.eval_harness import (
     FactorBook,
     _daily_ls_returns,
     _neutralized_eff,
@@ -12,7 +12,7 @@ from finrl_pro_ds.signals.eval_harness import (
     tier3_robustness,
     tier5_orthogonality,
 )
-from finrl_pro_ds.signals.features import Panel
+from sharpen.signals.features import Panel
 
 
 class Trail:

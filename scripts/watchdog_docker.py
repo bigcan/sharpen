@@ -39,7 +39,7 @@ import requests
 # scripts/ is not a package — fall back to a local set if running outside
 # the install path (e.g., ad-hoc invocations in dev sandboxes).
 try:
-    from finrl_pro_ds.monitoring.kill_file import CRIT_REASONS
+    from sharpen.monitoring.kill_file import CRIT_REASONS
 except ImportError:
     CRIT_REASONS = ("drift_crit", "agreement_decay_crit")
 
@@ -560,7 +560,7 @@ def _has_crit_kill_file(container) -> tuple[bool, dict | None]:
     `is_crit` is True iff the kill_file payload's `reason` is in
     `CRIT_REASONS` (operator-only re-enable per Protocol v2.2 §8.3).
     Currently `drift_crit` + `agreement_decay_crit`; the source of truth
-    is `finrl_pro_ds.monitoring.kill_file.CRIT_REASONS` so adding a new
+    is `sharpen.monitoring.kill_file.CRIT_REASONS` so adding a new
     reason there widens this guard automatically.
 
     F2-A-01 closure (S548-cont, 2026-05-22): previously `is_drift_crit`

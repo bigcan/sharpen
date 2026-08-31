@@ -2,7 +2,7 @@
 """Multi-sleeve (ETF momentum+rates ⊕ BTC options-VRP) paper-executor validation.
 
 Drives the N-sleeve fund-of-funds paper executor
-(:class:`finrl_pro_ds.paper.PortfolioExecutor`) END-TO-END on real data and emits the
+(:class:`sharpen.paper.PortfolioExecutor`) END-TO-END on real data and emits the
 pre-registered ``paper_soak`` verdict (now incl. the realized-returns diversification gate
 + the VRP short-vol tail monitor). Generalizes ``run_cross_asset_paper_validation.py`` to
 combine the ETF/IB account (momentum+rates, weight-combined, UNCHANGED) with the Deribit
@@ -37,13 +37,13 @@ from pathlib import Path
 import pandas as pd
 import yaml
 
-from finrl_pro_ds.crypto.data import deribit_options_loader as dol
-from finrl_pro_ds.crypto.data import options_array_builder as oab
-from finrl_pro_ds.data.cross_asset_loader import (
+from sharpen.crypto.data import deribit_options_loader as dol
+from sharpen.crypto.data import options_array_builder as oab
+from sharpen.data.cross_asset_loader import (
     build_two_sleeve_arrays,
     load_two_sleeve_data,
 )
-from finrl_pro_ds.paper import (
+from sharpen.paper import (
     PortfolioExecutor,
     evaluate_paper_soak_gates,
     serialize_verdict,

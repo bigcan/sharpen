@@ -30,8 +30,8 @@ import numpy as np
 import pandas as pd
 import pytest
 
-from finrl_pro_ds.envs.multi_asset_allocator_env import MultiAssetAllocatorEnv
-from finrl_pro_ds.features import cross_asset_signals as cas
+from sharpen.envs.multi_asset_allocator_env import MultiAssetAllocatorEnv
+from sharpen.features import cross_asset_signals as cas
 
 ROOT = Path(__file__).resolve().parents[2]
 PRICE_CACHE = ROOT / "results" / "xsec_momentum" / "prices_daily.parquet"

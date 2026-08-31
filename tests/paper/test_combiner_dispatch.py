@@ -15,7 +15,7 @@ import copy
 import numpy as np
 import pytest
 
-from finrl_pro_ds.paper import PortfolioExecutor, TwoSleeveExecutor
+from sharpen.paper import PortfolioExecutor, TwoSleeveExecutor
 
 
 def _with_combiner(cfg: dict, **sc) -> dict:

@@ -24,7 +24,7 @@ import pytest
 
 def _build_engine_for_pv_test(monkeypatch):
     """Minimal engine sufficient to drive `_update_portfolio_value`."""
-    from finrl_pro_ds.crypto.live.live_engine import LiveTradingEngine
+    from sharpen.crypto.live.live_engine import LiveTradingEngine
 
     monkeypatch.setenv("STRATEGY_NAME", "test-engine-s510")
     monkeypatch.setenv("METRICS_PORT", "0")

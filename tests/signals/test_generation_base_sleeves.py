@@ -18,9 +18,9 @@ from dataclasses import replace
 import numpy as np
 import pandas as pd
 
-from finrl_pro_ds.features import cross_asset_signals as cas
-from finrl_pro_ds.signals.features import Panel
-from finrl_pro_ds.signals.generation.base_sleeves import (
+from sharpen.features import cross_asset_signals as cas
+from sharpen.signals.features import Panel
+from sharpen.signals.generation.base_sleeves import (
     _book_from_target_weights,
     commodity_carry_sleeve_returns,
     defensive_sleeve_returns,
@@ -184,7 +184,7 @@ def test_production_sleeves_runtime_causality_check() -> None:
 def test_forward_returns_wide_masks_inactive_endpoints() -> None:
     """`_forward_returns_wide` NaNs a bar whose either endpoint is non-positive/NaN (Math LOW /
     GP1-04 / GP2-08), matching Panel.forward_returns — never a finite-but-bogus return."""
-    from finrl_pro_ds.signals.generation.base_sleeves import _forward_returns_wide
+    from sharpen.signals.generation.base_sleeves import _forward_returns_wide
     close = np.array([[10.0], [11.0], [np.nan], [12.0], [13.0]])
     fwd = _forward_returns_wide(close)
     assert np.isnan(fwd[1, 0]) and np.isnan(fwd[2, 0])       # both bars touching the NaN endpoint
@@ -324,7 +324,7 @@ def test_commodity_carry_current_bar_no_lookahead() -> None:
 def test_commodity_carry_close_injected_fetch_and_reindex() -> None:
     """`_load_commodity_carry_close` fetches the front+laddered ETFs on their own universe (injected
     fetch_fn) and reindexes the close to the panel clock — the rates-sleeve alignment pattern."""
-    from finrl_pro_ds.signals.generation.base_sleeves import _load_commodity_carry_close
+    from sharpen.signals.generation.base_sleeves import _load_commodity_carry_close
 
     panel = _panel()
     ec = _commodity_close()
@@ -418,7 +418,7 @@ def test_taiwan_tsmom_current_bar_no_lookahead() -> None:
 def test_taiwan_futures_close_injected_fetch_and_reindex() -> None:
     """`_load_taiwan_futures_close` fetches the futures on their own universe (injected fetch_fn)
     and reindexes the close to the panel clock — the rates-sleeve alignment pattern for TX/TE/TF."""
-    from finrl_pro_ds.signals.generation.base_sleeves import _load_taiwan_futures_close
+    from sharpen.signals.generation.base_sleeves import _load_taiwan_futures_close
 
     panel = _panel()
     fc = _tw_futures_close()

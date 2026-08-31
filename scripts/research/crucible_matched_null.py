@@ -47,9 +47,9 @@ if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
 import scripts.research.crucible_calibration as cal  # noqa: E402  (reuse the E1 pure-noise substrate)
-from finrl_pro_ds.signals.generation.evolve import evolve  # noqa: E402
-from finrl_pro_ds.signals.generation.fitness import FitnessConfig  # noqa: E402
-from finrl_pro_ds.signals.library._alpha_formulas import FORMULAS  # noqa: E402
+from sharpen.signals.generation.evolve import evolve  # noqa: E402
+from sharpen.signals.generation.fitness import FitnessConfig  # noqa: E402
+from sharpen.signals.library._alpha_formulas import FORMULAS  # noqa: E402
 
 log = logging.getLogger("crucible_matched_null")
 

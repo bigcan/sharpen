@@ -3,8 +3,8 @@ import numpy as np
 import pandas as pd
 import pytest
 
-from finrl_pro_ds.crypto.data.multiscale_crypto_handler import MultiScaleCryptoHandler
-from finrl_pro_ds.crypto.envs.crypto_perp_swing_env import CryptoPerpSwingEnv
+from sharpen.crypto.data.multiscale_crypto_handler import MultiScaleCryptoHandler
+from sharpen.crypto.envs.crypto_perp_swing_env import CryptoPerpSwingEnv
 
 
 # ---------------------------------------------------------------------------

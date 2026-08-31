@@ -222,8 +222,8 @@ safety:
 
 # ---------- ACTION DRIFT (v2.2 §8.2) ------------------------------------------------------
 # ⚠️ DECLARED, NOT YET CONSUMED ON THIS PATH. `ActionDriftTracker` is instantiated only in
-# finrl_pro_ds/crypto/live/live_engine.py:140 (the RL live engine). The TAILWIND executor
-# (finrl_pro_ds/paper/two_sleeve.py, driven by scripts/run_cross_asset_paper_validation.py)
+# sharpen/crypto/live/live_engine.py:140 (the RL live engine). The TAILWIND executor
+# (sharpen/paper/two_sleeve.py, driven by scripts/run_cross_asset_paper_validation.py)
 # has NO tracker call site, so these keys satisfy the protocol contract but nothing enforces
 # them at runtime yet. Wiring the consumer is a pre-attempt item for the Tier-2 audit — do
 # not read a green validate_config as "drift monitoring is live".

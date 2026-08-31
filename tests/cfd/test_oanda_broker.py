@@ -16,8 +16,8 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import httpx
 import pytest
 
-from finrl_pro_ds.cfd.execution.oanda_broker import OandaBroker
-from finrl_pro_ds.crypto.execution.exchange_perp_broker import RebalanceResult
+from sharpen.cfd.execution.oanda_broker import OandaBroker
+from sharpen.crypto.execution.exchange_perp_broker import RebalanceResult
 
 
 # ---------------------------------------------------------------------------

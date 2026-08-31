@@ -42,15 +42,15 @@ warnings.filterwarnings("ignore", category=RuntimeWarning)
 ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT))
 
-from finrl_pro_ds.data.equity_panel_loader import load_sp500_panel  # noqa: E402
-from finrl_pro_ds.signals import Gates  # noqa: E402
-from finrl_pro_ds.signals.eval_harness import (  # noqa: E402
+from sharpen.data.equity_panel_loader import load_sp500_panel  # noqa: E402
+from sharpen.signals import Gates  # noqa: E402
+from sharpen.signals.eval_harness import (  # noqa: E402
     _ls_weights,
     compute_scores,
     tier2_capturability,
 )
-from finrl_pro_ds.signals.features import Panel  # noqa: E402
-from finrl_pro_ds.signals.library.alphas101 import SIGNALS as ALPHAS  # noqa: E402
+from sharpen.signals.features import Panel  # noqa: E402
+from sharpen.signals.library.alphas101 import SIGNALS as ALPHAS  # noqa: E402
 
 BY = {s.spec.name: s for s in ALPHAS}
 # cont-73 lead: top-5 by 5d IC-IR (scorecard rank order) + the two cleanest low-turnover leads

@@ -68,7 +68,7 @@ def load_curve() -> tuple[list[tuple[float, float]], str]:
 
 def interp_mde(n_eff: float, pts: list[tuple[float, float]]) -> tuple[float | None, str]:
     """Log-log interpolation between MEASURED anchors. Off the top => refuse, mirroring
-    `finrl_pro_ds/crucible/orchestrator/substrate.interp_mde`, which returns +inf there because a
+    `sharpen/crucible/orchestrator/substrate.interp_mde`, which returns +inf there because a
     power law extrapolated past the grid UNDER-states MDE and fails OPEN."""
     if not pts:
         return None, "no_curve"

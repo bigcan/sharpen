@@ -1,6 +1,6 @@
 # TAILWIND-v1 — Prop-firm challenge simulator (Fable review item 1)
 
-**Date:** 2026-07-02 · **Engine:** `finrl_pro_ds/prop/challenge_simulator.py` (+ tests
+**Date:** 2026-07-02 · **Engine:** `sharpen/prop/challenge_simulator.py` (+ tests
 `tests/prop/test_challenge_simulator.py`, 11 green) · **Runner:**
 `scripts/research/run_challenge_simulator.py` · **Rules:** `configs/prop_firm_rules.yaml`
 (✅ VERIFIED 2026-07-02 vs official pages — see "Rules verified" below) · **Artifact:**

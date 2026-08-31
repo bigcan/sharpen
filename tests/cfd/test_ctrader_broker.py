@@ -11,8 +11,8 @@ from unittest.mock import patch
 
 import pytest
 
-from finrl_pro_ds.cfd.execution.ctrader_broker import CTraderBroker
-from finrl_pro_ds.crypto.execution.exchange_perp_broker import (
+from sharpen.cfd.execution.ctrader_broker import CTraderBroker
+from sharpen.crypto.execution.exchange_perp_broker import (
     OrderResult,
     RebalanceResult,
 )

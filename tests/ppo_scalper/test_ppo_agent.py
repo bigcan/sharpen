@@ -55,7 +55,7 @@ def batch_data(network_config):
 
 @pytest.fixture
 def ppo_network(network_config):
-    from finrl_pro_ds.agents.ppo_scalper.networks import PPOActorCritic
+    from sharpen.agents.ppo_scalper.networks import PPOActorCritic
     return PPOActorCritic(**network_config)
 
 
@@ -141,7 +141,7 @@ class TestRolloutBuffer:
 
     def test_store_and_gae(self):
         """Test storing data and computing GAE."""
-        from finrl_pro_ds.agents.ppo_scalper.rollout_buffer import RolloutBuffer
+        from sharpen.agents.ppo_scalper.rollout_buffer import RolloutBuffer
 
         T, B = 8, 2
         buf = RolloutBuffer(
@@ -178,7 +178,7 @@ class TestRolloutBuffer:
 
     def test_minibatch_iteration(self):
         """Test minibatch iterator yields correct shapes."""
-        from finrl_pro_ds.agents.ppo_scalper.rollout_buffer import RolloutBuffer
+        from sharpen.agents.ppo_scalper.rollout_buffer import RolloutBuffer
 
         T, B = 16, 2
         buf = RolloutBuffer(
@@ -212,7 +212,7 @@ class TestRolloutBuffer:
 
     def test_reset(self):
         """Test buffer reset."""
-        from finrl_pro_ds.agents.ppo_scalper.rollout_buffer import RolloutBuffer
+        from sharpen.agents.ppo_scalper.rollout_buffer import RolloutBuffer
 
         buf = RolloutBuffer(4, 1, (15, 30), (15, 5), (15,))
 
@@ -241,7 +241,7 @@ class TestPPOAgent:
 
     def test_predict_interface(self, network_config):
         """Test PPOAgent.predict returns correct types."""
-        from finrl_pro_ds.agents.ppo_scalper.ppo_agent import PPOAgent
+        from sharpen.agents.ppo_scalper.ppo_agent import PPOAgent
 
         agent = PPOAgent(
             network_config=network_config,
@@ -265,7 +265,7 @@ class TestPPOAgent:
 
     def test_stateless_agent(self, network_config):
         """V5: Agent should have no hidden state (stateless MLP)."""
-        from finrl_pro_ds.agents.ppo_scalper.ppo_agent import PPOAgent
+        from sharpen.agents.ppo_scalper.ppo_agent import PPOAgent
 
         agent = PPOAgent(
             network_config=network_config,
@@ -288,7 +288,7 @@ class TestPPOAgent:
 
     def test_save_load(self, network_config, tmp_path):
         """Test checkpoint save/load."""
-        from finrl_pro_ds.agents.ppo_scalper.ppo_agent import PPOAgent
+        from sharpen.agents.ppo_scalper.ppo_agent import PPOAgent
 
         agent = PPOAgent(
             network_config=network_config,
@@ -315,7 +315,7 @@ class TestPPOAgent:
 
     def test_checkpoint_architecture_mismatch(self, network_config, tmp_path):
         """AUDIT FIX C4: V4→V5 checkpoint mismatch should not crash."""
-        from finrl_pro_ds.agents.ppo_scalper.ppo_agent import PPOAgent
+        from sharpen.agents.ppo_scalper.ppo_agent import PPOAgent
 
         # Save with LSTM encoder (simulates V4 checkpoint)
         lstm_config = dict(network_config)
@@ -353,7 +353,7 @@ class TestEncoderTypeRegression:
     @pytest.mark.parametrize("encoder_type", ["mlp", "lstm"])
     def test_encoder_forward(self, encoder_type):
         """Both encoder types should produce correct output shapes."""
-        from finrl_pro_ds.agents.ppo_scalper.networks import PPOActorCritic
+        from sharpen.agents.ppo_scalper.networks import PPOActorCritic
 
         config = {
             "micro_config": {
@@ -386,7 +386,7 @@ class TestEncoderTypeRegression:
     @pytest.mark.parametrize("encoder_type", ["mlp", "lstm"])
     def test_encoder_evaluate_actions(self, encoder_type):
         """Both encoder types should work with evaluate_actions."""
-        from finrl_pro_ds.agents.ppo_scalper.networks import PPOActorCritic
+        from sharpen.agents.ppo_scalper.networks import PPOActorCritic
 
         config = {
             "micro_config": {

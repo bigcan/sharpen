@@ -3,9 +3,9 @@ from __future__ import annotations
 
 import numpy as np
 
-from finrl_pro_ds.signals import make_synthetic_panel
-from finrl_pro_ds.signals.eval_harness import assert_causal
-from finrl_pro_ds.signals.library.tradingview import SIGNALS, _roc
+from sharpen.signals import make_synthetic_panel
+from sharpen.signals.eval_harness import assert_causal
+from sharpen.signals.library.tradingview import SIGNALS, _roc
 
 
 def test_tv_signals_causal_and_compute() -> None:

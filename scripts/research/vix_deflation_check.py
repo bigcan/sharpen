@@ -4,7 +4,7 @@ import pandas as pd
 from scipy import stats
 
 sys.path.insert(0, r'C:\FinRL\FinRL-Pro_DS')
-from finrl_pro_ds.crypto.eval.statistics import block_bootstrap_sharpe_ci
+from sharpen.crypto.eval.statistics import block_bootstrap_sharpe_ci
 
 src = open(r'C:\FinRL\FinRL-Pro_DS\scripts\research\vix_voltarget_eval.py', encoding='utf-8').read()
 exec(src.split('def main')[0])

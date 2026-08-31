@@ -24,7 +24,7 @@ REPO = Path("/workspace/DeepScalper")
 sys.path.insert(0, str(REPO))
 os.environ.setdefault("WANDB_MODE", "disabled")
 
-from finrl_pro_ds.hpo.env_factory import make_env  # noqa: E402
+from sharpen.hpo.env_factory import make_env  # noqa: E402
 
 CONFIG = REPO / "configs/sg1_btc_velotrade_l1_multiseed_extended.yaml"
 CHECKPOINT = REPO / "checkpoints/sg1-btc-velotrade-l1-multiseed-extended-seed2025_20260505_074754/checkpoint_final.pth"
@@ -41,7 +41,7 @@ def _build_backtest_config(cfg: dict) -> dict:
 
 
 def _build_agent(cfg: dict, device: str):
-    from finrl_pro_ds.agents.sac.sac_agent import SACAgent
+    from sharpen.agents.sac.sac_agent import SACAgent
 
     network_config = dict(cfg.get("network", {}))
     scales = cfg.get("features", {}).get("scales", cfg.get("env", {}).get("scales", [3, 15, 60]))

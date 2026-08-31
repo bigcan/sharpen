@@ -4,8 +4,8 @@ from __future__ import annotations
 
 import numpy as np
 
-from finrl_pro_ds.agents.common.flat_replay_buffer import FlatReplayBuffer
-from finrl_pro_ds.envs.dsr import DSRCalculator
+from sharpen.agents.common.flat_replay_buffer import FlatReplayBuffer
+from sharpen.envs.dsr import DSRCalculator
 
 
 # ── Path 1: Regime-Balanced Replay ──────────────────────────────────────────

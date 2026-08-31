@@ -48,7 +48,7 @@ def _build_minimal_config(post_restart_cooldown: int = 0) -> dict:
 
 def _build_engine(config: dict, risk_manager, monkeypatch):
     """Wire the engine with all non-target deps short-circuited."""
-    from finrl_pro_ds.crypto.live.live_engine import LiveTradingEngine
+    from sharpen.crypto.live.live_engine import LiveTradingEngine
 
     monkeypatch.setenv("STRATEGY_NAME", "test-engine-s542-cooldown")
     monkeypatch.setenv("METRICS_PORT", "0")

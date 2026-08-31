@@ -11,7 +11,7 @@
 # meta-cadence, LEAK-2 safe). The executor shadows the COMBINED env-render book.
 #
 # NOT a training config (no HPO/RL — the campaign verdict was "ship linear, RL NOT
-# justified"). Consumed by finrl_pro_ds.paper.TwoSleeveExecutor + the paper_soak gates.
+# justified"). Consumed by sharpen.paper.TwoSleeveExecutor + the paper_soak gates.
 #
 # CAPITAL GATE (do not skip): an actual paper-capital soak still requires the report's
 # step-1 Tier-2 deep-lifecycle audit (deep_strategy_audit / audit_two_sleeve_book.py) +

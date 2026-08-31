@@ -12,8 +12,8 @@ from __future__ import annotations
 
 import numpy as np
 
-from finrl_pro_ds.crucible.data import assert_asof_join_causal, validate_series
-from finrl_pro_ds.crucible.data.twse_institutional import TwseInstitutionalConnector
+from sharpen.crucible.data import assert_asof_join_causal, validate_series
+from sharpen.crucible.data.twse_institutional import TwseInstitutionalConnector
 
 _FIELDS = [
     "證券代號", "證券名稱",

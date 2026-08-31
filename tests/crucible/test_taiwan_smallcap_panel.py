@@ -24,7 +24,7 @@ import numpy as np
 import pandas as pd
 import pytest
 
-from finrl_pro_ds.crucible.data import taiwan_smallcap_panel as tsp
+from sharpen.crucible.data import taiwan_smallcap_panel as tsp
 
 _TICKERS = ("1101", "2330", "6505")
 _N_DAYS = 260

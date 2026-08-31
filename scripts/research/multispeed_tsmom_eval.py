@@ -22,7 +22,7 @@ ROOT = Path(__file__).resolve().parents[2]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
-from finrl_pro_ds.crypto.eval.statistics import block_bootstrap_sharpe_ci  # noqa: E402
+from sharpen.crypto.eval.statistics import block_bootstrap_sharpe_ci  # noqa: E402
 
 PANEL = ROOT / "data" / "raw" / "cross_asset_panel" / "ohlcv_daily.parquet"
 ANN = 252
