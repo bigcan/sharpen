@@ -22,6 +22,7 @@ from __future__ import annotations
 
 import numpy as np
 import pandas as pd
+import pytest
 
 import scripts.research.vwap_avwap_falsification as vw
 import scripts.research.vwap_intraday_falsification as vwi
@@ -98,6 +99,14 @@ def test_cost_is_one_way_and_monotonic():
 
 
 # --- 4. the verdict is NO_GO AND is not a return-suppression artifact --------------
+# Unlike its three siblings, this one re-runs the probe against the CACHED panel rather
+# than a synthetic one. `results/` is gitignored, so the file exists only in the main
+# checkout and this test failed in EVERY worktree — red for where it ran, not for what
+# the code does. Skip on absence so the verdict is still pinned wherever the panel is.
+@pytest.mark.skipif(
+    not vw.DATA.exists(),
+    reason=f"cached panel absent (gitignored `results/`): {vw.DATA}",
+)
 def test_swing_verdict_no_go_and_not_suppression_bug():
     v = vw.main()                                         # reads the cached clean panel
     assert v["decision"] == "NO_GO"
