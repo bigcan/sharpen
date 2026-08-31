@@ -7,6 +7,16 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
+# The overlay's client is an optional dependency: `prism_client` ships INSIDE the
+# live-trading image (`docker/live/prism_sdk/`, an installable package) and is not
+# part of the workstation env. Every test here patches "prism_client.PRISMClient",
+# which resolves the module at call time -> 12 hard ModuleNotFoundError failures
+# rather than a signal about this code. Skip cleanly when the SDK is absent so the
+# tests still run wherever it IS installed (`pip install -e docker/live/prism_sdk`).
+# PRISM itself is falsified (S413+, `prism.enabled: false` everywhere); this keeps
+# the retired-but-deployed overlay testable without a red local suite.
+pytest.importorskip("prism_client", reason="prism_client SDK not installed (docker/live/prism_sdk)")
+
 
 def _call(overlay):
     """Drive the async ``get_position_multiplier`` to completion.

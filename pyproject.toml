@@ -74,7 +74,18 @@ include = ["finrl_pro_ds*"]
 [tool.pytest.ini_options]
 # `-m "not integration"` keeps bare `pytest` off the network: the integration
 # tests talk to live exchange testnets. Run them explicitly with `-m integration`.
-addopts = "-q -m 'not integration'"
+#
+# `not slow` is what makes a bare `pytest` terminate at all. The "run-size hang" filed
+# 2026-08-01 (S553-cont-149) as a suspected thread/handle/memory limit was these 25
+# tests: several shell out via `subprocess.run` to a full synthetic genetic search and
+# run it TWICE (tests/crucible/test_reproducibility.py, test_reproduce_p5.py — each
+# exceeds 400 s ALONE, so it is not a run-size effect). That also explains why
+# `--timeout --timeout-method=thread` never fired: the thread method raises in the main
+# thread, which is blocked inside `subprocess.run` and cannot take the exception until
+# the child returns. The `slow` marker already existed and every one of these files
+# documents itself as "skipped under -m 'not slow'" — it simply was not deselected here.
+# Cost of the exclusion is 25 of 3178 tests (0.8%). Run them with `-m slow`.
+addopts = "-q -m 'not integration and not slow'"
 # pytest-asyncio is a hard requirement — without it the `asyncio`-marked
 # coroutine tests are collected but never executed (silently, via a warning).
 asyncio_mode = "strict"

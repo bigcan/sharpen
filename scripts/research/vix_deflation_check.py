@@ -14,7 +14,9 @@ VIXC = _P('C:/FinRL/FinRL-Pro_DS/data/raw/cross_asset_panel/n4_vix_yf.parquet')
 df = pd.read_parquet(VIXC)
 df['date'] = pd.to_datetime(df['date'])
 df = df.set_index('date').sort_index()
-n1, n2, gross, w = build(df, use_signal=True)
+# `build` is injected by the exec() of vix_voltarget_eval.py above (defined at its
+# line 48, ahead of `def main`), so ruff cannot see the binding. Verified present.
+n1, n2, gross, w = build(df, use_signal=True)  # noqa: F821
 
 N = 22
 print("Multiplicity-adjusted confidence intervals (block bootstrap, 20k draws)")
