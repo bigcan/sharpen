@@ -65,7 +65,7 @@ dev = [
 ]
 
 [project.urls]
-Homepage = "https://github.com/AI4Finance-Foundation/FinRL"
+Homepage = "https://github.com/Chiwin-Technology/sharpen"
 
 [tool.setuptools.packages.find]
 where = ["."]
