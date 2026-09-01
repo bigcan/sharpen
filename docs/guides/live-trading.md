@@ -86,8 +86,8 @@ Containers run on a remote desktop via the `finrl-desktop` Docker context.
 |---|---|
 | `setup <ip> [user]` | Create the SSH-based Docker context for the remote desktop |
 | `context [local\|desktop]` | Switch target host |
-| `build` | Build the shared engine image |
-| `up [profile\|service]` | Start strategies — profiles: `ib`, `crypto`, `ctrader`, `monitoring`, `all` |
+| `build [service]` | Build an image; defaults to `engine-base`. Buildable: `engine-base`, `ibgateway`, `prometheus`, `grafana`, `watchdog`, `agent-memory-backup`, `prism-db`, `prism-api` |
+| `up [profile\|service]` | Start strategies. Profiles: `ib`, `crypto`, `ctrader`, `oanda`, `velotrade`, `sg1`, `hl-recorder`, `monitoring`, `memory`, `prism`, `retired`, `all`. Anything else is treated as a service name |
 | `down` / `stop <svc>` / `restart <svc>` | Lifecycle |
 | `ps` | Container status |
 | `logs <svc> [-f]` | Logs |
@@ -103,8 +103,8 @@ Compose files and Dockerfiles are under `docker/live/`.
 > misconfigured strategy.
 
 > **Prometheus and Grafana configuration is baked in too.** Edit the source under
-> `docker/live/` and rebuild (`--profile monitoring build`); editing inside a running
-> container changes nothing that survives.
+> `docker/live/` and rebuild that image — `./scripts/manage_strategies.sh build grafana`.
+> Editing inside a running container changes nothing that survives.
 
 ---
 
