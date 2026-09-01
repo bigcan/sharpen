@@ -88,7 +88,7 @@ This is the most dangerous class of failure here, because exit code 0 hides it.
 |---|---|---|
 | `docker ps` shows no trading containers | You are talking to local Docker Desktop | `./scripts/manage_strategies.sh ps`, or `docker --context finrl-desktop ps` |
 | Container starts but sees no files | **Bind mounts fail silently on Docker Desktop for Windows** | Bake files in with `COPY` at build time |
-| Prometheus/Grafana config changes do nothing | Configs are baked into the images | Edit under `docker/live/` and rebuild `--profile monitoring build` |
+| Prometheus/Grafana config changes do nothing | Configs are baked into the images | Edit under `docker/live/`, then `./scripts/manage_strategies.sh build grafana` (or `prometheus`) |
 | Strategy connects but never trades | Bar clock, market hours, or the kill file | Check the trading-aware health JSON, not process liveness |
 | Live results diverge from backtest | Sim↔live parity gap — usually a feature reading a bar live cannot see | `scripts/cross_validate_live.py`, `sharpen/paper/parity_harness.py` |
 | A strategy will not stop | Kill file not writable **from inside** the container | Verify the `safety.kill_file` path in the container's own filesystem |
