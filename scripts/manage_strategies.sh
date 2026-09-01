@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# FinRL Multi-Strategy Manager
+# Sharpen Multi-Strategy Manager
 #
 # Manages Docker-based trading strategies on a remote desktop host.
 # Run from your dev laptop — uses Docker context for remote execution.
@@ -8,7 +8,8 @@
 #   ./scripts/manage_strategies.sh setup <desktop-ip> [ssh-user]
 #
 # Usage:
-#   ./scripts/manage_strategies.sh build          # Build engine image
+#   ./scripts/manage_strategies.sh build          # Build the shared engine image
+#   ./scripts/manage_strategies.sh build grafana  # Build a specific image
 #   ./scripts/manage_strategies.sh up             # Start all strategies
 #   ./scripts/manage_strategies.sh up ib          # Start IB strategies only
 #   ./scripts/manage_strategies.sh up gmgp1-gold  # Start one strategy
@@ -48,13 +49,17 @@ DC="$DC_BIN -f $COMPOSE_BASE -f $COMPOSE_PRISM -f $COMPOSE_DESKTOP"
 
 usage() {
     cat <<'EOF'
-FinRL Multi-Strategy Manager
+Sharpen Multi-Strategy Manager
 
 Commands:
   setup <ip> [user]     Set up Docker context for remote desktop
   context [local|desktop] Switch Docker context
-  build                 Build the shared engine image
-  up [profile|service]  Start strategies (profile: ib, crypto, ctrader, monitoring, all; or service name)
+  build [service]       Build an image (default: engine-base). Buildable:
+                        engine-base, ibgateway, prometheus, grafana, watchdog,
+                        agent-memory-backup, prism-db, prism-api
+  up [profile|service]  Start strategies. Profiles: ib, crypto, ctrader, oanda,
+                        velotrade, sg1, hl-recorder, monitoring, memory, prism,
+                        retired, all. Anything else is treated as a service name.
   down                  Stop all strategies
   stop <service>        Stop a single strategy
   restart <service>     Restart a single strategy
@@ -92,10 +97,10 @@ cmd_setup() {
     echo "     Then: Start-Service sshd; Set-Service -Name sshd -StartupType Automatic"
     echo "  3. Set up SSH key auth (from this laptop):"
     echo "     ssh-copy-id ${user}@${ip}"
-    echo "  4. Clone/sync the project on desktop:"
-    echo "     git clone <repo> C:\\FinRL\\FinRL-Pro_DS"
+    echo "  4. Clone/sync the project on desktop (any path; example uses C:\\Sharpen):"
+    echo "     git clone <repo-url> C:\\Sharpen"
     echo "  5. Create .env on desktop:"
-    echo "     cd C:\\FinRL\\FinRL-Pro_DS\\docker\\live && cp .env.example .env"
+    echo "     cd C:\\Sharpen\\docker\\live && cp .env.example .env"
     echo "     # Fill in credentials"
     echo ""
     echo "To activate: ./scripts/manage_strategies.sh context desktop"
@@ -129,8 +134,13 @@ cmd_context() {
 }
 
 cmd_build() {
-    echo "Building finrl-live-engine image..."
-    $DC build engine-base
+    # Previously ignored its argument entirely: `build grafana` rebuilt
+    # engine-base and reported success. Any service with a build context is
+    # valid -- needed after editing the Prometheus/Grafana/watchdog configs,
+    # which are COPYed in at build time rather than bind-mounted.
+    local target="${1:-engine-base}"
+    echo "Building: $target"
+    $DC build "$target"
     echo "Build complete."
 }
 
@@ -140,7 +150,11 @@ cmd_up() {
     if [ -z "$target" ]; then
         echo "Starting all strategies..."
         $DC --profile all up -d
-    elif [[ "$target" == "ib" || "$target" == "crypto" || "$target" == "ctrader" || "$target" == "velotrade" || "$target" == "sg1" || "$target" == "monitoring" || "$target" == "prism" || "$target" == "all" ]]; then
+    # Keep in sync with the `profiles:` keys in docker/live/docker-compose*.yaml.
+    # A profile missing here falls through and is treated as a SERVICE name,
+    # which fails with a confusing "no such service". `build` is deliberately
+    # excluded -- that profile is what the `build` command targets.
+    elif [[ "$target" == "ib" || "$target" == "crypto" || "$target" == "ctrader" || "$target" == "oanda" || "$target" == "velotrade" || "$target" == "sg1" || "$target" == "hl-recorder" || "$target" == "monitoring" || "$target" == "memory" || "$target" == "prism" || "$target" == "retired" || "$target" == "all" ]]; then
         echo "Starting profile: $target"
         $DC --profile "$target" up -d
     else
