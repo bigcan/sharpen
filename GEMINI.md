@@ -11,7 +11,7 @@ This document provides foundational mandates and technical specifications for Ge
 ## 1. Project Brief & Status
 - **Goal**: Profitable RL quant trading across asset classes (BTC, Gold, Crypto Perps, Funding Arb).
 - **Active Agent**: **SAC only** (Implicit Quantile Network (IQN), Branching Dueling Q-Network (BDQ), and PPO are present but none profitable yet).
-- **Live Direction**: Sole live edge = **cross-asset TSMOM** (linear time-series momentum across ~18 ETFs / 4 asset classes, net Sharpe ~0.60, low SPY correlation), currently gated at paper (DSR 0.918 < 0.95). Active R&D thrust = **Crucible** (`finrl_pro_ds/crucible/`, `crucible-v2.8`) — continuous agentic alpha-mining funnel (free-data connectors → pre-registered hypotheses → deflated eval → forward lockbox), built on the `finrl_pro_ds/signals/` DSL/eval funnel.
+- **Live Direction**: Sole live edge = **cross-asset TSMOM** (linear time-series momentum across ~18 ETFs / 4 asset classes, net Sharpe ~0.60, low SPY correlation), currently gated at paper (DSR 0.918 < 0.95). Active R&D thrust = **Crucible** (`sharpen/crucible/`, `crucible-v13.1`) — continuous agentic alpha-mining funnel (free-data connectors → pre-registered hypotheses → deflated eval → forward lockbox), built on the `sharpen/signals/` DSL/eval funnel.
 - **Other Workstreams**: GMGP1 SAC Gold 15m (FTMO/Velotrade contender, paper). **Retired/shelved** (do NOT present as active): Sync-1H crypto (pilot failure — retired), Funding-Arb (SHELVED, re-run only if funding > 8%/yr), MM-SAC / V8 (retired S442), PRISM (falsified), AlphaSeek (terminated NO-GO). The Polymarket prediction-market research thread has moved to its own repo, `Chiwin-Technology/polymarket-updown-research` — do not present it as present here.
 - **Reference State**: `.agent/memory/core.md` (Read at boot for active decisions). R&D log: `randd_log.md`.
 
@@ -27,7 +27,7 @@ This document provides foundational mandates and technical specifications for Ge
 ## 3. Core Mandates & Anti-Patterns
 
 ### Project Boundary
-Only modify `finrl_pro_ds/`, `scripts/`, `configs/`, `tests/`, `docs/`. Never touch `FinRLPodracer/` or `Podracer/`.
+Only modify `sharpen/`, `scripts/`, `configs/`, `tests/`, `docs/`. Never touch `FinRLPodracer/` or `Podracer/`.
 
 ### Critical Invariants
 | ID | Rule |
@@ -61,16 +61,16 @@ Only modify `finrl_pro_ds/`, `scripts/`, `configs/`, `tests/`, `docs/`. Never to
 - **Logging**: Use `logging` or `MLOpsLogger`. Never use raw `print()`.
 
 ## 5. Project Map (Active vs. Legacy)
-- **`finrl_pro_ds/agents/sac/`**: **ACTIVE** (SAC Agent & Networks).
-- **`finrl_pro_ds/agents/deepscalper/`**: **LEGACY** (Do not extend).
-- **`finrl_pro_ds/envs/`**:
+- **`sharpen/agents/sac/`**: **ACTIVE** (SAC Agent & Networks).
+- **`sharpen/agents/deepscalper/`**: **LEGACY** (Do not extend).
+- **`sharpen/envs/`**:
     - `continuous_swing_env.py` (V7): **ACTIVE** (Continuous positions).
     - `market_making_env.py` (V8): **RETIRED** (S442 - MM-SAC workstream closed).
     - `deep_scalper_env.py` (V5) / `swing_scalper_env.py` (V6): **LEGACY** (Discrete actions, do not modify action spaces).
-- **`finrl_pro_ds/crypto/`**: Live Engine **ACTIVE**; Sync-1H **RETIRED** (pilot failure) and Funding-Arb **SHELVED** (re-run only if funding > 8%/yr).
-- **`finrl_pro_ds/signals/`**: **ACTIVE** (alpha-mining DSL + deflated 6-tier evaluation funnel — dependency layer under Crucible).
-- **`finrl_pro_ds/crucible/`**: **ACTIVE** (`crucible-v2.8` — continuous agentic alpha-mining: data connectors, agentic proposer/author, orchestrator, lockbox, governance. See `docs/claude_md_reference.md`).
-- **`finrl_pro_ds/data/multiscale_handler.py`**: **ACTIVE** (SAC/GMGP1 scaling).
+- **`sharpen/crypto/`**: Live Engine **ACTIVE**; Sync-1H **RETIRED** (pilot failure) and Funding-Arb **SHELVED** (re-run only if funding > 8%/yr).
+- **`sharpen/signals/`**: **ACTIVE** (alpha-mining DSL + deflated 6-tier evaluation funnel — dependency layer under Crucible).
+- **`sharpen/crucible/`**: **ACTIVE** (`crucible-v13.1` — continuous agentic alpha-mining: data connectors, agentic proposer/author, orchestrator, lockbox, governance. See `docs/claude_md_reference.md`).
+- **`sharpen/data/multiscale_handler.py`**: **ACTIVE** (SAC/GMGP1 scaling).
 
 ## 6. Env Contracts (ACTIVE)
 *All envs return raw numpy dicts, NOT Gymnasium wrappers — preserve this path.*
@@ -129,7 +129,7 @@ python scripts/collect_run.py --run_id <ID>
 python scripts/auto_collect_checkpoints.py   # Secure checkpoints to local/GCS
 
 # Quality Checks
-ruff check finrl_pro_ds && mypy finrl_pro_ds --ignore-missing-imports && pytest
+ruff check sharpen && mypy sharpen --ignore-missing-imports && pytest
 ```
 
 ### Docker & Live Trading

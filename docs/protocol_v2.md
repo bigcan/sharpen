@@ -532,11 +532,27 @@ Additive `sensitivity_audit` block alongside the v2.5 `bootstrap` / `legacy_upli
 
 ## 5. CLI Surface (`run_full_pipeline.py`)
 
+> ⚠ **TARGET STATE, NOT SHIPPED STATE.** This section specifies the staged DAG launcher the
+> monolithic flow is being refactored *into*. Verified 2026-09-01 against
+> `scripts/run_full_pipeline.py`: the flags `--hp-run`, `--seeds`, `--windows`, `--wf-run`,
+> `--upstream-run`, `--resume`, `--allow-cold-replay`, `--allow-env-drift` and
+> `--stage all` **do not exist**. `run_full_pipeline.py` today accepts `--config --agent
+> --tags --run_name --trials --steps --hpo_storage --backtest_only --checkpoint
+> --warm_start --seed --stage --skip_validate`, and stage fan-out is done by the dedicated
+> launchers (`scripts/launch_l1_multiseed.py`, `scripts/run_walk_forward.py`,
+> `scripts/<workstream>_ensemble_eval.py`). For commands that run today see
+> `docs/guides/rl-pipeline.md`. Treat the CLI rules below as the contract to build to.
+>
+> Stage names accepted by `--stage` (both here and in `validate_config.py`) are
+> `data-prep | hpo | l1-multiseed | ensemble-confirm | wf | oos | paper-deploy`. The prose
+> names used in the §1 taxonomy table ("walk-forward", "recent-oos") are descriptions, not
+> flag values, and are rejected by argparse.
+
 Refactor from current monolithic flow to staged DAG launcher:
 
 ```bash
-# Stage 0 — data prep (idempotent)
-python scripts/build_data_manifest.py --data data/xauusd_ctrader_15min.parquet
+# Stage 0 — data prep (idempotent). NOTE: the path is POSITIONAL; there is no --data flag.
+python scripts/build_data_manifest.py data/xauusd_ctrader_15min.parquet --write
 
 # Stage 1 — HPO (own WandB run)
 python scripts/run_full_pipeline.py --config configs/gmgp1_xauusd_ftmo_hpo.yaml \
