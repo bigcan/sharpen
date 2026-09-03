@@ -34,3 +34,8 @@ docker/live/**/*_crontab text eol=lf
 scripts/oss/phase1/LICENSE text eol=lf
 scripts/oss/phase1/NOTICE text eol=lf
 scripts/oss/phase1/DISCLAIMER.md text eol=lf
+
+# GitHub Actions parses these on a Linux runner; keep them LF like every other
+# file this repo pins, so a Windows checkout cannot introduce CRLF into CI config.
+.github/**/*.yml text eol=lf
+.github/**/*.yaml text eol=lf
