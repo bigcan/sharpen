@@ -30,7 +30,11 @@ dependencies = [
     "python-dotenv>=1.0.0",
     "kaggle>=1.5.16",
     "protobuf==3.20.1",
-    "rich>=14.0.0"
+    "rich>=14.0.0",
+    # HPO is a core Protocol-v2 stage and sharpen/hpo/ imports optuna at MODULE level.
+    # Undeclared until CI caught it 2026-09-03: `pip install -e .` produced a package
+    # whose `--stage hpo` could not import.
+    "optuna>=3.0"
 ]
 readme = "README.md"
 
@@ -57,6 +61,17 @@ distributed = [
 ]
 dev = [
     "pytest>=7.0",
+    # All four declared 2026-09-03 after CI collection failed on them. pytest-asyncio is
+    # called a hard requirement by the comment in [tool.pytest.ini_options] below yet was
+    # never listed, so a clean install silently SKIPPED every asyncio-marked test -- the
+    # exact failure that comment warns about.
+    "pytest-asyncio>=0.23",
+    # httpx: sharpen/cfd/execution/oanda_broker.py; seaborn: sharpen/analytics/wandb_evaluator.py.
+    # Both are MODULE-level imports inside the package, so they are arguably runtime deps;
+    # kept in dev to hold the base install small, matching how matplotlib is already scoped
+    # to the crypto extra. Revisit that placement as a set, not piecemeal.
+    "httpx>=0.27",
+    "seaborn>=0.13",
     "ruff>=0.1.8",
     "black>=23.12",
     "mypy>=1.7",
