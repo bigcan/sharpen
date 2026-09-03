@@ -21,15 +21,17 @@ defaults:
 
 jobs:
   test:
-    # windows-latest, NOT ubuntu. This suite is Windows-specific by construction and a
-    # Linux run is red for reasons that are not regressions: tests/test_memory_tools_*.py
-    # assert on `C:\FinRL\...` paths (the OSS publish filter already drops those three
-    # files as non-portable), and Linux resolves newer numpy/pandas that change array
-    # writeability and the default datetime unit. Measured on ubuntu-latest 2026-09-03:
-    # 56 failed / 3146 passed -- 24 "assignment destination is read-only", 4 M8[ns] vs
-    # M8[us] merge-key mismatches, 2 PosixPath-vs-WindowsPath, 1 strict XPASS.
-    # None of those are defects this gate should be reporting. Linux portability is a real
-    # gap (the live stack runs in Docker) but it is separate work, not a CI setting.
+    # windows-latest because a handful of tests genuinely cannot pass elsewhere:
+    # tests/test_memory_tools_*.py assert on literal `C:\FinRL\...` paths (the OSS publish
+    # filter already drops those three files as non-portable).
+    #
+    # Measured 2026-09-03, both runners, same commit:
+    #   ubuntu-latest    56 failed / 3146 passed
+    #   windows-latest   48 failed / 3154 passed
+    # So the OS accounted for only 8. The other 48 were dependency drift -- CI resolved
+    # pandas 3.0.5 + numpy 2.4.6 against an unbounded `pandas>=2.1.0`, and 3.0's
+    # Copy-on-Write default plus its datetime-unit change break this codebase. Fixed by
+    # bounding the numeric stack in pyproject, NOT by the runner choice.
     runs-on: windows-latest
     # The default pytest selection takes ~6 min locally. 45 is generous headroom for a
     # cold runner, and a cap matters here: the `slow` tests shell out via subprocess and
