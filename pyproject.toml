@@ -71,6 +71,22 @@ Homepage = "https://github.com/Chiwin-Technology/sharpen"
 where = ["."]
 include = ["sharpen*"]
 
+[tool.ruff]
+# EXPLICIT rule set -- do not rely on ruff's built-in defaults. Those defaults are NOT
+# stable across versions: with `ruff>=0.1.8` unpinned, CI installed 0.16.5 while this
+# machine had 0.14.4, and the same command over the same files reported 1,531 errors
+# there against 0 here (0.16 turned on RUF100 and others). An undeclared standard is not
+# a standard; it is whichever ruff the last `pip install` happened to fetch.
+#
+# E4/E7/E9 + F is ruff's pre-0.16 default -- the set this codebase was actually written
+# against, under which sharpen/ and tests/ are clean. Widening it is a deliberate project
+# decision, not something a dependency bump should do silently.
+target-version = "py311"
+line-length = 100
+
+[tool.ruff.lint]
+select = ["E4", "E7", "E9", "F"]
+
 [tool.pytest.ini_options]
 # `-m "not integration"` keeps bare `pytest` off the network: the integration
 # tests talk to live exchange testnets. Run them explicitly with `-m integration`.
