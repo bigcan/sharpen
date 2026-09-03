@@ -25,3 +25,17 @@ docker/live/**/Dockerfile text eol=lf
 docker/live/**/Dockerfile.* text eol=lf
 docker/live/**/crontab text eol=lf
 docker/live/**/*_crontab text eol=lf
+
+# The legal layer is COPIED VERBATIM into the published artifact by scripts/oss/rebuild.sh.
+# core.autocrlf=true (system-level on this machine) otherwise checks these out as CRLF, and the
+# copy carries CRLF into LICENSE/NOTICE/DISCLAIMER.md in the public repo -- measured 2026-09-01:
+# tracking phase1/ silently flipped all three vs the previously verified LF artifact, changing the
+# published tip SHA. Same failure class as audit finding F13. Pin them to LF.
+scripts/oss/phase1/LICENSE text eol=lf
+scripts/oss/phase1/NOTICE text eol=lf
+scripts/oss/phase1/DISCLAIMER.md text eol=lf
+
+# GitHub Actions parses these on a Linux runner; keep them LF like every other
+# file this repo pins, so a Windows checkout cannot introduce CRLF into CI config.
+.github/**/*.yml text eol=lf
+.github/**/*.yaml text eol=lf
