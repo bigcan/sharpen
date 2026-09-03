@@ -10,7 +10,17 @@ authors = [{ name = "Keng Lee" }]
 requires-python = ">=3.11"
 dependencies = [
     "torch>=2.8.0",
-    "pandas>=2.1.0",
+    # Upper bound added 2026-09-03 from CI evidence, not caution. Unbounded, pip resolves
+    # pandas 3.0.5 + numpy 2.4.6, and the suite reports 48 failures the 2.x stack does not:
+    # 24x "assignment destination is read-only" (3.0 makes Copy-on-Write the default, so
+    # frames hand back non-writeable arrays) and 4x "incompatible merge keys M8[ns] vs
+    # M8[us]" (3.0 changed the default datetime unit). numpy is pinned too because it is
+    # not declared anywhere else, so nothing otherwise stops a 2.x resolve.
+    # Verified-green combination: pandas 2.2.3 / numpy 1.26.4.
+    # Lifting these means porting the codebase to the 3.x/2.x stack, with its own
+    # before/after measurement -- not relaxing the bound and hoping.
+    "pandas>=2.1.0,<3",
+    "numpy>=1.26,<2",
     "pyyaml>=6.0",
     "requests==2.32.3",
     "yfinance>=0.2.40",
