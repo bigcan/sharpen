@@ -13,9 +13,24 @@ concurrency:
   group: ci-${{ github.ref }}
   cancel-in-progress: true
 
+defaults:
+  run:
+    # windows-latest defaults `run:` to PowerShell. Pin bash (present on the runner via
+    # Git for Windows) so quoting matches the shell these commands were tested in.
+    shell: bash
+
 jobs:
   test:
-    runs-on: ubuntu-latest
+    # windows-latest, NOT ubuntu. This suite is Windows-specific by construction and a
+    # Linux run is red for reasons that are not regressions: tests/test_memory_tools_*.py
+    # assert on `C:\FinRL\...` paths (the OSS publish filter already drops those three
+    # files as non-portable), and Linux resolves newer numpy/pandas that change array
+    # writeability and the default datetime unit. Measured on ubuntu-latest 2026-09-03:
+    # 56 failed / 3146 passed -- 24 "assignment destination is read-only", 4 M8[ns] vs
+    # M8[us] merge-key mismatches, 2 PosixPath-vs-WindowsPath, 1 strict XPASS.
+    # None of those are defects this gate should be reporting. Linux portability is a real
+    # gap (the live stack runs in Docker) but it is separate work, not a CI setting.
+    runs-on: windows-latest
     # The default pytest selection takes ~6 min locally. 45 is generous headroom for a
     # cold runner, and a cap matters here: the `slow` tests shell out via subprocess and
     # would hang the job rather than fail it (see "Tests" below).
@@ -30,19 +45,19 @@ jobs:
           cache: pip
           cache-dependency-path: pyproject.toml
 
-      # Install CPU torch FIRST, from PyTorch's CPU index. Plain `pip install torch` on
-      # Linux pulls the CUDA build (multi-GB) which this job has no GPU to use. Installing
-      # it first means the `.[dev,crypto]` step below sees torch>=2.8.0 already satisfied.
+      # Install CPU torch FIRST, from PyTorch's CPU index: the runner has no GPU, and the
+      # default wheel drags in CUDA payload it cannot use. Doing it first leaves
+      # torch>=2.8.0 already satisfied for the editable install below.
       - name: Install CPU-only torch
         run: pip install --index-url https://download.pytorch.org/whl/cpu 'torch>=2.8.0'
 
-      # `crypto` is required, not optional, for a green suite: sharpen/analytics/
-      # (pyfolio_analyzer.py, wandb_evaluator.py) imports matplotlib at MODULE level, and
-      # matplotlib is declared under the crypto extra. Every other optional dependency
-      # (ccxt, ib_insync, ctrader) is imported lazily inside functions, so `ib` and
-      # `ctrader` are deliberately not installed here.
+      # `crypto` is required, not optional: sharpen/analytics/ imports matplotlib at MODULE
+      # level and matplotlib is declared under that extra. `ctrader` is required too --
+      # tests/cfd/test_ctrader_broker.py imports ctrader_open_api directly (3 failures on
+      # the first Linux run). `ib` is NOT needed: no test imports ib_insync, and
+      # sharpen/futures/ imports it lazily inside functions.
       - name: Install project
-        run: pip install -e '.[dev,crypto]'
+        run: pip install -e ".[dev,crypto,ctrader]"
 
       # sharpen/ and tests/ are clean today (measured 2026-09-01), so this is a real gate:
       # it fails the moment the package or the suite regresses. scripts/oss/ is the tracked
