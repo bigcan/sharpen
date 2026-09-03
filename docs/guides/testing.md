@@ -8,8 +8,15 @@
 python -m pytest
 ```
 
-Bare `pytest` collects **3,240 tests across 262 files** (measured 2026-09-01 on the default
-selection). `addopts` in `pyproject.toml` deselects two markers:
+Measured 2026-09-01 on the default selection, quoted verbatim:
+
+```
+3215 passed, 25 skipped, 28 deselected, 1 xfailed, 21 warnings in 340.68s (0:05:40)
+```
+
+**Quote that summary line, never a derived total** — "3,240 tests pass" would be wrong three
+ways: 25 are skipped, 28 never ran, and one is an expected failure. `addopts` in
+`pyproject.toml` deselects two markers:
 
 - **`integration`** — hits live exchange testnets, so a bare run stays off the network.
 - **`slow`** — 25 tests that shell out via `subprocess.run` to a full synthetic genetic
