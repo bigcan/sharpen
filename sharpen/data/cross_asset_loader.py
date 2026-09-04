@@ -204,6 +204,54 @@ def _cache_covers_end(manifest: Mapping, end: str | None, *,
     return date_max >= (target - pd.Timedelta(days=int(tol_days)))
 
 
+def _cache_covers_start(manifest: Mapping, start: str) -> bool:
+    """Does the cached fetch window BEGIN at or before the requested ``start``?
+
+    The other half of window coverage, and for a long time the missing half. The cache-hit branch
+    tested the asset superset and :func:`_cache_covers_end` only, so a cache built from a NARROWER
+    window was served for a WIDER request and the caller silently received a truncated panel — with
+    ``end=None`` the freshness leg returns True unconditionally, so a request for more HISTORY hit
+    a clean cache-hit path and logged "using cached clean OHLCV". Measured on the Taiwan loader
+    (2026-09-02): a cache built at ``start=2018-01-01`` answered a ``start=2010-01-01`` request with
+    **713 bars instead of 4085**, moving every downstream statistic with no warning anywhere. Same
+    failure class as the flags-silently-change-the-subject rule in the standing record.
+
+    Compares the manifest's recorded fetch-window ``start`` — the start REQUESTED by the run that
+    built the cache — and deliberately NOT the observed ``date_min``. A name that listed after the
+    window opens (00891 lists 2021 on a 2010 request) legitimately gives ``date_min > start``, so
+    testing ``date_min`` would declare a correct cache stale and refetch on every single call.
+
+    A manifest with no ``start`` key predates this contract: report NOT covered, which triggers one
+    refetch that rewrites the manifest with the key. Self-healing, and it cannot mask a real gap.
+    """
+    cached = manifest.get("start")
+    if not cached:
+        return False
+    return pd.Timestamp(cached) <= pd.Timestamp(start)
+
+
+def _clip_window(wide: dict, start: str, end: str | None) -> dict:
+    """Clip cached wide frames to the REQUESTED ``[start, end]`` window.
+
+    The cache-hit path used to return whatever the cache held, while a fresh fetch returns exactly
+    the requested window — so one call site got different data depending on cache state, which is
+    the same class of silent subject-change as the start-coverage gap above and is what makes a
+    "reproduce this window" request unreproducible. Measured before this fix: a request for
+    2018-01-01..2020-12-31 against a 2010..2026 cache returned all 4085 bars, not the 713 asked for.
+
+    Clipping here makes the two paths agree. ``end=None`` means rolling-to-latest, so only the
+    lower bound is applied.
+    """
+    lo = pd.Timestamp(start)
+    hi = pd.Timestamp(end) if end is not None else None
+    out = {}
+    for name, frame in wide.items():
+        idx = frame.index
+        mask = idx >= lo if hi is None else (idx >= lo) & (idx <= hi)
+        out[name] = frame.loc[mask]
+    return out
+
+
 def fetch_and_clean(
     assets: Sequence[str],
     start: str,
@@ -222,9 +270,11 @@ def fetch_and_clean(
     Caches: ``ohlcv_daily_raw.parquet`` (the ``.bak``), ``ohlcv_daily.parquet``
     (cleaned), ``ohlcv_daily.manifest.json``.
 
-    The cache is reused only when it covers BOTH the requested asset superset AND the
-    requested window ``end`` (:func:`_cache_covers_end`, P1-02) — a scheduled run that asks
-    for fresher data than the cache holds refetches instead of silently freezing. The
+    The cache is reused only when it covers the requested asset superset AND BOTH ENDS of the
+    requested window — ``end`` via :func:`_cache_covers_end` (P1-02), so a scheduled run asking
+    for fresher data than the cache holds refetches instead of silently freezing, and ``start``
+    via :func:`_cache_covers_start`, so a run asking for more HISTORY than the cache was built
+    with refetches instead of silently receiving a truncated panel. The
     manifest ``status`` is EARNED from the stale-print scan (P1-05): ``FAIL`` if any ticker's
     stale-print P&L share crosses ``stale_pnl_fail_threshold`` (the gmgp1-gold class),
     ``WARN`` if any ticker is flagged below that, else ``PASS``.
@@ -240,22 +290,24 @@ def fetch_and_clean(
         assets_ok = set(manifest.get("assets", [])) >= set(assets)
         fresh_ok = _cache_covers_end(manifest, end, require_fresh=require_fresh,
                                      tol_days=freshness_tol_days)
+        start_ok = _cache_covers_start(manifest, start)
         # Refuse a cache that predates the stale-print scan (P1-03): no `stale_scan` block, or
         # an older manifest schema, means the scan never ran on this data — refetch so the
         # status is EARNED on active data instead of silently reusing un-scanned parquet.
         scan_ok = ("stale_scan" in manifest
                    and manifest.get("loader_manifest_version", 1) >= LOADER_MANIFEST_VERSION)
-        if assets_ok and fresh_ok and scan_ok:
-            log.info("cross_asset_loader: using cached clean OHLCV (%s, date_max=%s)",
-                     clean_path, manifest.get("date_max"))
+        if assets_ok and fresh_ok and scan_ok and start_ok:
+            log.info("cross_asset_loader: using cached clean OHLCV (%s, window=%s..%s)",
+                     clean_path, manifest.get("start"), manifest.get("date_max"))
             long = pd.read_parquet(clean_path)
             long["date"] = pd.to_datetime(long["date"])
             wide = {c: long.pivot(index="date", columns="ticker", values=c)
                     .reindex(columns=list(assets)).sort_index() for c in _OHLCV}
-            return wide, manifest
-        log.info("cross_asset_loader: cache stale (assets_ok=%s fresh_ok=%s scan_ok=%s, "
-                 "date_max=%s, requested_end=%s) → refetching", assets_ok, fresh_ok, scan_ok,
-                 manifest.get("date_max"), end)
+            return _clip_window(wide, start, end), manifest
+        log.info("cross_asset_loader: cache stale (assets_ok=%s fresh_ok=%s scan_ok=%s "
+                 "start_ok=%s, cached_window=%s..%s, requested=%s..%s) → refetching",
+                 assets_ok, fresh_ok, scan_ok, start_ok, manifest.get("start"),
+                 manifest.get("date_max"), start, end)
 
     log.info("cross_asset_loader: fetching %d tickers %s..%s", len(assets), start, end)
     wide = fetch_ohlcv_wide(assets, start, end)
