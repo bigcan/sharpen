@@ -1,0 +1,86 @@
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches: [Sept2026, main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+defaults:
+  run:
+    # windows-latest defaults `run:` to PowerShell. Pin bash (present on the runner via
+    # Git for Windows) so quoting matches the shell these commands were tested in.
+    shell: bash
+
+jobs:
+  test:
+    # windows-latest because a handful of tests genuinely cannot pass elsewhere:
+    # tests/test_memory_tools_*.py assert on literal `C:\FinRL\...` paths (the OSS publish
+    # filter already drops those three files as non-portable).
+    #
+    # Measured 2026-09-03, both runners, same commit:
+    #   ubuntu-latest    56 failed / 3146 passed
+    #   windows-latest   48 failed / 3154 passed
+    # So the OS accounted for only 8. The other 48 were dependency drift -- CI resolved
+    # pandas 3.0.5 + numpy 2.4.6 against an unbounded `pandas>=2.1.0`, and 3.0's
+    # Copy-on-Write default plus its datetime-unit change break this codebase. Fixed by
+    # bounding the numeric stack in pyproject, NOT by the runner choice.
+    runs-on: windows-latest
+    # The default pytest selection takes ~6 min locally. 45 is generous headroom for a
+    # cold runner, and a cap matters here: the `slow` tests shell out via subprocess and
+    # would hang the job rather than fail it (see "Tests" below).
+    timeout-minutes: 45
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'      # pyproject requires >=3.11
+          cache: pip
+          cache-dependency-path: pyproject.toml
+
+      # Install CPU torch FIRST, from PyTorch's CPU index: the runner has no GPU, and the
+      # default wheel drags in CUDA payload it cannot use. Doing it first leaves
+      # torch>=2.8.0 already satisfied for the editable install below.
+      - name: Install CPU-only torch
+        run: pip install --index-url https://download.pytorch.org/whl/cpu 'torch>=2.8.0'
+
+      # `crypto` is required, not optional: sharpen/analytics/ imports matplotlib at MODULE
+      # level and matplotlib is declared under that extra. `ctrader` is required too --
+      # tests/cfd/test_ctrader_broker.py imports ctrader_open_api directly (3 failures on
+      # the first Linux run). `ib` is NOT needed: no test imports ib_insync, and
+      # sharpen/futures/ imports it lazily inside functions.
+      - name: Install project
+        run: pip install -e ".[dev,crypto,ctrader]"
+
+      # sharpen/ and tests/ are clean today (measured 2026-09-01), so this is a real gate:
+      # it fails the moment the package or the suite regresses. scripts/oss/ is the tracked
+      # publication tooling and is also clean.
+      - name: Ruff (package, tests, publication tooling)
+        run: ruff check sharpen tests scripts/oss
+
+      # The rest of the repo carries a 269-error backlog, concentrated in scripts/ (213),
+      # contest/ (34) and sync_1h_export/ (17). Reported so the number stays visible, but
+      # NOT blocking -- a blocking check here would be red on day one and get ignored.
+      # Tighten this into the gate above as directories are cleaned up.
+      - name: Ruff (rest of repo, advisory)
+        continue-on-error: true
+        run: ruff check .
+
+      # Bare `pytest` on purpose. `addopts` in pyproject already deselects `integration`
+      # (hits live exchange testnets) and `slow` (shells out to a full synthetic genetic
+      # search, twice; several exceed 400 s alone).
+      #
+      # Do NOT add `-m` here: `-m X` REPLACES the addopts expression rather than
+      # intersecting with it, so `-m integration` would silently re-enable the slow tests
+      # and hang this job. If you need to compose, write the whole expression.
+      - name: Pytest
+        run: pytest

@@ -177,3 +177,11 @@ Thumbs.db
 # `$TMPDIR/_txo_vrp_validation_selftest`, and TMPDIR is unset on Windows, so the fallback
 # is the repo root. Two tests in tests/research invoke it, so a plain test run litters here.
 _txo_vrp_validation_selftest/
+
+# OSS publication pipeline: the --replace-text rule files carry REAL broker account ids
+# and the Tailscale host in plaintext. The tooling is tracked; these never are.
+scripts/oss/replacements.txt
+scripts/oss/replacements2.txt
+scripts/oss/*.private.txt
+scripts/oss/out/
+scripts/oss/*.git/
