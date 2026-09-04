@@ -226,9 +226,11 @@ def fetch_and_clean_taiwan(
 ) -> tuple[dict[str, pd.DataFrame], dict]:
     """Fetch FinMind OHLCV, DATA-CLEAN it, cache raw + cleaned + manifest → ``(wide, manifest)``.
 
-    Cache reuse requires the cached asset superset AND window ``end`` coverage AND a v2 stale-scan
-    block (:func:`cross_asset_loader._cache_covers_end`) — identical policy to the US loader so a
-    scheduled run cannot silently freeze on a frozen cache. ``status`` is EARNED from the stale-print
+    Cache reuse requires the cached asset superset AND coverage of BOTH window ends
+    (:func:`cross_asset_loader._cache_covers_end` and ``_cache_covers_start``) AND a v2 stale-scan
+    block — identical policy to the US loader, so a scheduled run cannot silently freeze on a
+    frozen cache and a wider-history request cannot silently receive a narrower cached window.
+    ``status`` is EARNED from the stale-print
     scan (``FAIL`` if any ticker's stale-print P&L share >= ``stale_pnl_fail_threshold`` — the
     gmgp1-gold class — ``WARN`` if flagged below, else ``PASS``).
     """
@@ -244,19 +246,21 @@ def fetch_and_clean_taiwan(
         assets_ok = set(manifest.get("assets", [])) >= set(ids)
         fresh_ok = cal._cache_covers_end(manifest, end, require_fresh=require_fresh,
                                          tol_days=freshness_tol_days)
+        start_ok = cal._cache_covers_start(manifest, start)
         scan_ok = ("stale_scan" in manifest
                    and manifest.get("loader_manifest_version", 1) >= cal.LOADER_MANIFEST_VERSION)
-        if assets_ok and fresh_ok and scan_ok:
-            log.info("taiwan_panel_loader: using cached clean OHLCV (%s, date_max=%s)",
-                     clean_path, manifest.get("date_max"))
+        if assets_ok and fresh_ok and scan_ok and start_ok:
+            log.info("taiwan_panel_loader: using cached clean OHLCV (%s, window=%s..%s)",
+                     clean_path, manifest.get("start"), manifest.get("date_max"))
             long = pd.read_parquet(clean_path)
             long["date"] = pd.to_datetime(long["date"])
             wide = {c: long.pivot(index="date", columns="ticker", values=c)
                     .reindex(columns=ids).sort_index() for c in cal._OHLCV}
-            return wide, manifest
-        log.info("taiwan_panel_loader: cache stale (assets_ok=%s fresh_ok=%s scan_ok=%s, "
-                 "date_max=%s, requested_end=%s) → refetching", assets_ok, fresh_ok, scan_ok,
-                 manifest.get("date_max"), end)
+            return cal._clip_window(wide, start, end), manifest
+        log.info("taiwan_panel_loader: cache stale (assets_ok=%s fresh_ok=%s scan_ok=%s "
+                 "start_ok=%s, cached_window=%s..%s, requested=%s..%s) → refetching",
+                 assets_ok, fresh_ok, scan_ok, start_ok, manifest.get("start"),
+                 manifest.get("date_max"), start, end)
 
     log.info("taiwan_panel_loader: fetching %d ids %s..%s via FinMind", len(ids), start, end)
     wide = fetch_taiwan_wide(list(etfs), start, end, futures=futures, token=token)

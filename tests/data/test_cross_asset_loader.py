@@ -348,3 +348,110 @@ def test_loader_baseline_reproduces_linear_core():
     # Validated core ~0.60 (falsification 0.601, keystone 0.615). Band absorbs
     # yfinance auto-adjust vintage drift; a leak would inflate >>1, a broken signal ~0.
     assert 0.45 <= sharpe <= 0.85, f"loader baseline net Sharpe {sharpe:.3f} off the ~0.60 core"
+
+
+def test_cache_covers_start_matrix():
+    """_cache_covers_start: the window-START half of cache coverage.
+
+    Keyed on the manifest's recorded fetch-window `start`, NOT the observed `date_min` — a name
+    that lists after the window opens legitimately gives date_min > start, and testing date_min
+    would refetch on every call forever.
+    """
+    man = {"start": "2018-01-01", "date_min": "2021-06-30"}   # a late-listing member
+    assert loader._cache_covers_start(man, "2018-01-01")      # exactly covered
+    assert loader._cache_covers_start(man, "2020-01-01")      # narrower request, covered
+    # The defect: a WIDER history request against a narrower cache must NOT be covered.
+    assert not loader._cache_covers_start(man, "2010-01-01")
+    # date_min is deliberately ignored — a request inside [start, date_min) is still covered.
+    assert loader._cache_covers_start(man, "2019-01-01")
+    # A manifest predating this contract has no `start`: report not-covered so one refetch
+    # rewrites it (self-healing, and it cannot mask a real gap).
+    assert not loader._cache_covers_start({"date_min": "2018-01-01"}, "2018-01-01")
+
+
+def test_fetch_and_clean_refetches_when_request_predates_cache_start(tmp_path, monkeypatch):
+    """A request for MORE HISTORY than the cache holds must REFETCH, not silently truncate.
+
+    The defect this pins: cache reuse tested the asset superset and the window END only, and with
+    `end=None` the freshness leg returns True unconditionally — so a cache built at start=2018
+    answered a start=2010 request from cache and handed back a panel missing eight years, logging
+    an ordinary "using cached clean OHLCV". Measured on the Taiwan loader before the fix: 713 bars
+    returned where 4085 were requested, with every downstream statistic silently different.
+    """
+    calls = {"n": 0}
+
+    def fake_fetch(assets, start, end, *, auto_adjust=True):
+        calls["n"] += 1
+        return _wide_frames(_clean_close())
+
+    monkeypatch.setattr(loader, "fetch_ohlcv_wide", fake_fetch)
+    loader.fetch_and_clean(["AAA", "BBB"], "2018-01-01", None, cache_dir=tmp_path)
+    assert calls["n"] == 1
+    # Same window → cache hit, no refetch (the fix must not cause spurious refetches).
+    loader.fetch_and_clean(["AAA", "BBB"], "2018-01-01", None, cache_dir=tmp_path)
+    assert calls["n"] == 1
+    # A NARROWER window is still covered by the cache → still no refetch.
+    loader.fetch_and_clean(["AAA", "BBB"], "2018-06-01", None, cache_dir=tmp_path)
+    assert calls["n"] == 1
+    # A WIDER window (earlier start) is NOT covered → must refetch.
+    loader.fetch_and_clean(["AAA", "BBB"], "2010-01-01", None, cache_dir=tmp_path)
+    assert calls["n"] == 2, "asking for earlier history than the cache holds must refetch"
+
+
+def test_cache_start_guard_does_not_refetch_on_late_listing(tmp_path, monkeypatch):
+    """The false-refetch trap: a cache whose data BEGINS late must still be reused.
+
+    `_wide_frames(_clean_close())` starts in 2018, so a cache built with start=2010 has
+    date_min ~2018 — exactly the shape of a late-listing member. If coverage were keyed on
+    date_min instead of the recorded window start, this would refetch on every call.
+    """
+    calls = {"n": 0}
+
+    def fake_fetch(assets, start, end, *, auto_adjust=True):
+        calls["n"] += 1
+        return _wide_frames(_clean_close())
+
+    monkeypatch.setattr(loader, "fetch_ohlcv_wide", fake_fetch)
+    _, man = loader.fetch_and_clean(["AAA", "BBB"], "2010-01-01", None, cache_dir=tmp_path)
+    assert calls["n"] == 1
+    assert pd.Timestamp(man["date_min"]) > pd.Timestamp(man["start"]), "fixture must list late"
+    for _ in range(3):
+        loader.fetch_and_clean(["AAA", "BBB"], "2010-01-01", None, cache_dir=tmp_path)
+    assert calls["n"] == 1, "a late-listing cache must be reused, not refetched every call"
+
+
+def test_cache_hit_clips_to_requested_window(tmp_path, monkeypatch):
+    """A cache HIT must return the requested window, not everything the cache holds.
+
+    The fresh-fetch path returns exactly [start, end]; the cache-hit path used to return the whole
+    cached range, so the same call produced different data depending on cache state and a
+    "reproduce this window" request was not reproducible. Measured on the Taiwan loader before the
+    fix: a 2018-01-01..2020-12-31 request against a 2010..2026 cache returned all 4085 bars.
+    """
+    calls = {"n": 0}
+
+    def fake_fetch(assets, start, end, *, auto_adjust=True):
+        calls["n"] += 1
+        return _wide_frames(_clean_close())
+
+    monkeypatch.setattr(loader, "fetch_ohlcv_wide", fake_fetch)
+    wide_full, _ = loader.fetch_and_clean(["AAA", "BBB"], "2018-01-01", None, cache_dir=tmp_path)
+    assert calls["n"] == 1
+    full_idx = wide_full["close"].index
+    lo, hi = full_idx.min(), full_idx.max()
+    assert len(full_idx) > 10, "fixture must be long enough to clip meaningfully"
+
+    # Narrower request → served from cache (no refetch) but CLIPPED to the window.
+    cut = full_idx[len(full_idx) // 2]
+    wide_clip, _ = loader.fetch_and_clean(["AAA", "BBB"], str(cut.date()), None,
+                                          cache_dir=tmp_path)
+    assert calls["n"] == 1, "narrower window is covered — must not refetch"
+    assert wide_clip["close"].index.min() >= cut
+    assert len(wide_clip["close"]) < len(full_idx), "cache hit must clip, not return everything"
+
+    # A finite end clips the upper bound too.
+    wide_both, _ = loader.fetch_and_clean(["AAA", "BBB"], "2018-01-01", str(cut.date()),
+                                          cache_dir=tmp_path)
+    assert wide_both["close"].index.max() <= cut
+    assert wide_both["close"].index.min() >= lo
+    assert hi > cut, "fixture must extend past the clip point for this to bite"
