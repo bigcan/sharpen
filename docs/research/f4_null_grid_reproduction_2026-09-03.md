@@ -113,9 +113,60 @@ search.
 - The power wall (F7) and F4 together are the honest backbone of the release narrative; the
   perfect-foresight-oracle sentence is not.
 
+## Addendum 2026-09-04 — the cohort MC-null power table, probed
+
+`mc_full.py` (the third missing script) backs the root-cause doc's §5b Finding 4 table, which is the
+sole evidence for the claim that **the selection-aware MC null is the one gate in the system with
+real power** — and hence for the forward R&D thesis that "power is linear in hit rate, so the
+binding constraint is the hypothesis bank."
+
+A full re-derivation was **deliberately not run**. It cannot move the verdict: the record contains
+exactly **one** cohort verdict in the project's lifetime (§5e), and no power figure repairs a
+denominator of 1. It is also expensive — the doc records 29,869 s on 14 parallel workers. Instead,
+`scripts/research/cohort_mc_power_probe.py` re-derives the single decisive cell (6/40 real at
+IR 0.30, published 25%) plus the null calibration cell, at 24 seeds and B=49. B=49 is defensible on
+the doc's own evidence: it reports B=49 and B=1000 producing *identical* pass rates.
+
+**Both configurations were run, because they differ and the doc says so:** the published table was
+measured at `K<=20, rho<=0.10`, while the shipped gates are `K<=12, rho<=0.35` ("what is enabled
+today is the WEAKER setting", ensemble multiplier 1.57x vs 2.77x).
+
+| config | pass rate | 95% CI | one-sided p vs 0.25 | null med p (want ~0.50) |
+|---|---|---|---|---|
+| measured (K≤20, ρ≤0.10) | **0.083** | [0.02, 0.26] | 0.0398 | 0.4500 |
+| **shipped (K≤12, ρ≤0.35)** | **0.042** | [0.01, 0.20] | **0.0090** | 0.5000 |
+| *published* | *0.25* | — | — | *0.4985* |
+
+⭐**At the configuration production actually runs, the gate's pass rate is 0.042 against α = 0.05 —
+it is operating at its own false-positive rate at IR 0.30.** That is significantly below the
+published 0.25 and **survives Bonferroni** over the two configurations tested (p 0.0090 < 0.025).
+
+At the configuration the table *was* measured at, the point estimate is 3× below the published
+figure; directionally significant alone (p 0.0398) but **not** after correction, so it is **not**
+reported as a refutation. Honest reading: **0.25 is not reproduced as a point estimate anywhere and
+is likely optimistic** — consistent with the doc's own stated caveat that mutually independent
+Gaussian candidates overstate effective K relative to correlated real alphas.
+
+Both null cells calibrate correctly (median p 0.4500 / 0.5000 against the published 0.4985), so the
+harness is sound in both directions.
+
+**Consequence — for the R&D plan, not the verdict.** "(A) is unclaimable" is untouched. What is
+undercut is the *forward* thesis: the cohort MC null is not a high-power path **at the shipped
+gates**. Making it one requires the `K`/`rho` threshold change, which the root-cause doc itself
+records as **not authorised**. Any plan that routes future mining through this gate should either
+carry that authorisation first or drop the power assumption.
+
+⚠ **A third harness bug, caught by the calibration cell.** The first pool construction demeaned every
+candidate to exactly zero sample mean, making all standalone Sharpes identically 0.0 — degenerate
+admission ranking, `t_obs` always the minimum of the comparison, and **p = 1.0000 on every seed,
+null and alternative alike**. Read without the null cell that is a clean-looking refutation of the
+published 0.25. The null cell returned median p 1.0000 against the required ~0.50 and the script
+refused to print a verdict. Pinned by 8 mutation-verified tripwires
+(`tests/research/test_cohort_mc_power_probe.py`).
+
 ## Still missing
 
-`forward_power.py` and `mc_full.py` remain uncommitted. F7's *published* figures reproduce from
-arithmetic (`planted_sweep.py --bar-only`), so the gap there is presentational rather than
-evidentiary. `mc_full.py` backs the cohort MC-null power table in the root-cause doc and has not
-been re-derived.
+`forward_power.py` remains uncommitted. F7's *published* figures reproduce from arithmetic
+(`planted_sweep.py --bar-only`), so that gap is presentational rather than evidentiary.
+`mc_full.py` is still uncommitted, but its decisive cell is now independently probed (addendum
+above) — the full grid has not been re-run and, per the reasoning there, does not need to be.
