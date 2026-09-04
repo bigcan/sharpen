@@ -164,9 +164,59 @@ published 0.25. The null cell returned median p 1.0000 against the required ~0.5
 refused to print a verdict. Pinned by 8 mutation-verified tripwires
 (`tests/research/test_cohort_mc_power_probe.py`).
 
-## Still missing
+## Addendum 2026-09-04 (2) — F7's power wall, including the DEPLOYED contract
 
-`forward_power.py` remains uncommitted. F7's *published* figures reproduce from arithmetic
-(`planted_sweep.py --bar-only`), so that gap is presentational rather than evidentiary.
-`mc_full.py` is still uncommitted, but its decisive cell is now independently probed (addendum
-above) — the full grid has not been re-run and, per the reasoning there, does not need to be.
+F7 has three parts, and only the first was previously closed:
+
+1. **ideal single-prereg t≥2 MDE80** — arithmetic, already reproduced by `--bar-only`.
+2. **deployed contract ≈ 1.9–3.5** — *not* arithmetic. The deployed gate is a six-leg AND, so its
+   minimum detectable effect has to be measured by planting edges of known size and finding where
+   the whole conjunction reaches 80% power. This was the open gap.
+3. **"ΔSR 0.3–0.5 undetectable"** — follows once both are in hand.
+
+`scripts/research/forward_power.py` measures (2) and puts it beside (1) on one axis:
+
+| bars | years | ideal (t≥2) | audit | **deployed MDE80** | ratio | null / saturation |
+|---|---|---|---|---|---|---|
+| 1011 | 4.01 | **1.419** | 1.42 | **3.536** | 2.49× | 0.000 / 1.000 |
+| 2520 | 10.00 | 0.899 | — | **2.178** | 2.42× | 0.000 / 1.000 |
+| 4044 | 16.05 | **0.709** | 0.71 | **1.860** | 2.62× | 0.000 / 1.000 |
+
+**Measured deployed range 1.86–3.54 against F7's published 1.9–3.5 — it reproduces**, and the band
+turns out to be *span-driven*: the short panel yields the top of it, the long panel the bottom.
+Both ideal anchors reproduce to three decimals.
+
+⭐**A regularity the audit did not state: the deployed contract costs a near-constant ~2.5×
+(2.42–2.62×) over an idealised single pre-registered test, independent of panel length.** More data
+lowers both walls together; it does not buy relief from the conjunction.
+
+**The conclusion in the form that matters:** a realistic single-signal edge is **0.3–0.5** annualised
+ΔSR. The deployed contract needs **1.86** even on sixteen years of daily bars — roughly **4×** the
+top of that range, and **7×** on four years. F7 stands: 0.3–0.5 is undetectable on this data under
+this contract.
+
+Two measurement points worth carrying forward. The MDE is interpolated in **realized** ΔSR, not
+planted Sharpe — those differ by ~1.5× on this gate (planted 2.00 → realized 1.305), and reporting
+the planted figure would overstate the gate's ability and put the numbers in the wrong units for
+F7's band. And every span carries **two** controls: a null that must stay quiet *and* a deliberately
+huge edge that must fire. Without the second, a gate that could never fire at any size would report
+"MDE unreachable" and read as a finding rather than a broken harness.
+
+⚠ One bug the tripwires caught: the 80%-crossing interpolation returned "unreachable" when the
+grid's *first* point already cleared 80% — understating the gate's power, the mirror image of the
+error the function exists to prevent. Both directions are now pinned
+(`tests/research/test_forward_power.py`, 12 tests), including one asserting the ideal formula stays
+byte-identical to `planted_sweep`'s copy, since it is duplicated deliberately rather than imported
+across research scripts.
+
+## Status of the audit's uncommitted scripts — all four now addressed
+
+| script | finding | status |
+|---|---|---|
+| `planted_sweep.py` | F1/F2 — oracle rejection | rebuilt; **does NOT reproduce** (holds only below ~1.8y of data) |
+| `null_grid_sim.py` | F4 — record uninformative | rebuilt; **reproduces**, all four sub-claims |
+| `forward_power.py` | F7 — power wall | rebuilt; **reproduces**, ideal and deployed |
+| `mc_full.py` | cohort MC-null power | decisive cell probed; **qualified** — no usable power at the shipped gates |
+
+Nothing in the audit's evidence base is now un-derivable from this repo. Three of the four hold;
+F1/F2 is the one that does not, and it is flagged unpublishable in Open Issues as **AUDIT-F1F2-01**.

@@ -45,13 +45,18 @@ strategy release, and **nothing here was ever deployed to capital.**
    at the same budget, run on data with **no signal in it at all**, reaches a *higher* gate
    statistic (`marginal_t` **3.68**) than anything the real mining record ever produced
    (**2.12**).
-4. **A power wall bounds what free daily data can settle.** An idealised single pre-registered
-   test needs an annualised ΔSharpe of **1.42** (4 years of daily bars) or **0.71** (16 years)
-   to detect an edge at 80% power — against realistic single-signal edges of **0.3–0.5**.
-   Verify in one second, no data required:
+4. **A power wall bounds what free daily data can settle — and the validation contract roughly
+   doubles it.** An *idealised* single pre-registered test needs an annualised ΔSharpe of **1.42**
+   (4 years of daily bars) or **0.71** (16 years) to detect an edge at 80% power. The **deployed**
+   six-leg gate needs **3.54** and **1.86** respectively — a near-constant **~2.5×** surcharge that
+   more data does not relieve. Realistic single-signal edges are **0.3–0.5**, i.e. **4–7× below**
+   what this contract can see. Verify the arithmetic in one second, no data required:
    ```bash
-   python scripts/research/planted_sweep.py --bar-only
+   python scripts/research/planted_sweep.py --bar-only     # the ideal wall
+   python scripts/research/forward_power.py                # the deployed wall, measured
    ```
+   This is the most useful thing in the repo: **it is a bound on what any honest test could have
+   concluded here, and it is why the null results below are not evidence about markets.**
 
 **Explicitly NOT claimed:**
 
