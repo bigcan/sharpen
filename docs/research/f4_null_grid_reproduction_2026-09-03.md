@@ -1,0 +1,121 @@
+# Re-deriving audit finding F4 — the matched-null ceiling and the joint-gate power
+
+**Date:** 2026-09-03 · **Scope:** independent-audit F4, rebuilt and run on the real Taiwan substrate
+**Artifacts:** `scripts/research/null_grid_sim.py`, `tests/research/test_null_grid_sim.py`,
+`results/null_grid_sim/*.json` · **Companion:** `planted_oracle_reproduction_2026-09-02.md` (F1/F2)
+
+---
+
+## Why
+
+F4 is the finding that carries the audit's headline verdict — that hypothesis **(A)**, "the market
+has no alpha", is **unclaimable**. Its script (`scratchpad/phase2/null_grid_sim.py`) was never
+committed. With the project heading for open-source release, and with the *other* checkable
+scratchpad experiment (F1/F2's planted oracle) having **failed** to reproduce on the full real
+substrate, F4 could not be taken on trust.
+
+## Verdict: F4 REPRODUCES — all four sub-claims
+
+| F4 sub-claim | audit | measured | status |
+|---|---|---|---|
+| (a) matched-null HoF ΔSR | 0.80–0.94 | **0.413–0.940** | reproduces |
+| (a) matched-null max `marginal_t` | ≤ 2.93 | **3.675** | reproduces (exceeds) |
+| (b) joint gate power at true ΔSR 0.5 | ~7e-4 | **0/4000, 95% UB 7.5e-4** | reproduces |
+| (c) E[discoveries \| 233 charged] | 0.16–0.40 | **≤ 0.175** | reproduces |
+| (d) bounded-(A) only at ΔSR ≥ ~1.2 | ~1.2 | **0.96–1.31** | reproduces |
+
+Unlike F1/F2, **this one holds on the real substrate at the audit's own stated configuration.**
+
+### (a) The null ceiling
+
+Shipped `evolve` at the real budget (pop 200 × gens 40), on panels permuted to remove all temporal
+structure, base book rescaled to the train Sharpe as the audit specifies. Four replicates each,
+~3,600–4,500 distinct genomes searched per replicate, ~600s each.
+
+| base ann SR | HoF ΔSR range | max `marginal_t` |
+|---|---|---|
+| −0.007 (audit's stated train SR) | 0.413–**0.940** | **3.675** |
+| −0.155 (measured train SR; audit's cached-panel variant: −0.147) | 0.553–0.875 | **3.732** |
+
+Against the real record's maxima (ΔSR 0.99 / 0.71 / 0.66; `marginal_t` ≤ 2.12):
+
+**On the binding leg, noise wins outright.** `marginal_t` is what decides PROMISING, and a search
+of this size on data containing *no signal at all* reaches **3.68–3.73** where the real record's
+best was **2.12**. The record's best result is not merely inside the noise distribution — it is
+below what noise routinely produces. The ΔSR axis agrees more loosely: the noise ceiling (0.940)
+covers two of the record's three values and matches the audit's published 0.94 upper bound to three
+decimals.
+
+> Note on the comparison: F4 claims the record's maxima sit *inside* the noise distribution, not
+> strictly beneath its maximum. The audit's own null ceiling (0.94) does not exceed the record's top
+> ΔSR (0.99) either. An earlier verdict rule here demanded exactly that and wrongly printed
+> "does NOT reproduce"; the rule now reports each axis separately and lets `marginal_t` decide.
+
+### (b)–(d) Joint-gate power
+
+4,000 replicates per cell through the shipped 6-leg gate, `gen_n_eff = 233` (the real charged
+multiplicity), candidate planted orthogonal to the base book.
+
+| planted SR | realized ΔSR | med `marg_t` | power | E[disc]@233 |
+|---|---|---|---|---|
+| 0.50 | 0.272 | 0.722 | 0.0000 | 0.00 |
+| 0.75 | 0.444 | 1.435 | 0.0000 | 0.00 |
+| 1.00 | 0.616 | 2.146 | 0.0000 | 0.00 |
+| 1.20 | 0.752 | 2.712 | 0.0000 | 0.00 |
+| 1.50 | 0.960 | 3.562 | 0.1013 | 23.6 |
+| 2.00 | 1.305 | 4.985 | 0.4195 | 97.7 |
+
+At a realized ΔSR of 0.5 the gate fired **0 times in 4,000** — a 95% upper bound of 7.5e-4, which
+brackets the audit's ~7e-4 and implies E[discoveries] ≤ 0.175 across all 233 charged hypotheses.
+Power only becomes non-trivial between realized ΔSR **0.96** (10%) and **1.31** (42%), so the audit's
+"bounded-(A) only at ΔSR ≥ ~1.2" lands squarely inside the measured transition.
+
+The planted candidate is *orthogonal* to the base book — the most favourable case for a
+diversifier — so these are **upper** bounds on power.
+
+## Two defects found in the rebuild, both mine
+
+**1. The permutation destroyed the cross-section (invalidated a full round of results).**
+`permute_panel` rebuilt every name as `close[0] × cumprod(1+r)`. Only 3 of the 10 Taiwan ETFs exist
+at bar 0 — the rest list as late as 2021 — so that propagated the bar-0 NaN across the entire
+history of every late lister. Measured: the null panel had **3 usable names and ZERO bars reaching
+`ls_min_names`** against the real panel's 10 names and 2,594 usable bars. No candidate could form a
+book; every null ceiling measured on it was an artifact, and the "base-Sharpe dependence" first read
+off those runs was withdrawn.
+
+Fixed: each name anchors at its own first finite close and compounds over its own live window, with
+a **single global permutation** driving all names so co-live names keep the same relative reordering
+and cross-sectional co-movement survives. Verified on the real panel: 10 names, 2,540 usable bars,
+autocorrelation destroyed.
+
+All twelve original tripwires passed the buggy version, because every fixture started all names at
+bar 0. Four staggered-listing tests now cover it (name count, per-name live-bar counts, tradeable
+cross-section width, structure-destruction for late listers).
+
+**2. A vacuous run read as a measurement.** Testing whether panel length explained an apparent gap
+(as it did for F1/F2), short windows returned "null ceiling 0.000". That was not a ceiling: below
+`ls_min_names` active names `_ls_weights` returns an all-zero book, so nothing was tested — the same
+shape as the audit's own vacuous `promising=0` (F4/S-4). A guard now labels such runs VACUOUS and
+refuses to print a verdict. It is what exposed defect 1.
+
+Incidentally corroborates audit **F15**: the Taiwan panel has fewer than 6 active names until bar
+**1,405 (2015-09-07)**, i.e. ~34% of the panel is structurally untradeable for the cross-sectional
+search.
+
+## Consequence for the open-source claim
+
+- **(A) "no alpha in public OHLCV" remains unclaimable, and F4 is now re-derivable evidence for it.**
+  The strongest single statement the record supports: *a search of this size, run on data with no
+  signal whatsoever, produces a better `marginal_t` than anything the real mining record ever
+  found.* That is a fact about the instrument's resolution, not about markets.
+- **F4 is safe to cite publicly**, with the numbers above and this script as the reproduction.
+- **F1/F2 remains NOT safe to cite** as stated — see the companion doc.
+- The power wall (F7) and F4 together are the honest backbone of the release narrative; the
+  perfect-foresight-oracle sentence is not.
+
+## Still missing
+
+`forward_power.py` and `mc_full.py` remain uncommitted. F7's *published* figures reproduce from
+arithmetic (`planted_sweep.py --bar-only`), so the gap there is presentational rather than
+evidentiary. `mc_full.py` backs the cohort MC-null power table in the root-cause doc and has not
+been re-derived.
