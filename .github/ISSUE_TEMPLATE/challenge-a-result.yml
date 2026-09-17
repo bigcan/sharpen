@@ -1,0 +1,58 @@
+name: Challenge a result
+description: A number in this repository did not reproduce, or you think a verdict is wrong.
+title: "[result] "
+labels: ["result-challenge"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks. A result that fails to reproduce, or a verdict that is wrong, is exactly what this
+        repository wants to hear about. Please give enough detail for someone else to re-run it.
+  - type: input
+    id: claim
+    attributes:
+      label: Which result
+      description: File and section, or the NEGATIVE_RESULTS.md row, or the README claim number.
+      placeholder: "NEGATIVE_RESULTS.md, section 4, 'Value factor sleeve'"
+    validations:
+      required: true
+  - type: dropdown
+    id: kind
+    attributes:
+      label: What kind of problem
+      options:
+        - Did not reproduce (different number)
+        - Suspected look-ahead or other leak
+        - Survivorship, cost or multiplicity error
+        - Verdict does not follow from the evidence
+        - Other
+    validations:
+      required: true
+  - type: textarea
+    id: command
+    attributes:
+      label: Command you ran
+      render: bash
+    validations:
+      required: false
+  - type: textarea
+    id: expected
+    attributes:
+      label: What the repository says
+    validations:
+      required: true
+  - type: textarea
+    id: observed
+    attributes:
+      label: What you found, and how to show it
+      description: Paste full output or the reasoning. Point at file and line where you can.
+    validations:
+      required: true
+  - type: textarea
+    id: environment
+    attributes:
+      label: Environment
+      description: OS, Python version, and `pip list | grep -Ei "numpy|pandas|scipy|yfinance|torch"`.
+      render: text
+    validations:
+      required: false
