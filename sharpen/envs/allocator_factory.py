@@ -189,10 +189,12 @@ def _drive(env: MultiAssetAllocatorEnv, action_at_step) -> tuple[dict, np.ndarra
         "turnovers": np.asarray(turnovers, dtype=np.float64),         # (n_steps,) sum|Δw| per step
         "cumulative_fees": np.asarray(fees, dtype=np.float64),        # (n_steps,) running fee+slippage
     }
-    return _metrics(step_returns, turnovers, pvs), np.asarray(weights, dtype=np.float64), trajectory
+    return (_metrics(step_returns, turnovers, pvs, weights),
+            np.asarray(weights, dtype=np.float64), trajectory)
 
 
-def _metrics(step_returns: list[float], turnovers: list[float], pvs: list[float]) -> dict:
+def _metrics(step_returns: list[float], turnovers: list[float], pvs: list[float],
+             weights: list | None = None) -> dict:
     r = np.asarray(step_returns, dtype=np.float64)
     pv = np.asarray(pvs, dtype=np.float64)
     # ddof=1 (Bessel) for both Sharpe & Sortino — consistent with crypto_perp_env /
@@ -215,6 +217,27 @@ def _metrics(step_returns: list[float], turnovers: list[float], pvs: list[float]
         "max_drawdown": max_dd,
         "turnover_ann": float(np.sum(turnovers) / years),
         "n_steps": int(len(r)),
+        # ACTIVITY diagnostics (never a gate). Sharpe is scale-free, so a policy
+        # that stops trading can post a respectable Sharpe on a near-cash book and
+        # "beat" a losing baseline without taking any risk — the pre-registered
+        # over-conservative-reward-hacking pitfall, and the reason a strategy that
+        # cannot trade looks low-risk. Report exposure so a reader can tell an edge
+        # from an abstention. `exposure_frac` = share of bars holding any position.
+        **_exposure_metrics(weights, len(r)),
+    }
+
+
+def _exposure_metrics(weights, n_steps: int) -> dict:
+    """Gross-exposure summary of a weight path; zeros when weights weren't captured."""
+    if weights is None or n_steps <= 0:
+        return {"gross_exposure_mean": None, "exposure_frac": None}
+    w = np.asarray(weights, dtype=np.float64)
+    if w.ndim != 2 or w.shape[0] == 0:
+        return {"gross_exposure_mean": None, "exposure_frac": None}
+    gross = np.abs(w).sum(axis=1)
+    return {
+        "gross_exposure_mean": float(gross.mean()),
+        "exposure_frac": float((gross > 1e-8).mean()),
     }
 
 
@@ -224,6 +247,7 @@ def _linear_core_drive(
     overrides: Mapping | None,
     *,
     conv_monthly: np.ndarray | None = None,
+    force_levers_off: bool = True,
 ) -> tuple[dict, np.ndarray, dict]:
     """Shared frozen-linear-core env drive behind :func:`evaluate_linear_core` (the
     gate metrics) and :func:`linear_core_weights` (the executor's weight trajectory).
@@ -251,7 +275,9 @@ def _linear_core_drive(
             raise KeyError("the linear-core drive needs arrays['conviction_ary'] "
                            "(build_allocator_arrays output)")
         conv_monthly = monthly_rebal_conviction(arrays["timestamps"], arrays["conviction_ary"])
-    core_overrides = {**(overrides or {}), **_EXECUTION_LEVERS_OFF}
+    core_overrides = dict(overrides or {})
+    if force_levers_off:
+        core_overrides.update(_EXECUTION_LEVERS_OFF)
     env = make_allocator_env(arrays, config, overrides=core_overrides, eval_mode=True)
     return _drive(env, lambda k, obs: conv_monthly[k])
 
@@ -270,6 +296,34 @@ def evaluate_linear_core(
     ``arrays['conviction_ary']`` (from ``build_allocator_arrays``).
     """
     metrics, _, _ = _linear_core_drive(arrays, config, overrides)
+    return metrics
+
+
+def evaluate_linear_core_levered(
+    arrays: Mapping,
+    config: Mapping,
+    *,
+    overrides: Mapping | None = None,
+) -> dict:
+    """Linear core driven through the RL's OWN v1.1 execution levers — a DIAGNOSTIC
+    arm, never a gate.
+
+    :func:`evaluate_linear_core` (the gate baseline) forces the v1.1 levers OFF by
+    construction, because the pre-registered baseline is the *validated* monthly core.
+    That makes a v1.1 uplift ambiguous: it could come from the POLICY, or merely from
+    the THROTTLE the baseline is forbidden to use. The `allocator_turnover_lever_probe`
+    measured that ambiguity as real — on the 14 WF test windows a purely mechanical
+    throttle lifts a deterministic conviction path from ~0.41 to ~0.70 net Sharpe with
+    no RL at all.
+
+    So this arm holds the SIGNAL fixed (the same monthly core conviction) and gives it
+    the RL's trading discipline (`no_trade_band`, `rebalance_interval`,
+    `cost_penalty_scale` from the winning trial). ``rl_net_sharpe`` minus this is the
+    policy's own share of any uplift. Note the interaction the sibling docstring flags:
+    a `rebalance_interval > 1` can block the monthly cadence itself, which is precisely
+    the point — it is the RL's discipline applied to the baseline's signal.
+    """
+    metrics, _, _ = _linear_core_drive(arrays, config, overrides, force_levers_off=False)
     return metrics
 
 
