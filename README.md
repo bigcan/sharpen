@@ -1,78 +1,75 @@
 # Sharpen
 
-**An end-to-end, all-in-one strategy development platform with built-in alpha mining.**
+**S**emi-agentic **H**ypothesis-to-**A**lpha **R**esearch **P**latform with **E**mpirical **N**ull-testing.
 
-Mine alphas, build strategies, validate them against a backtest engine that won't lie to
-you, size them into a portfolio, and run them on live brokers — one platform, one data
-layer, one set of gates, from raw hypothesis to funded position.
+Sharpen is a quantitative research platform and the research record of the program that built
+it: nine months of systematically trying to find tradeable edges, and mostly failing to. About
+twenty strategies across six families were pre-registered, built, measured and killed. One weak
+edge survived and still did not clear its own deployment gates. **Nothing here was ever traded
+with real capital.**
 
-```
-ALPHA MINING  ──►  STRATEGY BUILD  ──►  BACKTEST VALIDATION  ──►  PORTFOLIO  ──►  PAPER  ──►  LIVE
-free-data          signal · DSL ·        T0–T5 funnel ·             sleeves ·      fill      6 broker
-connectors ·       RL policy ·           walk-forward ·             vol target ·   engine ·  adapters ·
-agentic search     ensembles             CPCV · deflation           combiners      parity    Docker + alerts
-```
+It is published for two reasons. The validation machinery is reusable, and the record of what
+it rejected, and why, saves you rebuilding the same things. And along the way the project caught
+itself shipping look-ahead bugs that had manufactured the results it was about to act on. Those
+are written up in **[docs/LEAKS_FOUND.md](docs/LEAKS_FOUND.md)**, the best place to start.
 
-**The validation engine is the reason to use it.** Most backtesters answer "did this make
-money on this data?" Sharpen answers the question that actually predicts live performance:
-**is this result distinguishable from luck, after costs, out of sample, given everything
-else you tried?** That means deflated Sharpe, multiplicity correction across your whole
-search, combinatorial purged cross-validation, an explicit cost wall, orthogonality to known
-factors, walk-forward with stress replay, and forward incubation on unseen bars.
-
-Nothing is bolted on. The alpha miner writes into the same funnel your hand-built signal
-goes through; the portfolio you certify is wired to the executor that trades it; the
-strategies that don't make it are recorded with their evidence in the
-[validation archive](docs/research/README.md), so you don't rebuild them next quarter.
+> **Not investment advice. Not a trading product.** Every performance figure in this repository
+> comes from a historical simulation or a paper run. Read [DISCLAIMER.md](DISCLAIMER.md).
 
 ---
 
-## What this repo does and does not claim
+## What the record shows
 
-This is the platform's own track record, stated plainly. It is a tooling release, not a
-strategy release, and **nothing here was ever deployed to capital.**
+Each claim below points at evidence you can re-run.
 
-**Claimed, and reproducible from this repo:**
+1. **About twenty strategies, across six families, were tested and closed.** Options and volatility risk premium,
+   several arbitrage mechanisms, funding-rate carry, liquid large-cap cross-sectional equity,
+   single-asset directional RL, market making, retail intraday patterns and more. Each has its
+   pre-registration and the evaluation that closed it in the
+   [validation archive](docs/research/README.md).
 
-1. **~20 strategy families were specified, built, measured and falsified.** Each carries its
-   decision doc in the [validation archive](docs/research/README.md).
-2. **One weak survivor: cross-asset TSMOM.** Time-series momentum on 18 ETFs across 4 asset
-   classes, from **free daily public OHLCV**, **net Sharpe ≈ 0.60 @ 2 bps**, low SPY
-   correlation, PBO ≈ 0.0009 (i.e. not overfit). **It still failed this project's own
-   deployment gates** — Deflated Sharpe 0.896 < 0.95 — and a Tier-2 audit returned BLOCK. A
-   real but sub-threshold edge, not a product.
-3. **The alpha miner has never produced a discovery, and the record cannot say why.** A search
-   at the same budget, run on data with **no signal in it at all**, reaches a *higher* gate
-   statistic (`marginal_t` **3.68**) than anything the real mining record ever produced
-   (**2.12**).
-4. **A power wall bounds what free daily data can settle — and the validation contract roughly
-   doubles it.** An *idealised* single pre-registered test needs an annualised ΔSharpe of **1.42**
-   (4 years of daily bars) or **0.71** (16 years) to detect an edge at 80% power. The **deployed**
-   six-leg gate needs **3.54** and **1.86** respectively — a near-constant **~2.5×** surcharge that
-   more data does not relieve. Realistic single-signal edges are **0.3–0.5**, i.e. **4–7× below**
-   what this contract can see. Verify the arithmetic in one second, no data required:
+2. **One weak survivor: cross-asset time-series momentum (TSMOM).** 18 ETFs across four asset
+   classes, built from **free daily public OHLCV**, net Sharpe **≈ 0.60 at 2 bps**. The book built
+   on it (TSMOM plus a betting-against-beta sleeve) has a probability of backtest overfitting of
+   0.0009, but a **deflated Sharpe of 0.896 against a 0.95 bar**, so it failed. A real but
+   sub-threshold edge, not a product. See
+   [`tailwind_v1_R1_dsr_pbo_2026-07-01.md`](docs/research/tailwind_v1_R1_dsr_pbo_2026-07-01.md).
+
+3. **Three bugs had manufactured or disguised results.** A multi-timeframe look-ahead was the
+   *entire* edge of one strategy (profit factor 1.69 → 1.02 once fixed); a signal gate read the bar
+   it was about to trade; and `--seed` never reached the environments, so every earlier multi-seed
+   comparison measured noise. [docs/LEAKS_FOUND.md](docs/LEAKS_FOUND.md).
+
+4. **The automated alpha miner has never produced a discovery, and the record cannot say why.** A
+   search of the same size, run on data containing no signal at all, reaches a *higher* gate
+   statistic (`marginal_t` **3.68**) than anything the real mining record ever produced (**2.12**).
+   Re-run with `scripts/research/null_grid_sim.py`; see
+   [`f4_null_grid_reproduction_2026-09-03.md`](docs/research/f4_null_grid_reproduction_2026-09-03.md).
+
+5. **Free daily data sets a hard floor on what any honest test here could detect.** An idealised
+   single pre-registered test needs an annualised ΔSharpe of **1.42** on 4 years of daily bars, or
+   **0.71** on 16 years, for 80% power. The deployed six-leg validation contract needs **3.54** and
+   **1.86**: a near-constant ~2.5× surcharge that more data does not remove. Realistic
+   single-signal edges are 0.3–0.5. Check the arithmetic yourself, no data needed:
+
    ```bash
-   python scripts/research/planted_sweep.py --bar-only     # the ideal wall
-   python scripts/research/forward_power.py                # the deployed wall, measured
+   python scripts/research/planted_sweep.py --bar-only     # the idealised floor
+   python scripts/research/forward_power.py                # the deployed contract, measured
    ```
-   This is the most useful thing in the repo: **it is a bound on what any honest test could have
-   concluded here, and it is why the null results below are not evidence about markets.**
 
-**Explicitly NOT claimed:**
+   This is why the null results are **statements about the instrument, not about markets.**
 
-- ❌ **"There is no alpha in public OHLCV price data."** This repo does not support that and in
-  fact contradicts it — TSMOM (claim 2) *is* an alpha found in free public OHLCV. The null
-  results here bound what **this instrument, on this data, at this sample size** could have
-  detected. That is a statement about the search apparatus, not about markets.
-- ❌ **That any strategy here is profitable, live-ready, or fit to trade.** The one survivor is
-  gated; everything else was falsified.
+### What this repository does **not** claim
 
-The reproductions and their tripwires live in `scripts/research/` and `tests/research/`; the
-reasoning is in `docs/research/`.
+- ❌ **"There is no alpha in public price data."** TSMOM, claim 2, is an alpha found in free public
+  OHLCV. The nulls bound what *this apparatus, on this data, at this sample size* could detect.
+- ❌ **That any strategy here is profitable, live-ready, or fit to trade.**
 
 ---
 
-## Try it in 30 seconds — no data, no API keys
+## Try it in 30 seconds
+
+No data and no API keys. Python 3.11+.
 
 ```bash
 pip install -e ".[dev]"
@@ -82,73 +79,54 @@ pip install -e ".[dev]"
 python scripts/research/eval_signals.py --batch demo --panel "synthetic:1400,60" --out results/demo
 ```
 
+This scores four demo signals on a synthetic panel through the full validation funnel
+(abridged columns):
+
 ```
-| # | signal   | family    | verdict | IC-IR  | DSR   | FDR-q | cpcvOOS | fricSh | netSh@std |
-|---|----------|-----------|---------|--------|-------|-------|---------|--------|-----------|
-| 1 | mom_60d  | technical | LOGGED  |  0.045 | 0.474 | 0.835 |    0.22 |   0.23 |     -0.59 |
-| 2 | mom_20d  | technical | LOGGED  | -0.014 | 0.013 | 0.835 |   -0.15 |  -0.31 |     -1.66 |
+| # | signal  | verdict | IC-IR  | DSR   | FDR-q | cpcvOOS | fricSh | netSh@std |
+|---|---------|---------|--------|-------|-------|---------|--------|-----------|
+| 1 | mom_60d | LOGGED  |  0.045 | 0.474 | 0.835 |    0.22 |   0.23 |     -0.59 |
+| 2 | mom_20d | LOGGED  | -0.014 | 0.013 | 0.835 |   -0.15 |  -0.31 |     -1.66 |
+| 3 | rev_5d  | LOGGED  | -0.043 | 0.000 | 0.835 |   -0.08 |  -0.27 |     -3.10 |
+| 4 | vol_20d | LOGGED  | -0.054 | 0.000 | 0.835 |   -0.33 |  -0.22 |     -1.60 |
 ```
 
-You just built four strategies and validated all of them. `LOGGED` means "fully measured,
-did not clear the promotion bar" — most candidates land here, which is what makes a
-`PROMISING` worth acting on.
+`LOGGED` means fully measured and did not clear the promotion bar. That is where almost every
+candidate lands, which is what makes a `PROMISING` worth looking at. The scorecard also prints its
+own caveats: the synthetic panel is not survivorship-free, so every figure is an **upper bound**.
 
-**[→ Getting started](docs/guides/getting-started.md)** walks through this plus a full
-Crucible discovery tick, and explains what every column means.
-**[→ Building a strategy](docs/guides/building-a-strategy.md)** is the end-to-end workflow:
-idea → build → validate → paper → live.
-
----
-
-## Documentation
-
-**[docs/README.md](docs/README.md) is the documentation hub.**
-
-| Guide | Covers |
-|---|---|
-| [Getting started](docs/guides/getting-started.md) | Install and two verified first runs |
-| [Building a strategy](docs/guides/building-a-strategy.md) | **The end-to-end workflow** — idea to live, with the validation gate at each step |
-| [Data](docs/guides/data.md) | **Read before using real prices.** `/data/` is gitignored — a fresh clone has none |
-| [Signal research](docs/guides/signal-research.md) | Writing a signal; the T0–T5 validation funnel |
-| [Crucible](docs/guides/crucible.md) | Automated strategy search that validates as it goes |
-| [RL pipeline](docs/guides/rl-pipeline.md) | Training Protocol v2 in practice |
-| [Configuration](docs/guides/configuration.md) | Config and gate schemas |
-| [Live trading](docs/guides/live-trading.md) | Brokers, Docker, observability, kill switch |
-| [Architecture](docs/guides/architecture.md) | Package map and data flow |
-| [Testing](docs/guides/testing.md) | Suite, negative tests, contributing |
-| [Troubleshooting](docs/guides/troubleshooting.md) | Observed failure modes |
-| [Validation archive](docs/research/README.md) | ~100 preregistrations, audits and verdicts — what has already been tested |
+[Getting started](docs/guides/getting-started.md) explains every column and walks through a full
+Crucible discovery tick.
 
 ---
 
 ## What is in the box
 
-### Strategy construction + validation — `sharpen/signals/`
+### Signal validation funnel — `sharpen/signals/`
 
-Build a signal as a pre-registered, content-hashed spec; get back a validated verdict with
-the full evidence attached. Seven tiers, each answering a different way a backtest lies:
+A signal is a pre-registered, content-hashed spec. Each tier answers a different way a backtest
+lies:
 
 | Tier | Test |
 |---|---|
-| 0 | Causality (truncation tripwire) + OHLC hygiene + coverage |
+| 0 | Causality (truncation tripwire), OHLC hygiene, coverage |
 | 1 | Multi-horizon IC, decile spread, breadth, decay half-life |
-| 2 | Capturability — net Sharpe per cost model, cost wall, turnover |
-| 3 | Subperiod stability + recent OOS |
-| 3.5 | Combinatorial purged CV with embargo |
-| 4 | Deflated Sharpe, effective N, FDR/BHY, HLZ hurdle |
-| 5 | Orthogonality to a factor book — residual Sharpe |
+| 2 | Capturability: net Sharpe per cost model, cost wall, turnover |
+| 3 | Subperiod stability and recent out-of-sample |
+| 3.5 | Combinatorial purged cross-validation with embargo |
+| 4 | Deflated Sharpe, effective N, FDR/BHY, Harvey-Liu-Zhu hurdle |
+| 5 | Orthogonality to a factor book (residual Sharpe) |
 
-Signal libraries: demo, WorldQuant 101, TradingView indicators, plus a genetic DSL search
+Signal libraries: demo, WorldQuant 101, TradingView indicators, and a genetic DSL search
 (`sharpen/signals/generation/`) with cohort-level Monte-Carlo null gating.
 
-### Crucible — `sharpen/crucible/` (`crucible-v13.1`)
+### Crucible — `sharpen/crucible/`
 
-Automated strategy generation with validation built into the loop. Free-data connectors
-(FRED, CFTC COT, SEC EDGAR, GDELT, Stooq, TWSE, TAIFEX) feed an agent that proposes
-pre-registered hypotheses **blind to all prior verdicts**, which are mined, deflated, and
-forward-incubated in a lockbox on bars that postdate the hypothesis. It searches at a scale
-no human can, and the multiplicity accounting charges every candidate it tries — so a
-survivor is a survivor of the search, not of one lucky draw.
+Automated hypothesis search with validation inside the loop. Free-data connectors (FRED, CFTC COT,
+SEC EDGAR, GDELT, Stooq, TWSE, TAIFEX) feed an agent that proposes pre-registered hypotheses
+**without access to any prior verdict**. Candidates are mined, deflated against everything the
+search has tried, and forward-incubated on bars that postdate the hypothesis. It has produced no
+survivor that cleared incubation (claim 4).
 
 ```bash
 python scripts/research/crucible_orchestrator.py --mode synthetic --nights 4 --force
@@ -156,51 +134,68 @@ python scripts/research/crucible_orchestrator.py --mode synthetic --nights 4 --f
 
 ### RL training — Protocol v2
 
-Six stages, each one WandB run producing one decision artifact: `data-prep` → `hpo` →
-`l1-multiseed` → `ensemble-confirm` → `wf` → `oos` → `paper-deploy`. Fused pipelines are
-rejected by `scripts/validate_config.py`.
+A staged protocol where each stage is one tracked run producing one decision artifact:
+`data-prep` → `hpo` → `l1-multiseed` → `ensemble-confirm` → `wf` → `oos` → `paper-deploy`.
+`scripts/validate_config.py` rejects fused pipelines. See [docs/protocol_v2.md](docs/protocol_v2.md).
 
 ```bash
 python scripts/validate_config.py --config configs/<cfg>.yaml --stage hpo
-```
-
-```bash
 python scripts/run_full_pipeline.py --config configs/<cfg>.yaml --stage hpo --agent sac
 ```
 
-**Use SAC.** IQN, BDQ and PPO are implemented but have not cleared validation here, and
-single-asset directional RL did not survive a clean de-leaked re-baseline — see the
-[GMGP1-BTC audit](docs/research/gmgp1-btc_deep_lifecycle_audit_2026-06-03.md) before
-investing GPU time in that shape. The productive pattern is a validated linear core with RL
-as an overlay behind a beat-the-baseline gate.
+Before spending GPU time: single-asset directional RL did not survive a clean, de-leaked
+re-baseline here ([audit](docs/research/gmgp1-btc_deep_lifecycle_audit_2026-06-03.md)). SAC, IQN,
+BDQ and PPO are all implemented; none produced a strategy that cleared validation.
+The shape that remained worth testing is a validated linear core with RL as an overlay that must
+beat it out of sample.
 
-### Live and paper trading
+### Execution
 
-Six broker adapters — Bybit perps, ccxt exchanges, DXtrade, Interactive Brokers futures,
-cTrader, OANDA — behind a Docker stack with Prometheus, Grafana, Telegram alerting, drift
-detection and a kill file.
-
-```bash
-./scripts/manage_strategies.sh ps
-```
+Six broker adapters (Bybit perpetuals, ccxt exchanges, DXtrade, Interactive Brokers futures, cTrader,
+OANDA), a paper-portfolio executor with a parity harness, and a Docker stack with Prometheus,
+Grafana, Telegram alerting, drift detection and a kill file. These ran against paper and demo
+accounts only.
 
 ---
 
-## What the validation engine has found so far
+## Documentation
 
-Useful for calibrating expectations, and for not rebuilding work that is already done.
+The hub is [docs/README.md](docs/README.md).
 
-- **Validated and wired:** a cross-asset time-series momentum sleeve (~18 ETFs, 4 asset
-  classes) at a net Sharpe near **0.60** with low SPY correlation. Running on the paper
-  executor; held short of capital pending a deflated-Sharpe threshold.
-- **Tested and closed:** roughly twenty strategy families, each with the preregistration
-  that preceded it and the evaluation that closed it — options/VRP, several arbitrage
-  mechanisms, funding-rate arb standalone, liquid large-cap cross-section, intraday retail
-  patterns, market making. Full index in the
-  [validation archive](docs/research/README.md).
+| Document | Covers |
+|---|---|
+| [LEAKS_FOUND](docs/LEAKS_FOUND.md) | Three bugs that manufactured results, how each was caught, and the test guarding it |
+| [Validation archive](docs/research/README.md) | ~100 pre-registrations, audits and verdicts |
+| [Getting started](docs/guides/getting-started.md) | Install and two verified first runs |
+| [Data](docs/guides/data.md) · [sources and licensing](docs/DATA.md) | **Read before using real prices.** A fresh clone contains no market data |
+| [Building a strategy](docs/guides/building-a-strategy.md) | Idea → build → validate, with the gate at each step |
+| [Signal research](docs/guides/signal-research.md) | Writing a signal; the validation funnel |
+| [Crucible](docs/guides/crucible.md) | The automated search |
+| [RL pipeline](docs/guides/rl-pipeline.md) | Protocol v2 in practice |
+| [Configuration](docs/guides/configuration.md) | Config and gate schemas |
+| [Live trading](docs/guides/live-trading.md) | Brokers, Docker, observability, kill switch |
+| [Architecture](docs/guides/architecture.md) · [Testing](docs/guides/testing.md) · [Troubleshooting](docs/guides/troubleshooting.md) | Package map, test suite, known failure modes |
 
-That ratio is what a correctly calibrated validation engine produces. A backtester that
-promotes most of what you feed it is not being generous — it is not measuring multiplicity.
+---
+
+## Invariants worth stealing
+
+Each is enforced by a **negative** test: one that must fail if the defect is reintroduced.
+
+| ID | Rule |
+|---|---|
+| `LEAK-1` | Normalization statistics reset at every train/val/test boundary; never fit across splits |
+| `LEAK-2` | No input at bar *t* may carry data stamped after *t*, including coarse-timeframe bars (map to the last **closed** one) and anything a gate or filter reads |
+| `BUG-03` | Any hindsight-shaped reward term is zero in backtests |
+| `DATA-CLEAN` | All OHLCV passes `scripts/clean_ohlcv.py` before an experiment |
+| `CRU-1` | Crucible's gate definitions are hash-frozen; a new capability may not change a past verdict |
+| `CRU-2` | Crucible's hypothesis agent can read only dedup keys and killed families, never verdicts |
+
+Gate thresholds live in `configs/*.gates.yaml`, never in code.
+
+The project was run semi-agentically: an AI coding agent did most of the implementation under the
+rules in [CLAUDE.md](CLAUDE.md). That file ships as it was used, minus private hostnames, including
+the rules that were added after something went wrong.
 
 ---
 
@@ -208,64 +203,38 @@ promotes most of what you feed it is not being generous — it is not measuring 
 
 ```
 sharpen/
-├── signals/    Signal construction + alpha DSL + T0–T5 validation funnel
-├── crucible/   Automated strategy search with validation in the loop
-├── crypto/     Crypto envs, execution, live engine
+├── signals/    Signal specs, alpha DSL, validation funnel
+├── crucible/   Automated hypothesis search with validation in the loop
 ├── agents/     SAC, DSAC, PPO, DeepScalper
+├── envs/       Trading environments and wrappers
 ├── data/       Loaders, feature engineering, splitter
-├── envs/       V7 ContinuousSwing, wrappers, legacy V5/V6
-├── cfd/        cTrader + OANDA execution
-├── futures/    Interactive Brokers execution
-├── paper/      Paper portfolio executor + parity harness
-├── live/       Agent loading, ensembles, challenge state machine
-└── ...         hpo, training, eval, monitoring, analytics, prop, portfolio
+├── paper/      Paper-portfolio executor and parity harness
+├── crypto/  cfd/  futures/  live/   Broker adapters and live engine
+└── ...         hpo, training, eval, monitoring, analytics, portfolio
 configs/  scripts/  tests/  docs/  docker/live/
 ```
 
-**Boundary:** modify only `sharpen/`, `scripts/`, `configs/`, `tests/`, `docs/`.
-
 ---
 
-## Critical invariants
-
-| ID | Rule |
-|---|---|
-| `LEAK-1` | Reset EMA-Z normalization at train/val/test boundaries. Never normalize across splits |
-| `LEAK-2` | No feature at bar *t* may read data stamped `> t`. Each guard has a **negative** test |
-| `BUG-01` | HPO objective is `profit_factor`; lock reward parameters during HPO |
-| `BUG-03` | `hindsight_weight` must be `0.0` in backtests — it reads future prices |
-| `BUG-04` | Dense reward on a switch bar uses the direction **before** the switch |
-| `SHORT-ACCT` | Shorts must not accumulate `notional_debt` |
-| `MARGIN-CFG` | BTC `margin_requirement: 0.05` (20×); `1.0` starves the agent |
-| `DATA-CLEAN` | All OHLCV passes `scripts/clean_ohlcv.py` before experiments |
-| `PF-XCHECK` | Cross-check PF via `mid_price` **and** `close`; >30% divergence halts |
-| `CRU-1` | Crucible's `gates_hash` is frozen; a new capability must not change a past verdict |
-| `CRU-2` | Crucible's agentic code reads only `ledger_agent_view` — never verdicts. The anti-oracle moat |
-
-Full rule set and coding standards: [CLAUDE.md](CLAUDE.md).
-
----
-
-## Requirements
-
-Python 3.11+ · PyTorch 2.8+ · Gymnasium · Optuna · Weights & Biases · Parquet ·
-Prometheus · Grafana · Docker · Ruff · Mypy · Pytest
-
-A CUDA GPU (tested on RTX 4090 / 5090) is needed for RL training only. The signal and
-Crucible research stacks are CPU-only.
+## Tests
 
 ```bash
 python -m pytest
 ```
 
+On the published tree at release, pytest's own summary read:
+
+```
+3248 passed, 25 skipped, 28 deselected, 1 xfailed, 21 warnings in 252.36s (0:04:12)
+```
+
+The 28 deselected tests are slow or integration tests excluded by the default `addopts`. They are
+not part of that result, and at least one of them can hang rather than fail, so run them
+individually with a timeout.
+
 ---
-
-## Risk disclaimer
-
-For research and educational purposes only. **Trading involves significant financial risk**
-and reinforcement learning does not reduce it. Nothing here is investment advice, nothing
-here is cleared for capital, and the authors are not responsible for trading losses.
 
 ## License
 
-See [LICENSE](LICENSE).
+[Apache License 2.0](LICENSE). Copyright 2026 Keng Lee. Attribution for derived third-party code is
+in [NOTICE](NOTICE). No market data is distributed; see [docs/DATA.md](docs/DATA.md).
