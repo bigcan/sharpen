@@ -98,6 +98,19 @@ own caveats: the synthetic panel is not survivorship-free, so every figure is an
 [Getting started](docs/guides/getting-started.md) explains every column and walks through a full
 Crucible discovery tick.
 
+### Reproduce the headline numbers
+
+The surviving momentum edge, its deflation failure and the value test all re-run from a fresh clone
+in about a minute on free data:
+
+```bash
+python scripts/research/xsec_momentum_falsification.py   # net Sharpe 0.601, 4/4 classes
+python scripts/research/audit_tailwind_book.py           # DSR 0.896 < 0.95, PBO 0.0009
+python scripts/research/value_falsification.py           # value factor -0.364, NO-GO
+```
+
+Expected output and what to do if yours differs: [docs/REPRODUCE.md](docs/REPRODUCE.md).
+
 ---
 
 ## What is in the box
@@ -166,6 +179,7 @@ The hub is [docs/README.md](docs/README.md).
 |---|---|
 | [NEGATIVE_RESULTS](NEGATIVE_RESULTS.md) | All 76 closed strategies and probes, with the number that closed each |
 | [LEAKS_FOUND](docs/LEAKS_FOUND.md) | Three bugs that manufactured results, how each was caught, and the test guarding it |
+| [Reproduce](docs/REPRODUCE.md) | Re-run the headline numbers from a fresh clone, with expected output |
 | [Methodology](docs/METHODOLOGY.md) | How a result was judged real: pre-registration, leakage rules, deflation, power, controls, audits |
 | [Validation archive](docs/research/README.md) | ~100 pre-registrations, audits and verdicts |
 | [Getting started](docs/guides/getting-started.md) | Install and two verified first runs |
@@ -233,6 +247,17 @@ On the published tree at release, pytest's own summary read:
 The 28 deselected tests are slow or integration tests excluded by the default `addopts`. They are
 not part of that result, and at least one of them can hang rather than fail, so run them
 individually with a timeout.
+
+---
+
+## Contributing, security, and a personal note
+
+Challenges to a result are the most useful contribution: see [CONTRIBUTING.md](CONTRIBUTING.md).
+Report security issues privately per [SECURITY.md](SECURITY.md). Participation follows the
+[Code of Conduct](CODE_OF_CONDUCT.md).
+
+[EPILOGUE.md](EPILOGUE.md) is the author's personal conclusion. It is opinion, labelled as such, and
+goes beyond what this repository shows.
 
 ---
 
