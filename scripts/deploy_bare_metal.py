@@ -37,6 +37,12 @@ DEPLOY_EXCLUDES = [
     # tool caches (.mypy_cache alone was ~608MB uncompressed). Excluding all of
     # these: ~201MB -> ~15MB package (fast, reliable upload).
     'bundles', '.backups', '.mypy_cache', '.pytest_cache', '.ruff_cache',
+    # .claude/worktrees held 1.26GB across 8 worktree copies (2026-09-05). The walk
+    # prunes .git/__pycache__ INSIDE each one, so they never showed up as the usual
+    # cache bloat — but their source still zipped, making the package 45MB instead
+    # of ~7MB and shipping 8 stale divergent copies of sharpen/scripts/configs to
+    # the training box. Nothing on the remote ever reads them.
+    '.claude',
 ]
 ROOT_DATA_EXCLUDE = ['data'] # Only exclude root data folder
 
