@@ -7,6 +7,8 @@ name = "sharpen"
 version = "0.1.0"
 description = "Semi-agentic Hypothesis-to-Alpha Research Platform with Empirical Null-testing."
 authors = [{ name = "Keng Lee" }]
+license = { text = "Apache-2.0" }
+classifiers = ["License :: OSI Approved :: Apache Software License"]
 requires-python = ">=3.11"
 dependencies = [
     "torch>=2.8.0",

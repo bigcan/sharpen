@@ -1,0 +1,57 @@
+Sharpen
+Copyright 2026 Keng Lee
+
+This product includes software developed by Keng Lee.
+
+Licensed under the Apache License, Version 2.0. See the LICENSE file.
+
+--------------------------------------------------------------------------------
+PROVENANCE AND THIRD-PARTY ATTRIBUTION
+--------------------------------------------------------------------------------
+
+1. FinRL / FinRL-Podracer (AI4Finance Foundation Inc.)
+
+   This project originated in 2026-01 as a scaffold derived from FinRL and
+   FinRL-Podracer, licensed under the Apache License, Version 2.0.
+
+       https://github.com/AI4Finance-Foundation/FinRL
+       Copyright 2024 AI4Finance Foundation Inc.
+
+   The codebase has since been rewritten and no longer imports or links against
+   FinRL: there is no `import finrl` / `from finrl` statement anywhere in the
+   source tree. This attribution is retained as an accurate record of the
+   project's origin and in acknowledgement of the upstream work.
+
+2. ElegantRL (AI4Finance Foundation Inc.)
+
+   Portions of the following files are derived from ElegantRL, licensed under
+   the Apache License, Version 2.0:
+
+       https://github.com/AI4Finance-Foundation/ElegantRL
+       Copyright 2024 AI4Finance Foundation Inc.
+
+       sharpen/alphaseek/agents.py         derived from erl_agent.py
+       sharpen/alphaseek/nets.py           derived from erl_net.py
+       sharpen/alphaseek/replay_buffer.py  derived from erl_replay_buffer.py
+       sharpen/alphaseek/trainer.py        derived from erl_run.py
+
+   Modified by Keng Lee, 2026. Summary of modifications: imports restructured
+   into a package (no sys.path manipulation); print() replaced by logging;
+   non-blocking host-to-device transfers; safe checkpoint loading with
+   map_location; a lightweight agent config replacing the contest Config; a
+   12-dimensional state network trained from scratch (earlier baked-in
+   normalisation statistics removed); a production training loop with
+   evaluation metrics (total return, Sharpe, Sortino, profit factor, max
+   drawdown), checkpoint save/resume and experiment logging.
+
+   Earlier revisions of this repository also contained a verbatim copy of
+   ElegantRL agent source under `contest/`; that tree has been removed.
+
+--------------------------------------------------------------------------------
+DATA
+--------------------------------------------------------------------------------
+
+No market data is distributed with this software. Datasets referenced by the
+configuration files (Dukascopy, OANDA, CME, FinMind, Bitfinex, Bybit and others)
+are subject to their respective providers' licences and terms of use and must be
+obtained directly from those providers. See docs/DATA.md.
