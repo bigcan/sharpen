@@ -166,6 +166,7 @@ The hub is [docs/README.md](docs/README.md).
 |---|---|
 | [NEGATIVE_RESULTS](NEGATIVE_RESULTS.md) | All 76 closed strategies and probes, with the number that closed each |
 | [LEAKS_FOUND](docs/LEAKS_FOUND.md) | Three bugs that manufactured results, how each was caught, and the test guarding it |
+| [Methodology](docs/METHODOLOGY.md) | How a result was judged real: pre-registration, leakage rules, deflation, power, controls, audits |
 | [Validation archive](docs/research/README.md) | ~100 pre-registrations, audits and verdicts |
 | [Getting started](docs/guides/getting-started.md) | Install and two verified first runs |
 | [Data](docs/guides/data.md) · [sources and licensing](docs/DATA.md) | **Read before using real prices.** A fresh clone contains no market data |
