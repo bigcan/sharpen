@@ -3,8 +3,8 @@
 **S**emi-agentic **H**ypothesis-to-**A**lpha **R**esearch **P**latform with **E**mpirical **N**ull-testing.
 
 Sharpen is a quantitative research platform and the research record of the program that built
-it: nine months of systematically trying to find tradeable edges, and mostly failing to. About
-twenty strategies across six families were pre-registered, built, measured and killed. One weak
+it: nine months of systematically trying to find tradeable edges, and mostly failing to. 76
+strategies and probes across eight families were specified, measured and closed. One weak
 edge survived and still did not clear its own deployment gates. **Nothing here was ever traded
 with real capital.**
 
@@ -22,11 +22,11 @@ are written up in **[docs/LEAKS_FOUND.md](docs/LEAKS_FOUND.md)**, the best place
 
 Each claim below points at evidence you can re-run.
 
-1. **About twenty strategies, across six families, were tested and closed.** Options and volatility risk premium,
-   several arbitrage mechanisms, funding-rate carry, liquid large-cap cross-sectional equity,
-   single-asset directional RL, market making, retail intraday patterns and more. Each has its
-   pre-registration and the evaluation that closed it in the
-   [validation archive](docs/research/README.md).
+1. **76 strategies and probes, across eight families, were tested and closed.** Directional RL,
+   options and volatility premium, arbitrage and market making, equity cross-section, sleeves and
+   overlays, retail technical rules, free-data probes and automated-mining substrates. Every one,
+   with the number that closed it and the evidence that ships, is in
+   **[NEGATIVE_RESULTS.md](NEGATIVE_RESULTS.md)**.
 
 2. **One weak survivor: cross-asset time-series momentum (TSMOM).** 18 ETFs across four asset
    classes, built from **free daily public OHLCV**, net Sharpe **≈ 0.60 at 2 bps**. The book built
@@ -164,6 +164,7 @@ The hub is [docs/README.md](docs/README.md).
 
 | Document | Covers |
 |---|---|
+| [NEGATIVE_RESULTS](NEGATIVE_RESULTS.md) | All 76 closed strategies and probes, with the number that closed each |
 | [LEAKS_FOUND](docs/LEAKS_FOUND.md) | Three bugs that manufactured results, how each was caught, and the test guarding it |
 | [Validation archive](docs/research/README.md) | ~100 pre-registrations, audits and verdicts |
 | [Getting started](docs/guides/getting-started.md) | Install and two verified first runs |
