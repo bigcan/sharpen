@@ -276,3 +276,74 @@ def test_slippage_decreases_with_dollar_volume():
     _, _, _, _, info = env.step(np.array([0.5]))
     base_only = info["turnover"] * env.initial_capital * 1.0 * 1e-4
     assert abs(s_deep - base_only) / base_only < 1e-3
+
+
+# --------------------------------------------------------------------------- #
+# 4. evaluate_linear_core_levered — the v1.1 DIAGNOSTIC arm
+# --------------------------------------------------------------------------- #
+# Bidirectional by construction (the "silence is not a result" rule): a levered
+# arm that silently forced its levers off would pass a one-directional
+# "levers-off matches the gate baseline" check forever. So assert BOTH that it
+# matches with levers off AND that it genuinely MOVES with levers on.
+
+def test_levered_core_matches_gate_baseline_when_levers_off():
+    arrays = _factory_arrays()
+    cfg = {"env": {"taker_fee": 0.0002, "slippage_base_bps": 1.0,
+                   "target_vol_asset": 0.10, "max_gross_exposure": 3.0}}
+    off = {"no_trade_band": 0.0, "rebalance_interval": 1, "cost_penalty_scale": 0.0}
+    base = factory.evaluate_linear_core(arrays, cfg, overrides=off)
+    lev = factory.evaluate_linear_core_levered(arrays, cfg, overrides=off)
+    assert lev == base
+
+
+def test_levered_core_actually_responds_to_the_levers():
+    """The other direction: with levers ON the diagnostic must diverge from the
+    gate baseline (which forces them off) — lower turnover, different metrics.
+    If this ever passes trivially the arm has stopped measuring anything."""
+    arrays = _factory_arrays()
+    cfg = {"env": {"taker_fee": 0.0002, "slippage_base_bps": 1.0,
+                   "target_vol_asset": 0.10, "max_gross_exposure": 3.0}}
+    on = {"no_trade_band": 0.25, "rebalance_interval": 21}
+    base = factory.evaluate_linear_core(arrays, cfg, overrides=on)
+    lev = factory.evaluate_linear_core_levered(arrays, cfg, overrides=on)
+    assert base["turnover_ann"] > 0.0
+    assert lev["turnover_ann"] < base["turnover_ann"]
+    assert lev["net_sharpe"] != base["net_sharpe"]
+
+
+# --------------------------------------------------------------------------- #
+# 5. exposure diagnostics — telling an edge from an abstention
+# --------------------------------------------------------------------------- #
+
+def test_exposure_metrics_distinguish_flat_from_invested():
+    """Bidirectional: a flat book must report zero exposure, an invested one
+    must not. Without this a near-cash policy posts a healthy Sharpe and reads
+    as an edge (the window-0 v1.1 signature: +0.53%/yr at 1.14 turnover)."""
+    flat = factory._exposure_metrics([[0.0, 0.0]] * 5, 5)
+    assert flat["exposure_frac"] == 0.0
+    assert flat["gross_exposure_mean"] == 0.0
+
+    invested = factory._exposure_metrics([[0.5, -0.25]] * 5, 5)
+    assert invested["exposure_frac"] == 1.0
+    assert invested["gross_exposure_mean"] == 0.75
+
+    half = factory._exposure_metrics([[0.4, 0.0], [0.0, 0.0]] * 3, 6)
+    assert half["exposure_frac"] == 0.5
+
+
+def test_exposure_metrics_absent_when_weights_not_captured():
+    """Callers that never collected weights get explicit None, not a fake 0.0 —
+    a silent zero would read as 'flat book' and libel an active policy."""
+    m = factory._metrics([0.01, -0.005], [0.1, 0.1], [100.0, 101.0, 100.5])
+    assert m["gross_exposure_mean"] is None
+    assert m["exposure_frac"] is None
+
+
+def test_linear_core_reports_exposure_through_the_drive():
+    """The real path: evaluate_linear_core must surface exposure, not None."""
+    arrays = _factory_arrays()
+    cfg = {"env": {"taker_fee": 0.0002, "target_vol_asset": 0.10,
+                   "max_gross_exposure": 3.0}}
+    m = factory.evaluate_linear_core(arrays, cfg)
+    assert m["exposure_frac"] is not None and m["exposure_frac"] > 0.0
+    assert m["gross_exposure_mean"] > 0.0

@@ -154,6 +154,7 @@ def _evaluate_model(model, arrays: dict, config: dict, overrides: dict | None = 
     env = factory.make_allocator_env(arrays, config, overrides=overrides, eval_mode=True)
     obs, _ = env.reset()
     step_returns, turnovers, pvs = [], [], [env.initial_capital]
+    weights = []
     done = False
     while not done:
         action, _ = model.predict(obs, deterministic=True)
@@ -161,8 +162,9 @@ def _evaluate_model(model, arrays: dict, config: dict, overrides: dict | None = 
         step_returns.append(info["step_return"])
         turnovers.append(info["turnover"])
         pvs.append(info["portfolio_value"])
+        weights.append(info["position"])
         done = terminated or truncated
-    return factory._metrics(step_returns, turnovers, pvs)
+    return factory._metrics(step_returns, turnovers, pvs, weights)
 
 
 # --------------------------------------------------------------------------- #
@@ -333,6 +335,14 @@ def run_window(w_idx, window, data, config, n_trials, hpo_steps, train_steps,
     # Test eval — RL vs frozen linear core (identical env/convention/costs).
     rl_test = _evaluate_model(model, test_arrays, config, hpo["env_overrides"])
     core_test = factory.evaluate_linear_core(test_arrays, config, overrides=hpo["env_overrides"])
+    # Lever-matched core (DIAGNOSTIC ONLY, never a gate; v1.1). The gate baseline above
+    # forces the v1.1 execution levers OFF by construction, so an uplift won here could
+    # be the THROTTLE rather than the POLICY — the lever probe measured a purely
+    # mechanical throttle moving a deterministic path ~0.41 -> ~0.70 net Sharpe with no
+    # RL at all. This arm holds the baseline's SIGNAL fixed and gives it the RL's own
+    # levers; `uplift_vs_levered_core` is then the policy's own share.
+    core_levered_test = factory.evaluate_linear_core_levered(
+        test_arrays, config, overrides=hpo["env_overrides"])
     # g_cost_gap (artifact detector): frictionless RL minus net RL Sharpe. A large
     # gap = the edge is cost-fragile (the AlphaSeek/HFT failure mode). Reuse the
     # trained model; only the env costs change (zero fee + zero slippage).
@@ -359,8 +369,10 @@ def run_window(w_idx, window, data, config, n_trials, hpo_steps, train_steps,
         "hpo_env_overrides": hpo["env_overrides"],
         "rl_test": rl_test,
         "linear_core_test": core_test,
+        "linear_core_levered_test": core_levered_test,
         "rl_frictionless_net_sharpe": rl_frictionless["net_sharpe"],
         "uplift_net_sharpe": float(uplift),
+        "uplift_vs_levered_core": float(rl_test["net_sharpe"] - core_levered_test["net_sharpe"]),
         "cost_gap": float(cost_gap),
         "cost_gap_pass": bool(cost_gap_pass),
         "gate_pass": bool(window_pass),
@@ -371,6 +383,8 @@ def run_window(w_idx, window, data, config, n_trials, hpo_steps, train_steps,
         f"window/{w_idx}/rl_net_sharpe": rl_test["net_sharpe"],
         f"window/{w_idx}/linear_core_net_sharpe": core_test["net_sharpe"],
         f"window/{w_idx}/uplift_net_sharpe": uplift,
+        f"window/{w_idx}/linear_core_levered_net_sharpe": core_levered_test["net_sharpe"],
+        f"window/{w_idx}/uplift_vs_levered_core": rl_test["net_sharpe"] - core_levered_test["net_sharpe"],
         f"window/{w_idx}/cost_gap": cost_gap,
         f"window/{w_idx}/gate_pass": int(window_pass),
     })
@@ -494,6 +508,10 @@ def _write_manifest(out_dir: Path, stage: str, config: dict, gate: dict,
     uplifts = [r["uplift_net_sharpe"] for r in ok]
     rl_sharpes = [r["rl_test"]["net_sharpe"] for r in ok]
     core_sharpes = [r["linear_core_test"]["net_sharpe"] for r in ok]
+    # v1.1 diagnostic arm (never a gate) — absent from pre-v1.1 window results.
+    levered_sharpes = [r["linear_core_levered_test"]["net_sharpe"]
+                       for r in ok if "linear_core_levered_test" in r]
+    levered_uplifts = [r["uplift_vs_levered_core"] for r in ok if "uplift_vs_levered_core" in r]
     cost_gaps = [r["cost_gap"] for r in ok if "cost_gap" in r]
     n_pass = sum(1 for r in ok if r["gate_pass"])
 
@@ -542,6 +560,14 @@ def _write_manifest(out_dir: Path, stage: str, config: dict, gate: dict,
         "median_uplift_net_sharpe": median_uplift,
         "median_rl_net_sharpe": median_rl,
         "median_linear_core_net_sharpe": float(np.median(core_sharpes)) if core_sharpes else None,
+        # DIAGNOSTIC (not a gate): the baseline signal under the RL's own execution
+        # levers, and the RL's uplift over it. A large `median_uplift_net_sharpe`
+        # alongside a ~0 `median_uplift_vs_levered_core` means the throttle won, not
+        # the policy — read both before calling any v1.1 result an RL result.
+        "median_linear_core_levered_net_sharpe":
+            float(np.median(levered_sharpes)) if levered_sharpes else None,
+        "median_uplift_vs_levered_core":
+            float(np.median(levered_uplifts)) if levered_uplifts else None,
         "median_cost_gap": median_cost_gap,
         # g_diversification (corr to existing live sleeves) needs GMGP1/SG-1 live
         # return series — a Stage-3/deploy-gate integration, not wired in this
