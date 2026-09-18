@@ -55,9 +55,9 @@ mean the mechanism is absent, only that it is not extractable at this power/cost
   |---|---|---|---|
   | Month-revenue | `TaiwanStockMonthRevenue` | monthly | mandatory disclosure by the **10th of the following month** → signal becomes visible on **day 10 of month(revenue_month)+1**, never the revenue month-end |
   | Margin / short-sale | `TaiwanStockMarginPurchaseShortSale` | daily (post-close) | **T+1 trading day** (published after the close of day T) |
-  | Shareholding distribution (集保 TDCC) | `TaiwanStockHoldingSharesPer` | weekly (per-Friday) | **as-of `date` + 6 calendar days** buffer (TDCC releases the following week) |
+  | Shareholding distribution (TDCC) | `TaiwanStockHoldingSharesPer` | weekly (per-Friday) | **as-of `date` + 6 calendar days** buffer (TDCC releases the following week) |
 - **Sample window:** full available FinMind history per channel, intersected. Month-revenue and
-  margin run to ~2005+; the 集保 distribution series is shorter (~2016+). Each probe uses its own
+  margin run to ~2005+; the TDCC distribution series is shorter (~2016+). Each probe uses its own
   channel's full history (the harness reports the effective `min_days`); **no window is chosen to
   flatter a result.**
 - **Currency / cost:** TWD notional; the **0.30% securities-transaction SELL tax** is baked into the
@@ -77,8 +77,8 @@ reconstruction (TEJ-grade) is a **promotion gate**, not part of this probe.
 At each **month-end** rebalance `t`:
 
 1. Rank the common-stock pool by **market cap** = `close_t × shares_t`, where `shares_t` = total
-   registered shares from the `TaiwanStockHoldingSharesPer` **"total" (合計)** tier, forward-filled
-   from the last *available* weekly update (causal) and lagged per §1. (Shares from the 集保 total
+   registered shares from the `TaiwanStockHoldingSharesPer` **"total"** tier, forward-filled
+   from the last *available* weekly update (causal) and lagged per §1. (Shares from the TDCC total
    are used **only** for the cap-rank cut; they are independent of the log-ADV size proxy the
    harness neutralizes on, so membership and neutralization do not share a quantity.)
 2. **Exclude the top-50** (the 0050 large-cap tier — the slice the June mirage already killed).
@@ -121,7 +121,7 @@ has the *opposite* sign is a FAIL, not a sign-flip opportunity.
 - **Expected sign:** **−1** (long LOW / falling margin utilization; short the crowded).
 
 ### P3 — Big-holder shareholding concentration · `tw_smallcap_holder_conc` · sign **+1** · hash `1be26f02ee6a`
-- **Mechanism:** the 集保 (TDCC) weekly distribution splits each name's register into holder-size
+- **Mechanism:** the TDCC weekly distribution splits each name's register into holder-size
   tiers. A **rising share held by big holders (>400 board lots)** = informed accumulation by
   concentrated hands; **outperformance** follows. (The mirror, dispersion to many tiny retail
   holders, is distribution.)
@@ -225,9 +225,9 @@ in code):
 > Original values are preserved in the table below for the audit trail.
 
 **Run record.** Full FinMind pull (Sponsor token, env-only, never committed): 2131-name TWSE+TPEx
-common-stock pool → prices 2130 ids / month-revenue 2126 / margin 1995 / 集保 2106 / dividends 2029.
+common-stock pool → prices 2130 ids / month-revenue 2126 / margin 1995 / TDCC 2106 / dividends 2029.
 Panel: pool **N=612**, **T=5292** (2005-01-03..2026-07-15), **4017 liquid days**; membership
-**2010-02-26..2026-07-15**, **median 200 names/month** (the 集保 register starts 2010-01-29 — *earlier*
+**2010-02-26..2026-07-15**, **median 200 names/month** (the TDCC register starts 2010-01-29 — *earlier*
 than the ~2016 assumed in §1, so the band is longer than pre-registered, not shorter). Channel
 coverage of active cells: mrev_yoy 99.3%, margin_util 97.2%, holder_conc 100.0%. Hygiene **PASS** on
 all three (causal ✓, OHLC violations 0). All three spec content-hashes reproduced exactly
@@ -248,7 +248,7 @@ figures in parentheses. Verdicts are identical in both.
 *What is PROVEN (measured, on this substrate):*
 - **P2 and P3 are cleanly falsified.** Both realized the *opposite* of their pre-committed sign (§5
   kill condition #1), with negative net Sharpe at every cost model, DSR 0.000 and FDR-q 0.997. The
-  contrarian margin-crowding mechanism and the informed-accumulation 集保 mechanism are both rejected
+  contrarian margin-crowding mechanism and the informed-accumulation TDCC mechanism are both rejected
   in the small/mid band. Rising margin utilization mildly predicts *continuation*, not reversal.
 - **P1 clears every pre-registered gate on the current-listing pool**: IC-IR 0.288 ≥ 0.05, t 18.23 ≥
   3.0, DSR 1.000 ≥ 0.90, FDR-q 0.000 ≤ 0.10, net Sharpe +0.56 at the 0.30%-sell-tax `standard` cost
