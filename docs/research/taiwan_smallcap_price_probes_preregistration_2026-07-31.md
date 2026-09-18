@@ -7,8 +7,8 @@ already on disk. **Harness:** the locked `sharpen/signals/` scorecard, threshold
 
 ## 0. Why these, and why they are not a re-specification
 
-The 2026-07-15 campaign probed three **alt-data** channels (month-revenue, margin, 集保 holdings) and
-its stop rule bars its Round 2 (`value/book-to-market`, `分點` branch-concentration). Those channels
+The 2026-07-15 campaign probed three **alt-data** channels (month-revenue, margin, TDCC holdings) and
+its stop rule bars its Round 2 (`value/book-to-market`, `broker-branch` concentration). Those channels
 stay barred and untouched. R1/R2 are **price-only** and test mechanisms none of the prior probes
 touched — neither is a different window or scaling of P1/P2/P3, which the stop rule exists to
 prevent.

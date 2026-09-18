@@ -60,12 +60,12 @@ Round 1 does — a spec-text drift then fails the test).
 - **Expected sign:** **+1** (long high book-to-market).
 - **Build cost:** LOW — one extra FinMind dataset, PIT-clean daily, trivial transform.
 
-### R2-B — Smart-money branch concentration (分點) · `tw_smallcap_branch_conc` · sign **+1** · hash `6976763832da`
+### R2-B — Smart-money branch concentration (broker-branch) · `tw_smallcap_branch_conc` · sign **+1** · hash `6976763832da`
 - **Dataset (untouched, niche):** broker-branch daily buy/sell per stock (`TaiwanStockTradingDailyReport`
-  or the equivalent 分點 dataset — **confirm exact FinMind id + Sponsor tier + coverage before build**).
+  or the equivalent broker-branch dataset — **confirm exact FinMind id + Sponsor tier + coverage before build**).
   This is the §6.3 "capacity-constrained niche / small-operator reframe" poster child — big money
   ignores it because it is messy and low-capacity, which is exactly why an edge could survive there.
-- **Mechanism:** **concentrated** net accumulation by a few branches (主力 / informed hands) predicts
+- **Mechanism:** **concentrated** net accumulation by a few branches (informed hands) predicts
   continuation; **dispersed** net buying (broad retail) does not. Concentration, not raw net flow, is
   the signal.
 - **Signal (causal):** `branch_net_conc` = trailing-`N`-day sum of
@@ -73,7 +73,7 @@ Round 1 does — a spec-text drift then fails the test).
   `/ shares_outstanding`, with **K and N FIXED here** (K = 15 branches, N = 21 trading days — not
   tuned), stamped **T+1** (branch report is EOD). Concentration is enforced by the top-K restriction.
 - **Expected sign:** **+1** (long concentrated net accumulation).
-- **Build cost + risk:** HIGH — the 分點 feed is large (every branch × stock × day), the wire format
+- **Build cost + risk:** HIGH — the broker-branch feed is large (every branch × stock × day), the wire format
   needs a live PF-XCHECK, and the signal is the noisiest of the five. Run this **only** if R2-A does not
   already answer the "different data" question, or if the niche credibility is worth the build.
 
@@ -93,7 +93,7 @@ Round 1 does — a spec-text drift then fails the test).
 
 Nothing is built now. On greenlight, the work is the Round-1 shape:
 1. extend `scripts/data/fetch_taiwan_fundamentals_finmind.py` with the R2 dataset(s) + their causal
-   `avail_date` lags (PER: T+1; 分點: T+1 EOD), fail-loud on schema drift;
+   `avail_date` lags (PER: T+1; broker-branch: T+1 EOD), fail-loud on schema drift;
 2. add the two signal classes to a Round-2 eval (or extend the Round-1 eval) reading from
    `feature_slots`, with `build_signals` asserting the frozen hashes above;
 3. offline tests: spec-hash seal, availability-lag leak guard, truncation-equivalence, evaluate_batch

@@ -7,7 +7,7 @@
 ## 0. Why this is a new campaign, not the barred Round 2
 
 The 2026-07-15 pre-registration's §5 stop rule closed **that** campaign at 3 probes and barred its
-Round 2 (`value/book-to-market` + `分點` branch-concentration). Those two channels are **not** probed
+Round 2 (`value/book-to-market` + `broker-branch` concentration). Those two channels are **not** probed
 here and remain barred. This campaign uses a channel that did not exist on disk on 2026-07-15 —
 per-name daily **institutional net flow** (TWSE T86 via FinMind
 `TaiwanStockInstitutionalInvestorsBuySell`), fetched by a new `institutional` channel added to
@@ -47,7 +47,7 @@ is a **FAIL**, not a sign-flip opportunity.
 ### Q2 — Investment-trust net flow · `tw_smallcap_trust_flow` · sign **+1**
 - **Signal (causal):** identical construction on `trust_net`.
 - **Expected sign: +1** (same sign on purpose — see below).
-- **Q2 IS A MECHANISM TEST, NOT A SECOND SHOT AT A HIT.** Domestic investment trusts (投信) are
+- **Q2 IS A MECHANISM TEST, NOT A SECOND SHOT AT A HIT.** Domestic investment trusts are
   institutional but far more prone to window-dressing and momentum-chasing, and the literature on
   their informativeness is much weaker than for foreign investors. So:
   - Q1 **≫** Q2 ⇒ consistent with *informed* foreign flow (the claimed mechanism);

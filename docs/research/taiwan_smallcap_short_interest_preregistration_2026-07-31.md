@@ -19,7 +19,7 @@ untested here, and the data has been sitting on disk unused — the 2026-07-15 c
 the panel for a pre-registered robustness read only — NOT a second trial."* So it has never been a
 signal. This makes it one, in a new campaign with its own cumulative multiplicity.
 
-Taiwan-specific reason the prior is strong: 融券 (margin short) requires a borrow under strict
+Taiwan-specific reason the prior is strong: margin short selling requires a borrow under strict
 exchange mechanics and is costly to maintain, so a large short balance is an expensive position to
 hold and therefore more likely to be informed than a cheap one.
 
@@ -144,7 +144,7 @@ count instead of relying on DSR.
 
 ### Ledger entry (durable — do not re-test)
 
-**Taiwan small/mid-cap short interest (融券 balance / shares) is FALSIFIED.** Right sign at 21d, no
+**Taiwan small/mid-cap short interest (margin-short balance / shares) is FALSIFIED.** Right sign at 21d, no
 capture after the sell tax, sign flips at 63d, inverted over the recent 2 years. Per §5 the campaign
 is **complete at 1 probe** — no S2, and no re-specification as days-to-cover, float-adjusted, or
 Δ-instead-of-level.

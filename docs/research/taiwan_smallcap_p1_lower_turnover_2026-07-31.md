@@ -25,7 +25,7 @@ the decision horizon. The existing scorecard already carried the full ladder, an
 horizon to 63 — the prescribed lower-turnover form, inside the pre-registered set — converts that
 into a deployable edge.
 
-This is **not** Round 2. Round 2 (value/book-to-market + 分點 branch-concentration) remains barred by
+This is **not** Round 2. Round 2 (value/book-to-market + broker-branch concentration) remains barred by
 the pre-reg §5 stop rule and was not run. This re-scores the *same three frozen specs* on the *same
 data* at a *pre-registered* horizon.
 

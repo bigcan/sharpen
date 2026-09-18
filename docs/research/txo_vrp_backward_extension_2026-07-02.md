@@ -242,7 +242,7 @@ layer, not another re-sampling of the same premium).
    for the *market-maker* who earns the spread and the tax asymmetry — not for a taker-side
    harvester. The moat that protects the corner from global vol arb also prices out the
    small taker. (Same conclusion as the cont-85 STF cost scout: the friction edge is the
-   造市商 seat, an infra/membership moat outside this project's capability.)
+   market-maker seat, an infra/membership moat outside this project's capability.)
 
 **Honest caveats — what could, in principle, be criticized:**
 - The extension hedge marks at 13:45 (D1) drag ≈ −0.09 SR vs the frozen 13:30 convention;
