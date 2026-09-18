@@ -4,15 +4,15 @@
 
 The all-in-one agentic platform for building quant trading strategies, from idea to alpha, with empirical null-testing.
 
-**Build full-featured quant trading strategies in any natural language. Sharpen takes your idea
-all the way to a validated, trained and paper-deployed system.**
+**Build full-featured quant trading strategies in any natural language. Sharpen carries each one
+from a sentence to a validated, trained and paper-deployed system.**
 
 Sharpen is built to be driven by an AI coding agent such as Claude Code or Codex. The rules the
 agent follows ship in the repository ([CLAUDE.md](CLAUDE.md), [AGENTS.md](AGENTS.md)): how to
 turn an idea into a pre-registered spec, which gates it must pass, how RL training is staged, and
 what must never happen (look-ahead, cross-split normalization, fused train-and-evaluate runs). You
-say what you want; the agent writes the signal, the config and the tests, runs the pipeline, and
-stops at every gate that fails.
+say what you want, in whatever language you work in; the agent writes the signal, the config and
+the tests, runs the pipeline, and stops at every gate that fails.
 
 Underneath is a full research-to-execution stack:
 
@@ -35,7 +35,8 @@ Underneath is a full research-to-execution stack:
 ## From a sentence to a strategy
 
 Here is the end-to-end path, as you would drive it from a coding agent. Each step names what you
-ask, what the agent does, and the gate that decides whether you go on.
+ask, what the agent does, and the gate that decides whether you go on. The requests are shown in
+English, but any language works; step 7 is shown in Chinese.
 
 **1. State the idea.**
 > *"Test whether 12-month time-series momentum on liquid ETFs across equities, bonds, commodities
@@ -46,6 +47,8 @@ model and the result that would kill it. It commits this **before** running anyt
 signal spec is content-hashed so it can't be quietly edited after the results are in.
 
 **2. Build and validate the signal.**
+> *"Build it as a signal and run it through the validation funnel."*
+
 The agent implements a `compute(panel)` signal and scores it through the funnel:
 
 ```bash
@@ -94,7 +97,8 @@ python scripts/run_full_pipeline.py --config configs/<cfg>.yaml --stage hpo --ag
 ```
 
 **7. Deploy to paper, then watch it.**
-> *"Deploy the ensemble to the paper account and alert me if it drifts."*
+> *「把這個組合部署到模擬帳戶，出現漂移就通知我。」*
+> *("Deploy the ensemble to the paper account and alert me if it drifts.")*
 
 The paper-portfolio executor, parity harness and Docker stack (Prometheus, Grafana, Telegram)
 take over. Drift detection and a kill file guard the live path.
@@ -218,6 +222,9 @@ No data and no API keys. Python 3.11+.
 pip install -e ".[dev]"
 python scripts/research/eval_signals.py --batch demo --panel "synthetic:1400,60" --out results/demo
 ```
+
+Or open the repo in your coding agent and ask for it: *"Run the demo signals on a synthetic panel
+and explain the scorecard."*
 
 This scores four demo signals on a synthetic panel through the full funnel (abridged columns):
 
