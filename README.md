@@ -4,8 +4,8 @@
 
 The all-in-one agentic platform for building quant trading strategies, from idea to alpha, with empirical null-testing.
 
-**Describe a trading strategy in plain English. Sharpen turns it into a validated, trained and
-paper-deployed system.**
+**Build full-featured quant trading strategies in any natural language. Sharpen takes your idea
+all the way to a validated, trained and paper-deployed system.**
 
 Sharpen is built to be driven by an AI coding agent such as Claude Code or Codex. The rules the
 agent follows ship in the repository ([CLAUDE.md](CLAUDE.md), [AGENTS.md](AGENTS.md)): how to
