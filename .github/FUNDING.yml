@@ -2,7 +2,5 @@
 # https://docs.github.com/en/repositories/managing-your-repositorys-settings-and-features/customizing-your-repository/displaying-a-sponsor-button-in-your-repository
 
 github: [bigcan]
-# TODO: set to your Open Collective slug (the part after opencollective.com/) once
-# Open Source Collective approves the application, then uncomment.
-# open_collective: your-collective-slug
+open_collective: sharpen
 ko_fi: bigcan
