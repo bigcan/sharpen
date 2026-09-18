@@ -78,12 +78,6 @@ Each claim below points at evidence you can re-run; claim 4 needs free Taiwan da
 
    This is why the null results are **statements about the instrument, not about markets.**
 
-### What this repository does **not** claim
-
-- ❌ **"There is no alpha in public price data."** TSMOM, claim 2, is an alpha found in free public
-  OHLCV. The nulls bound what *this apparatus, on this data, at this sample size* could detect.
-- ❌ **That any strategy here is profitable, live-ready, or fit to trade.**
-
 ---
 
 ## Try it in 30 seconds
