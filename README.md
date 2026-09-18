@@ -20,7 +20,7 @@ Underneath is a full research-to-execution stack:
 - **A full backtesting and falsification toolkit**: walk-forward and recent out-of-sample
   backtests, realistic costs, timing nulls, planted-signal power tests, stress and noise
   robustness. Its job is to try to break a strategy before the market does.
-- **Crucible**, an automated alpha-discovery loop in which an LLM proposes hypotheses it can never
+- **Crucible**, an automated **alpha mining** platform in which an LLM proposes hypotheses it can never
   see the scores of.
 - **A frontier deep-RL stack**: distributional SAC, CrossQ, IQN, BDQ and PPO, multi-asset and
   execution environments, distributed GPU hyper-parameter search, and a staged training protocol.
@@ -63,15 +63,16 @@ The agent runs the falsification battery: a circular-shift timing null, a power 
 measures the smallest edge the test can detect, and cost and stress sweeps. A strategy that loses
 to randomly re-timed copies of its own trades is closed here, not in production.
 
-**4. Let the machine search for you** (optional).
+**4. Let the machine mine alphas for you** (optional).
 > *"Run Crucible on the synthetic substrate for four nights."*
 
 ```bash
 python scripts/research/crucible_orchestrator.py --mode synthetic --nights 4 --force
 ```
 
-Crucible proposes, mines, deflates and forward-incubates candidates on its own, and forward-tests
-survivors only on bars that postdate the hypothesis.
+Crucible runs continuous alpha mining on its own: it proposes, mines, deflates and
+forward-incubates candidates, and forward-tests survivors only on bars that postdate the
+hypothesis.
 
 **5. Build a portfolio.**
 > *"Combine the validated sleeves into a volatility-targeted book and check whether it's
@@ -132,7 +133,9 @@ lies:
 Signal libraries: WorldQuant 101, TradingView indicators, a demo set, and a genetic DSL search
 (`sharpen/signals/generation/`) with cohort-level Monte-Carlo null gating.
 
-### Crucible: automated alpha discovery — `sharpen/crucible/`
+### Crucible: automated alpha mining — `sharpen/crucible/`
+Systematic alpha mining with validation inside the loop.
+
 - **LLM hypothesis proposer** (`agentic/llm_proposer.py`, uses the Claude API). It turns
   natural-language priors into pre-registered specs. It is **structurally blind to scores**: the
   module can't reach any verdict, so the search can't overfit to its own results.
@@ -267,7 +270,7 @@ The hub is [docs/README.md](docs/README.md).
 | [Getting started](docs/guides/getting-started.md) | Install and two verified first runs |
 | [Building a strategy](docs/guides/building-a-strategy.md) | Idea → build → validate → portfolio → paper, with the gate at each step |
 | [Signal research](docs/guides/signal-research.md) | Writing a signal; the validation funnel; the DSL |
-| [Crucible](docs/guides/crucible.md) | Automated discovery |
+| [Crucible](docs/guides/crucible.md) | Automated alpha mining |
 | [RL pipeline](docs/guides/rl-pipeline.md) | Protocol v2 in practice |
 | [Configuration](docs/guides/configuration.md) | Config and gate schemas |
 | [Live trading](docs/guides/live-trading.md) | Brokers, Docker, observability, kill switch |
@@ -283,7 +286,7 @@ The hub is [docs/README.md](docs/README.md).
 ```
 sharpen/
 ├── signals/    Signal specs, alpha DSL, validation funnel
-├── crucible/   Automated hypothesis search with an LLM proposer
+├── crucible/   Alpha mining: automated hypothesis search with an LLM proposer
 ├── agents/     SAC, distributional SAC, IQN, BDQ, PPO
 ├── envs/       Trading, allocator, execution and market-making environments
 ├── hpo/        Optuna objectives and samplers
