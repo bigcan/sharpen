@@ -2,5 +2,8 @@
 # https://docs.github.com/en/repositories/managing-your-repositorys-settings-and-features/customizing-your-repository/displaying-a-sponsor-button-in-your-repository
 
 github: [bigcan]
+# TODO: set to your Open Collective slug (the part after opencollective.com/) once
+# Open Source Collective approves the application, then uncomment.
+# open_collective: your-collective-slug
 # TODO: set to your Ko-fi page name (the part after ko-fi.com/) and uncomment.
 # ko_fi: your-kofi-name
