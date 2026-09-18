@@ -1,7 +1,7 @@
-# Portions of this file are derived from ElegantRL
-# (https://github.com/AI4Finance-Foundation/ElegantRL), Copyright 2024
-# AI4Finance Foundation Inc., licensed under the Apache License, Version 2.0.
-# Modified by Keng Lee, 2026. See the NOTICE file for details.
+# Portions of this file are derived from the FinRL Contest 2025 AlphaSeek
+# starter kit (https://github.com/Open-Finance-Lab/FinRL_Contest_2025),
+# Copyright 2024 AI4Finance Foundation Inc., licensed under the Apache License,
+# Version 2.0. Modified by Keng Lee, 2026. See the NOTICE file for details.
 
 """Q-network architectures for AlphaSeek DQN ensemble.
 
