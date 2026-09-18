@@ -36,7 +36,7 @@ Underneath is a full research-to-execution stack:
 
 Here is the end-to-end path, as you would drive it from a coding agent. Each step names what you
 ask, what the agent does, and the gate that decides whether you go on. The requests are shown in
-English, but any language works; step 7 is shown in Chinese.
+English, but you can write them in any language.
 
 **1. State the idea.**
 > *"Test whether 12-month time-series momentum on liquid ETFs across equities, bonds, commodities
@@ -97,8 +97,7 @@ python scripts/run_full_pipeline.py --config configs/<cfg>.yaml --stage hpo --ag
 ```
 
 **7. Deploy to paper, then watch it.**
-> *「把這個組合部署到模擬帳戶，出現漂移就通知我。」*
-> *("Deploy the ensemble to the paper account and alert me if it drifts.")*
+> *"Deploy the ensemble to the paper account and alert me if it drifts."*
 
 The paper-portfolio executor, parity harness and Docker stack (Prometheus, Grafana, Telegram)
 take over. Drift detection and a kill file guard the live path.
