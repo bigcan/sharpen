@@ -7,8 +7,7 @@
 Sharpen is a quantitative research platform and the research record of the program that built
 it: nine months of systematically trying to find tradeable edges, and mostly failing to. 76
 strategies and probes across eight families were specified, measured and closed. One weak
-edge survived and still did not clear its own deployment gates. **Nothing here was ever traded
-with real capital.**
+edge survived and still did not clear its own deployment gates.
 
 It is published for two reasons. The validation machinery is reusable, and the record of what
 it rejected, and why, saves you rebuilding the same things. And along the way the project caught
