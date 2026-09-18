@@ -1,11 +1,11 @@
-# Portions of this file are derived from ElegantRL
-# (https://github.com/AI4Finance-Foundation/ElegantRL), Copyright 2024
-# AI4Finance Foundation Inc., licensed under the Apache License, Version 2.0.
-# Modified by Keng Lee, 2026. See the NOTICE file for details.
+# Portions of this file are derived from the FinRL Contest 2025 AlphaSeek
+# starter kit (https://github.com/Open-Finance-Lab/FinRL_Contest_2025),
+# Copyright 2024 AI4Finance Foundation Inc., licensed under the Apache License,
+# Version 2.0. Modified by Keng Lee, 2026. See the NOTICE file for details.
 
 """DQN Agent classes for AlphaSeek production training.
 
-Ported from contest/reference/erl_agent.py with production fixes:
+Ported from the FinRL Contest 2025 AlphaSeek starter-kit agent with production fixes:
 - Imports from production .nets and .replay_buffer (no sys.path hacks)
 - logging instead of print()
 - non_blocking=True on .to(device) calls

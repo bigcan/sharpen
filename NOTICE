@@ -22,18 +22,22 @@ PROVENANCE AND THIRD-PARTY ATTRIBUTION
    source tree. This attribution is retained as an accurate record of the
    project's origin and in acknowledgement of the upstream work.
 
-2. ElegantRL (AI4Finance Foundation Inc.)
+2. FinRL Contest 2025 -- AlphaSeek starter kit (AI4Finance Foundation Inc.)
 
-   Portions of the following files are derived from ElegantRL, licensed under
-   the Apache License, Version 2.0:
+   Portions of the following files are derived from the Task 2 (AlphaSeek
+   Crypto) starter kit of the FinRL Contest 2025:
 
-       https://github.com/AI4Finance-Foundation/ElegantRL
+       https://github.com/Open-Finance-Lab/FinRL_Contest_2025
        Copyright 2024 AI4Finance Foundation Inc.
 
        sharpen/alphaseek/agents.py         derived from erl_agent.py
        sharpen/alphaseek/nets.py           derived from erl_net.py
        sharpen/alphaseek/replay_buffer.py  derived from erl_replay_buffer.py
        sharpen/alphaseek/trainer.py        derived from erl_run.py
+
+   The starter kit's agent code is taken from AI4Finance's ElegantRL library
+   (https://github.com/AI4Finance-Foundation/ElegantRL) and is used here under
+   that library's Apache License, Version 2.0.
 
    Modified by Keng Lee, 2026. Summary of modifications: imports restructured
    into a package (no sys.path manipulation); print() replaced by logging;
@@ -44,8 +48,8 @@ PROVENANCE AND THIRD-PARTY ATTRIBUTION
    evaluation metrics (total return, Sharpe, Sortino, profit factor, max
    drawdown), checkpoint save/resume and experiment logging.
 
-   Earlier revisions of this repository also contained a verbatim copy of
-   ElegantRL agent source under `contest/`; that tree has been removed.
+   Earlier revisions of this repository also contained a verbatim copy of the
+   starter kit under `contest/`; that tree has been removed.
 
 --------------------------------------------------------------------------------
 DATA
