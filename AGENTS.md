@@ -167,7 +167,7 @@ Reasoning steps:
 
 8) Reference‑Class Priming
 ```text
-Similar repos: PODRACER, ElegantRL
+Similar repos: FinRL-Podracer, FinRL
 Pitfalls: hidden global state, RNG seeds, PIT violations
 Apply known fixes before coding.
 ```
