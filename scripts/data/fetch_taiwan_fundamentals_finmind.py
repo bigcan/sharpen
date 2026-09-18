@@ -73,11 +73,13 @@ BOARD_LOT = 1000  # 1 board lot (張) = 1000 shares. Big-holder tier = ">400 lot
 # Causal availability lags (LEAK-2) — pure, unit-tested by --selftest and pytest
 # --------------------------------------------------------------------------- #
 def month_revenue_avail_date(revenue_year: int, revenue_month: int) -> pd.Timestamp:
-    """First public date for a month's revenue: the 10th of the FOLLOWING month (statutory deadline).
+    """Statutory disclosure DEADLINE for a month's revenue: the 10th of the FOLLOWING month.
 
-    April (month 4) revenue is disclosed by May 10 → avail 2000-05-10. December rolls to next
-    January. Conservative (the deadline, not the earliest voluntary print) — can only DELAY a
-    signal's activation, never advance it (no look-ahead).
+    April (month 4) revenue is due by May 10 → 2000-05-10. December rolls to next January.
+    This is NOT the first tradeable session: a deadline-day filer may post after the close, so the
+    panel builder moves it to the session after the deadline session
+    (``taiwan_smallcap_panel.next_session_after``, crucible-v14.0). Using this date directly as a
+    tradeable availability date leaks one session for after-close filers.
     """
     y, m = int(revenue_year), int(revenue_month) + 1
     if m > 12:

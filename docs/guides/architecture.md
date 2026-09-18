@@ -20,7 +20,7 @@ research tool bolted to an execution tool.
 ```
 sharpen/
 ├── signals/       Signal build + alpha DSL + T0–T5 validation     (29 modules)
-├── crucible/      Alpha-mining platform, crucible-v13.1           (46 modules)
+├── crucible/      Alpha-mining platform, crucible-v14.0           (46 modules)
 ├── crypto/        Crypto envs, execution, live engine            (39 modules)
 ├── agents/        SAC, DSAC, PPO, DeepScalper                    (28 modules)
 ├── data/          Loaders, feature engineering, splitter         (20 modules)

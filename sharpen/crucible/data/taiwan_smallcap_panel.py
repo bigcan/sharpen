@@ -55,8 +55,12 @@ CAUSALITY (LEAK-2), the three places it is load-bearing:
     rebalance AT OR BEFORE t, never the next one.
   * ALT-DATA channels enter through :func:`asof_grid`, which stamps ``value[t,n]`` = the last event
     whose ``avail_date <= dates[t]``, where ``avail_date`` carries the publication lag computed once
-    at fetch time (month revenue: the 10th of the following month; TWSE balances and T86 flows: T+1,
-    they publish after the close).
+    at fetch time (TWSE balances and T86 flows: T+1, they publish after the close). Month revenue is
+    stored with its statutory deadline (the 10th of the following month) and, since crucible-v14.0,
+    becomes usable only on the session AFTER the deadline session (:func:`next_session_after`): a
+    deadline-day filer may post after the close, and bar t trades at t's close. Before v14.0 it was
+    usable on the deadline session itself, a one-session look-ahead for after-close filers; P1
+    (month-revenue drift) was re-scored on the fixed panel.
 
 Run the tripwires whenever this builder is touched:
 
@@ -130,17 +134,47 @@ def asof_grid(events: pd.DataFrame, dates: np.ndarray, tickers: tuple[str, ...],
     return grid
 
 
-def month_revenue_yoy(mrev: pd.DataFrame) -> pd.DataFrame:
-    """``[stock_id, avail_date, yoy]`` — YoY revenue growth, availability from the 10th-of-next-month."""
+def next_session_after(avail: pd.Series, dates: np.ndarray) -> pd.Series:
+    """Map each deadline date to the first trading session STRICTLY AFTER the deadline's own session.
+
+    A filing is due BY the deadline, and a filer may post after the 13:30 close on that day. The
+    strategy trades at the close of bar t, so a value first usable on the deadline session could be
+    traded before it was public. The deadline session is the first trading date >= the deadline
+    (covers weekend and holiday rolls on the panel's own calendar); the value becomes usable on the
+    session after that. Deadlines past the panel's last usable session map to NaT (never visible)."""
+    d = np.asarray(pd.to_datetime(dates).values, dtype="datetime64[ns]")
+    a = np.asarray(pd.to_datetime(avail).values, dtype="datetime64[ns]")
+    idx = np.searchsorted(d, a, side="left") + 1
+    out = np.full(a.shape, np.datetime64("NaT"), dtype="datetime64[ns]")
+    ok = idx < len(d)
+    out[ok] = d[idx[ok]]
+    return pd.Series(out, index=avail.index)
+
+
+def month_revenue_yoy(mrev: pd.DataFrame, dates: np.ndarray | None = None) -> pd.DataFrame:
+    """``[stock_id, avail_date, yoy]`` — YoY revenue growth.
+
+    YoY compares the SAME CALENDAR month a year earlier (a missing month yields NaN, never a
+    13-month comparison). Stored ``avail_date`` is the statutory deadline (10th of the next month);
+    when the trading ``dates`` are given it is moved to the session after the deadline session via
+    :func:`next_session_after` (v14.0 LEAK-2 fix). Without ``dates`` the raw deadline is returned —
+    only for unit tests of the YoY arithmetic, never for building a tradeable panel."""
     if mrev.empty:
         return pd.DataFrame(columns=["stock_id", "avail_date", "yoy"])
     m = mrev.copy()
     m["stock_id"] = m["stock_id"].astype(str)
-    m = m.sort_values(["stock_id", "revenue_year", "revenue_month"])
-    prev = m.groupby("stock_id")["revenue"].shift(12)               # same month, prior year
+    m["_k"] = m["revenue_year"].astype(int) * 12 + m["revenue_month"].astype(int)
+    m = m.sort_values(["stock_id", "_k"]).drop_duplicates(["stock_id", "_k"], keep="last")
+    base = m[["stock_id", "_k", "revenue"]].rename(columns={"revenue": "_prev"})
+    base["_k"] = base["_k"] + 12                                       # same month, prior year
+    m = m.merge(base, on=["stock_id", "_k"], how="left")
+    prev = m["_prev"]
     yoy = np.where((prev > 0) & prev.notna(), m["revenue"] / prev - 1.0, np.nan)
-    return pd.DataFrame({"stock_id": m["stock_id"], "avail_date": pd.to_datetime(m["avail_date"]),
-                         "yoy": yoy}).dropna(subset=["yoy"])
+    avail = pd.to_datetime(m["avail_date"])
+    if dates is not None:
+        avail = next_session_after(avail, dates)
+    return pd.DataFrame({"stock_id": m["stock_id"], "avail_date": avail,
+                         "yoy": yoy}).dropna(subset=["yoy", "avail_date"])
 
 
 def balance_util(margin: pd.DataFrame, shareholding: pd.DataFrame, *,
@@ -332,7 +366,7 @@ def _build_channels(data: Path, dates: np.ndarray, tickers: tuple[str, ...],
         else pd.DataFrame()
 
     if "mrev_yoy" in want:
-        slots["mrev_yoy"] = asof_grid(month_revenue_yoy(_read(data, "month_revenue.parquet")),
+        slots["mrev_yoy"] = asof_grid(month_revenue_yoy(_read(data, "month_revenue.parquet"), dates),
                                       dates, tickers, "yoy")
     if "margin_util" in want:
         slots["margin_util"] = asof_grid(
@@ -449,7 +483,7 @@ def _self_check(panel: Panel, data: Path = DEFAULT_DATA) -> None:
     #    proves nothing about this builder — a vacuous green. The builder-level version of the test
     #    (delete the future from the SOURCE parquets, rebuild, compare) lives in
     #    tests/crucible/test_taiwan_smallcap_panel.py, where it can use a synthetic fixture.
-    mrev = month_revenue_yoy(_read(data, "month_revenue.parquet"))
+    mrev = month_revenue_yoy(_read(data, "month_revenue.parquet"), panel.dates)
     checked = 0
     if not mrev.empty and "mrev_yoy" in panel.feature_slots:
         slot = panel.feature_slots["mrev_yoy"]

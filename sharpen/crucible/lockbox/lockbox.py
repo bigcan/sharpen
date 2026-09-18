@@ -28,7 +28,17 @@ from dataclasses import dataclass, replace
 from pathlib import Path
 
 from ..agentic.card import DiscoveryCard
-from .incubation import ForwardEvidence, IncubationCriterion
+from .incubation import ForwardEvidence, IncubationCriterion, _epoch_seconds_scalar
+
+
+def _epoch_or_none(ts: str | None) -> float | None:
+    """POSIX seconds of an ISO stamp, or None when absent/unparseable (e.g. a symbolic test tick)."""
+    if not ts:
+        return None
+    try:
+        return _epoch_seconds_scalar(ts)
+    except (ValueError, TypeError):
+        return None
 
 # Verdict vocabulary. INCUBATING is the only non-terminal state; a card is human-gate-eligible iff
 # and only iff its entry is CLEARED. REJECTED is terminal-dead (forward evidence failed the criterion).
@@ -189,16 +199,26 @@ class Lockbox:
 
     # --- enrollment (idempotent) ------------------------------------------------------------------
     def enroll(self, card: DiscoveryCard, criterion: IncubationCriterion, *, substrate_id: str,
-               tick_ts: str) -> LockboxEntry:
+               tick_ts: str, scored_through_ts: str | None = None) -> LockboxEntry:
         """Enroll a PROMISING survivor, pinning ``criterion`` per CR-2. Idempotent on
         ``candidate_hash``: a re-mined duplicate does NOT reset an existing entry's accrued state or
-        criterion — the first enrollment's proposal_ts / horizon are authoritative. The CR-8 boundary
-        is the card's own ``proposal_ts`` when present, else the discovery tick (conservative: data
-        after discovery is provably unseen)."""
+        criterion — the first enrollment's proposal_ts / horizon are authoritative.
+
+        The CR-8 boundary is the LATEST of the card's ``proposal_ts``, the discovery tick, and
+        ``scored_through_ts`` (the last bar of the panel the candidate was just scored on). The card's
+        ``proposal_ts`` alone is not enough: a U4 re-admission keeps its ORIGINAL (old) proposal_ts,
+        and a tick run with a past ``--start-ts`` stamps a past one, so bars the candidate was SELECTED
+        on would otherwise count as "forward" evidence (v14.0 fix). Only bars the selection never saw
+        are forward."""
         existing = self.get(card.candidate_hash)
         if existing is not None:
             return existing
         proposal_ts = card.proposal_ts or tick_ts
+        base = _epoch_or_none(proposal_ts)
+        for later in (tick_ts, scored_through_ts):
+            t = _epoch_or_none(later)
+            if base is not None and t is not None and t > base:
+                proposal_ts, base = later, t
         entry = LockboxEntry(
             candidate_hash=card.candidate_hash, substrate_id=substrate_id, formula=card.formula,
             candidate_type=card.candidate_type, crucible_version=card.crucible_version,

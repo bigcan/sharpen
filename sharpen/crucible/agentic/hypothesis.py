@@ -69,7 +69,8 @@ class HypothesisAuthor:
     def build_context(self, available_terminals: tuple[str, ...], *, asset_classes: tuple[str, ...]
                       = (), panel_n: int = 0,
                       feature_slot_bars: tuple[tuple[str, int], ...] = (),
-                      mechanism_nonce: str = "") -> ProposalContext:
+                      mechanism_nonce: str = "",
+                      killed_scope: str | None = None) -> ProposalContext:
         """Assemble the :class:`ProposalContext` from ``ledger.agent_view()`` (dedup keys + killed
         families ONLY) + the caller-supplied panel terminals and catalog asset classes. This method
         is the concrete CR-1 boundary: it reads the agent view, never a scored column.
@@ -77,8 +78,9 @@ class HypothesisAuthor:
         ``panel_n`` / ``feature_slot_bars`` / ``mechanism_nonce`` are optional CR-1-legal DATA-SHAPE
         hints (cross-section width, per-slot bar COUNTS, a rotating entropy token) — never scores. All
         default to empty, so the pre-existing single-arg call sites build a byte-identical context and
-        the offline :class:`LibrarySeedProposer` (which reads none of them) is unaffected (CRU-1)."""
-        view = self.ledger.agent_view()          # dedup keys + killed_families ONLY
+        the offline :class:`LibrarySeedProposer` (which reads none of them) is unaffected (CRU-1).
+        ``killed_scope`` is a ledger run-id prefix that scopes the killed-family list to one substrate."""
+        view = self.ledger.agent_view(killed_scope)   # dedup keys + killed_families ONLY
         return ProposalContext(
             available_terminals=tuple(available_terminals),
             killed_families=tuple(view["killed_families"]),

@@ -13,8 +13,8 @@ before making any investment decision.
 
 ## The results here are overwhelmingly negative
 
-This repository is published as a **negative-results archive**. Approximately
-twenty strategies across six families were tested and falsified. One survived
+This repository is published as a **negative-results archive**. Seventy-six
+strategies and probes across eight families were tested and closed. One survived
 weakly and still failed its own pre-registered deployment gates. **No strategy in
 this repository is validated for live trading, and none was ever deployed with
 real capital.**
