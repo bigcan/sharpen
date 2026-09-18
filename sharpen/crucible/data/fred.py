@@ -43,6 +43,12 @@ _DEFAULT_SERIES: tuple[tuple[str, str, str], ...] = (
     ("WALCL", "Fed total assets (liquidity)", "W"),
 )
 
+#: Per-series EXTRA publication lag (days) on top of ``release_lag_days`` (crucible-v14.0). WALCL
+#: (H.4.1) is dated Wednesday but published Thursday 16:30 ET, after the US close, so the first
+#: bar that can trade on it is Friday: reference + 2 days. The default +1 day put it on
+#: Thursday's bar, one session early.
+_EXTRA_LAG_DAYS: dict[str, int] = {"WALCL": 1}
+
 
 def _default_transport(url: str) -> dict:
     """Live HTTPS GET → parsed JSON. Only reached when no ``transport`` is injected."""
@@ -146,7 +152,8 @@ class FredConnector:
             except (TypeError, ValueError):
                 continue
             reference = np.datetime64(o["date"], "ns")
-            release = reference + self._release_lag        # publication lag (see __init__)
+            release = (reference + self._release_lag              # publication lag (see __init__)
+                       + np.timedelta64(_EXTRA_LAG_DAYS.get(ref.series_id, 0), "D"))
             if cutoff is not None and release > cutoff:    # vintage: only what was public by as_of
                 continue
             refs.append(reference)

@@ -101,7 +101,7 @@ def test_versions_are_distinct_and_tagged_form() -> None:
     # because substrate_dirty keyed only on per-candidate novelty and so reported "nothing to do"
     # about a cohort test that had never run. Both paths are opt-in and default off (CRU-1).
     # v13.1 = `taiwan_smallcap` wired as a substrate. MINOR: it ADDS a panel + its base-book binding
-    assert CRUCIBLE_VERSION == "crucible-v13.1"
+    assert CRUCIBLE_VERSION == "crucible-v14.0"
     assert CRUCIBLE_BASELINE_VERSION == "crucible-v1.0"
     assert CRUCIBLE_VERSION != CRUCIBLE_BASELINE_VERSION
 

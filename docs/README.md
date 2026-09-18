@@ -54,7 +54,7 @@ Normative documents. These define contracts; the guides explain how to work with
 [**docs/research/**](research/README.md) — ~100 preregistrations, audits and verdicts.
 
 This is not appendix material, it is a working index of **what has already been tested**:
-roughly twenty strategy families closed with evidence, each with the preregistration that
+76 strategies and probes across eight families closed with evidence (ledger: [NEGATIVE_RESULTS](../NEGATIVE_RESULTS.md)), each with the preregistration that
 preceded it and the evaluation that settled it, plus the one edge that survived. **Check it
 before you build** — it is the cheapest step in the workflow, and it regularly saves weeks.
 
@@ -80,7 +80,6 @@ Human contributors want the [guides](#guides) instead.
 | [SG-1 XAUUSD post-WF runbook](sg1_xauusd_vs_v2_phase2_post_wf_runbook.md) | Post-walk-forward procedure |
 | [Distributed HPO checkpoint race fix](dhpo_checkpoint_race_fix.md) | A specific fix writeup |
 | [AlphaSeek fee audit](alphaseek_fee_audit_report.md) | Fee audit for a terminated workstream |
-| [Soak plan](soak_plan_20260509.md) | Paper soak procedure |
 
 ---
 

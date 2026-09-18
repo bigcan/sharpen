@@ -57,7 +57,7 @@ sharpen/
     library/_alpha_dsl.py          # WQ101-style alpha DSL primitives
     features.py                    # Panel (OHLCV + feature_slots for macro/positioning, added P1a)
     spec.py                        # SignalSpec, content_hash
-  crucible/                        # Crucible agentic alpha-mining platform (crucible-v13.1) -- see dedicated section below
+  crucible/                        # Crucible agentic alpha-mining platform (crucible-v14.1) -- see dedicated section below
     agentic/                       # Proposer/Author/DataScout -- agent proposes, statistics dispose (CR-1)
     data/                          # Free-data connectors: FRED, CFTC COT, EDGAR, GDELT, Stooq, TWSE, TAIFEX
     governance/                    # Survivor -> Tier-2 handoff pipeline (never runs the audit itself)
@@ -67,7 +67,7 @@ sharpen/
     ledger.py                      # Split trial ledger -- agent-blind verdicts, agent-visible dedup view
     manifest.py                    # RunManifest -- version + gates_hash + data_snapshot_hash + rng_seeds
     reproduce.py                   # `crucible reproduce <run_id>` -- re-executes, asserts bit-identical
-    version.py                     # Current: crucible-v13.1
+    version.py                     # Current: crucible-v14.0
 scripts/
 configs/
 tests/
@@ -132,7 +132,7 @@ docker/live/
 
 ## Crucible Alpha-Mining Architecture (full)
 
-**Purpose:** `sharpen/crucible/` (current: `crucible-v13.1`, see `version.py`) is a continuous agentic alpha-discovery system built on top of the existing `sharpen/signals/` DSL + T0-T5 deflated evaluation funnel (not a replacement). Falsification-first pipeline: ACQUIRE (free data connectors) -> HYPOTHESIZE (agent proposes pre-registered specs, blind to verdicts) -> MINE (DSL/genetic search) -> DEFLATE (T0-T5 gates) -> COMBINE + forward-incubate in a **lockbox** on data that postdates the hypothesis timestamp, before any human-initiated Tier-2 audit. Value proposition is the *filter*, not idea supply: rigorous statistical gatekeeping (pre-registration, split-ledger anti-oracle, per-substrate online-FDR) across capacity-constrained free data domains (FRED/ALFRED macro, CFTC COT positioning, SEC EDGAR fundamentals, GDELT sentiment, Stooq global market, TWSE/TAIFEX Taiwan). P0-P5 roadmap shipped (see below); zero PROMISING survivors have cleared the lockbox as of `crucible-v13.1`.
+**Purpose:** `sharpen/crucible/` (current: `crucible-v14.0`, see `version.py`) is a continuous agentic alpha-discovery system built on top of the existing `sharpen/signals/` DSL + T0-T5 deflated evaluation funnel (not a replacement). Falsification-first pipeline: ACQUIRE (free data connectors) -> HYPOTHESIZE (agent proposes pre-registered specs, blind to verdicts) -> MINE (DSL/genetic search) -> DEFLATE (T0-T5 gates) -> COMBINE + forward-incubate in a **lockbox** on data that postdates the hypothesis timestamp, before any human-initiated Tier-2 audit. Value proposition is the *filter*, not idea supply: rigorous statistical gatekeeping (pre-registration, split-ledger anti-oracle, per-substrate online-FDR) across capacity-constrained free data domains (FRED/ALFRED macro, CFTC COT positioning, SEC EDGAR fundamentals, GDELT sentiment, Stooq global market, TWSE/TAIFEX Taiwan). P0-P5 roadmap shipped (see below); zero PROMISING survivors have cleared the lockbox as of `crucible-v13.1`.
 
 ### Subpackages
 

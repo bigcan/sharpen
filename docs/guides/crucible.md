@@ -1,6 +1,6 @@
 # Crucible — Autonomous Alpha Mining
 
-Crucible (`crucible-v13.1`, `sharpen/crucible/`) is a continuous, agentic alpha-discovery
+Crucible (`crucible-v14.0`, `sharpen/crucible/`) is a continuous, agentic alpha-discovery
 funnel built on top of the [signal research harness](signal-research.md). It runs unattended
 "nightly ticks": an agent proposes pre-registered hypotheses, they are mined, deflated,
 and — if anything survives — forward-incubated in a lockbox before a human ever sees a
@@ -160,8 +160,8 @@ Read this before concluding a zero means the system is broken.
    funnel produces at that promotion rate.
 2. **The bottleneck is the hypothesis bank, not the machinery.** A design audit (104
    findings) plus an independent audit found gate-leg pass rates of 0/170, i.e.
-   `P(PROMISING) = 0` by construction at the time. The machine is correct and cannot
-   discover; the constraint is the diversity and quality of what is proposed.
+   `P(PROMISING) = 0` by construction at the time. The constraint is the diversity and
+   quality of what is proposed, not a missing gate.
 3. **Power is often the binding constraint, not signal.** Crucible's MDE units are ΔSR per
    252-*bar* year — more bars buy no power. Several substrates were closed after this was
    corrected because the powered horizon (H≤2) and the tradeable horizon (H≈21) are
@@ -169,6 +169,22 @@ Read this before concluding a zero means the system is broken.
 
 The honest framing: Crucible's product is a defensible, reproducible **negative result**,
 which is far more than most research stacks can produce.
+
+### Known limitations
+
+- **The lockbox pass bar is loose.** `min_forward_sharpe: 0.30` over `min_forward_bars: 63` daily
+  bars: at that length the annualised Sharpe of a zero-edge candidate has a standard error near 2,
+  so roughly 44% of pure-noise candidates would clear it. The lockbox adds a forward-time check,
+  not much statistical protection; the funnel before it carries the significance burden. Changing
+  the value is a gate change (new hash), deliberately not done in a correctness release.
+- **Killed families are coarse.** `family` is a four-value label, so one DECISIVE rejection kills
+  the whole family on that substrate (since `crucible-v14.0`, only on that substrate). In practice
+  every recorded rejection is UNDERPOWERED, so the list is empty.
+- **In-code fallback defaults.** Some modules supply threshold defaults when a config block is
+  missing. The frozen gates hash covers the YAML bytes only.
+- **Publication lags are modelled, not observed.** Connectors stamp availability as reference date
+  plus a fixed lag. Shutdown backlogs (for example CFTC reports during US government shutdowns) are
+  not modelled.
 
 ---
 

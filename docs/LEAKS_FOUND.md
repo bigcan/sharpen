@@ -48,6 +48,7 @@ seeds, evaluation and training budget):
 | Leaky | **1.689** | 8 / 8 |
 | Fixed | **1.016** | 0 / 8 |
 
+The two rows come from [`research/redesign_pivot_2026-06-02.md`](research/redesign_pivot_2026-06-02.md).
 The look-ahead was worth about 0.67 of profit factor. It **was** the edge. The strategy was
 shelved. A second strategy on the same handler collapsed to PF 0.79–0.85; a third kept real but
 regime-dependent signal that no longer cleared its deployment gate.
@@ -87,8 +88,9 @@ reached the line. Proven empirically: inject an ATR spike at bar 60; the gate in
 while the last consumed bar was 59, and the next step traded bar 60.
 
 **What it invalidated.** 54 configurations, every variant of that strategy family across four
-instruments. The bias is **optimistic**, so the family's existing NO-GO verdict only hardened.
-But every pre-fix number from it is void as a performance floor.
+instruments (the count is from the private R&D log; the shipped evidence is the tripwire below).
+The bias is **optimistic**, so the family's existing NO-GO verdict only hardened. But every pre-fix
+number from it is void as a performance floor.
 
 **The fix.** Gate on `handler._ptr - 1`, the last closed bar
 (`sharpen/envs/signal_gated_wrapper.py`). That is also the parity fix, because it is the only bar
@@ -121,7 +123,8 @@ or an unseeded generator, which no seed passed to an env can ever reach.
 
 **How it was found.** Re-running a recorded result. The identical config at the identical seed
 returned **−7.70%** where the earlier run had recorded **+3.40%**, an 11.1-point divergence at
-nominally the same seed.
+nominally the same seed. (These run figures are from the private R&D log, not a shipped artifact; the
+shipped evidence is the reproducibility test below, which runs twice and diffs.)
 
 **What it invalidated.** Every "multiseed" result before the fix. They measured run-to-run
 variability, not a seed effect, and no individual run can be reproduced. A reported "18.7-point
@@ -141,6 +144,32 @@ that names, by file and line, any env code calling the global RNG.
 not by reading where the flag is passed.
 
 ---
+
+## Found in the pre-release audit (`crucible-v14.0`)
+
+A final whole-module review before publication, not a diff review, found four more defects in the
+validation machinery itself. None reversed a published NO-GO, because each made candidates look
+*better*, but one recorded PROMISING was an artifact of them.
+
+- **Overlapping labels treated as independent.** The funnel's IC t-stat and deflated-Sharpe count
+  used `sqrt(n_days)` on daily ICs of h-day forward returns, which share h−1 days. On a no-edge
+  signal at h = 21 the null t-stat had a standard deviation near 4 and cleared t ≥ 3 about 27% of
+  the time. Fixed with a Newey-West effective count (`sharpen/signals/_ic.py`). Re-scored: the
+  small-cap idiosyncratic-vol PROMISING dropped to LOGGED (DSR 1.000 → 0.875 < 0.90, and FDR-q
+  0.100 → 0.348 from the next fix; either alone demotes it); the month-revenue
+  PROMISING survived (DSR 1.000 → 0.944).
+- **A filing deadline treated as a publication time.** Taiwan monthly revenue became usable on the
+  statutory deadline session, but a deadline-day filer can post after the close. It now enters on
+  the next session. The Fed's weekly balance sheet (`WALCL`) had the same one-session shape.
+- **Forward evidence that was not forward.** A re-admitted candidate kept its original proposal
+  timestamp, so the lockbox could count bars it had just been selected on. The boundary is now
+  floored at the last bar the candidate was scored on.
+- **Multiplicity over the wrong family, and a dead metric.** FDR q-values used the submitted batch
+  size rather than the declared family, and the Tier-5 "residual Sharpe" was the Sharpe of an OLS
+  residual, which is zero by construction.
+
+Each fix has a tripwire in `tests/crucible/test_v14_0_fixes.py` or
+`tests/signals/test_v14_0_stats_fixes.py`, checked by reverting the fix and watching the test fail.
 
 ## What the three have in common
 

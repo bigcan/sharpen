@@ -36,8 +36,9 @@ class CrossSectionalIC:
 
     ``ic_series`` is the per-day Spearman IC (only valid days retained). ``ic_ir`` is the
     per-period information ratio ``ic_mean / ic_std`` (Grinold); ``ic_tstat`` is its
-    significance ``ic_ir * sqrt(n_days)`` (== the quantity ``_xs_ic`` returned as its
-    "ic_ir"). All are NaN when fewer than 2 valid days exist. ``kept_days`` are the integer
+    significance ``ic_ir * sqrt(n_eff)``, where ``n_eff`` is ``n_days`` for non-overlapping
+    labels and the Newey-West effective count for overlapping ones (``overlap`` > 1; v14.0).
+    All are NaN when fewer than 2 valid days exist. ``kept_days`` are the integer
     row indices into the original ``(T, N)`` panel that survived the ``min_names``/finite
     gate and produced ``ic_series`` (1:1, same length) — used by ``effective_n_trials`` to
     date-align the IC series of different signals onto a common grid (C2.1).
@@ -80,6 +81,7 @@ def cross_sectional_ic(
     active: np.ndarray | None = None,
     *,
     min_names: int = 4,
+    overlap: int = 1,
 ) -> CrossSectionalIC:
     """Cross-sectional rank-IC: per-day Spearman across names, then mean + IC-IR.
 
@@ -93,6 +95,9 @@ def cross_sectional_ic(
         day are excluded from that day's rank-IC.
     min_names : int
         Minimum active names required to rank a day (else the day is skipped).
+    overlap : int
+        Horizon of the forward-return label in bars. Daily ICs on h-bar labels overlap by
+        h-1 bars; the t-stat then uses :func:`hac_effective_n` with lag ``overlap - 1``.
 
     Vectorized: per-row average-tie ranks (matching ``scipy.spearmanr``) + a nan-aware
     per-row Pearson — equivalent to a per-day ``spearmanr`` loop (parity-tested) but ~10x
@@ -136,8 +141,38 @@ def cross_sectional_ic(
     ic_mean = float(arr.mean())
     ic_std = float(arr.std(ddof=1))
     ic_ir = ic_mean / ic_std if ic_std > 0 else float("nan")
-    ic_tstat = ic_ir * float(np.sqrt(n_days)) if np.isfinite(ic_ir) else float("nan")
+    # Overlapping h-bar forward returns make consecutive daily ICs share h-1 bars, so the IID
+    # sqrt(n_days) overstates significance (null sd(t) ~2 at h=5, ~4 at h=21). Newey-West with
+    # lag overlap-1 gives the effective count; overlap=1 reproduces the IID value exactly.
+    n_eff = hac_effective_n(arr, overlap - 1)
+    ic_tstat = ic_ir * float(np.sqrt(n_eff)) if np.isfinite(ic_ir) else float("nan")
     return CrossSectionalIC(arr, ic_mean, ic_std, ic_ir, ic_tstat, n_days, n_obs, kept_idx)
+
+
+def hac_effective_n(series, lag: int) -> float:
+    """Effective observation count of a series' MEAN under a Newey-West (Bartlett) long-run variance.
+
+    ``n_eff = n * gamma_0 / LRV`` with ``LRV = gamma_0 + 2 * sum_{k=1..lag} (1 - k/(lag+1)) gamma_k``,
+    so ``mean / sqrt(gamma_0 / n_eff)`` is the HAC t-stat. Clipped to ``[2, n]``: negative
+    autocorrelation never inflates the count above ``n`` (conservative). ``lag < 1`` returns ``n``,
+    identical to the IID formula. Use ``lag = h - 1`` for daily-sampled h-bar forward returns
+    (Hansen-Hodrick overlap)."""
+    x = np.asarray(series, dtype=np.float64)
+    x = x[np.isfinite(x)]
+    n = int(x.size)
+    if n < 3 or lag < 1:
+        return float(n)
+    xc = x - x.mean()
+    g0 = float(np.dot(xc, xc) / n)
+    if g0 <= 0:
+        return float(n)
+    lrv = g0
+    for k in range(1, min(int(lag), n - 1) + 1):
+        gk = float(np.dot(xc[k:], xc[:-k]) / n)
+        lrv += 2.0 * (1.0 - k / (lag + 1.0)) * gk
+    if lrv <= 0:
+        return float(n)
+    return float(min(n, max(2.0, n * g0 / lrv)))
 
 
 def one_sided_p(ic: float, se: float) -> float:

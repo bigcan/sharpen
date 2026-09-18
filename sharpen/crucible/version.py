@@ -733,7 +733,24 @@ from pathlib import Path
 # `0ccf6dd584f0`); the new gates file is a fourth, registered in tests. Every changed probe script
 # was re-run and its scorecard verified byte-identical to the pre-refactor artifact. No recorded
 # verdict moves.
-CRUCIBLE_VERSION = "crucible-v13.1"
+#
+#   * IC significance under overlap (`signals/_ic.py`, `eval_harness.py`). The IC t-stat and the
+#     DSR's observation count used sqrt(n_days) on daily ICs of h-bar forward returns, which share
+#     h-1 bars. On a no-edge persistent signal at h=21 the null t had sd ~4 and cleared t>=3 ~27% of
+#     the time. Both now use a Newey-West effective count (lag h-1); h=1 is byte-identical. The
+#     bootstrap block is max(21, h) and `cohort_dsr` uses the AR(1) effective N like fitness F14.
+#   * BH/BHY q-values over the DECLARED family (U5 `n_mult`), not the submitted batch.
+#   * Tier-5 residual Sharpe was the Sharpe of an OLS residual (mean exactly 0); it is now
+#     alpha + eps, and L/S returns are stamped at period end to match factor-return dating.
+#   * FRED WALCL (published Thursday after the close) was usable on Thursday; now Friday.
+#   * Lockbox: the forward boundary is floored at the last bar the candidate was scored on, so a
+#     U4 re-admission (which keeps its original proposal_ts) cannot count selection bars as forward.
+#   * `killed_families`: a NULL-family PROMISING offspring emptied the list (SQL NOT IN + NULL), and
+#     one DECISIVE rejection killed the coarse family on EVERY substrate; now NULL-safe and scoped
+#     per substrate by the orchestrator.
+# Tripwires: tests/crucible/test_v14_0_fixes.py, tests/signals/test_v14_0_stats_fixes.py (each
+# mutation-checked: reverting the fix fails its test).
+CRUCIBLE_VERSION = "crucible-v14.0"
 
 # The baseline (pre-gate-repair) system, preserved as a git tag for reproducibility comparisons.
 CRUCIBLE_BASELINE_VERSION = "crucible-v1.0"

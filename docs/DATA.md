@@ -25,8 +25,8 @@ redistribute.
 
 | Source | What the repo uses it for | Access | Fetcher |
 |---|---|---|---|
-| [Stooq](https://stooq.com) | Daily OHLCV for ETFs, indices, FX, commodities (cross-asset TSMOM) | free, no key | `sharpen/crucible/data/stooq.py` |
-| Yahoo Finance via `yfinance` | Daily ETF history (fallback) | free, no key; unofficial API | `sharpen/data/cross_asset_loader.py` |
+| [Stooq](https://stooq.com) | Daily OHLCV for ETFs, indices, FX, commodities (Crucible market connector) | free, no key | `sharpen/crucible/data/stooq.py` |
+| Yahoo Finance via `yfinance` | Daily ETF history. **The TSMOM survivor, the TAILWIND audit and the value test all fetch from here** (`scripts/research/xsec_momentum_falsification.py`) | free, no key; unofficial API | `sharpen/data/cross_asset_loader.py`, the scripts above |
 | [Dukascopy](https://www.dukascopy.com) | FX, metals and equity-index tick/intraday history | free, no key | `scripts/data/fetch_dukascopy.py`, `scripts/data/fetch_dukascopy_equity.py` |
 | [OANDA](https://www.oanda.com) v20 API | Broker-native FX/CFD bars | free practice-account token | `scripts/fetch_xauusd_oanda.py`, `scripts/fetch_eurusd_oanda.py` |
 | [Databento](https://databento.com) | CME futures bars and MBP-10 order book | **paid** | `scripts/fetch_gc_front_month.py`, `scripts/fetch_gc_mbp10.py` |

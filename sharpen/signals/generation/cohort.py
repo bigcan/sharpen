@@ -441,7 +441,9 @@ def evaluate_cohort_analytic(
     n = len(pool)
     sr_star = cohort_sr_star(sigma_trials, len(members), n, rho_bar)
     dsr_book = cohort_dsr(
-        sr_cohort_only, sr_star, n_obs=int(bclean.size),
+        # v14.0: AR(1)-effective N (as fitness F14 and the marginal leg below), not the raw bar
+        # count -- multi-day holds autocorrelate daily marks, and raw N overstates the DSR.
+        sr_cohort_only, sr_star, n_obs=max(2, int(round(_ar1_effective_n(bclean)))),
         skew=skewness(bclean.tolist()), excess_kurt=excess_kurtosis(bclean.tolist()))
 
     # marginal stream (gated separately as a policy against paying for pure de-risking)

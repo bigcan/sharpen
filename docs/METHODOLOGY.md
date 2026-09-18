@@ -102,8 +102,10 @@ construction.
 
 ### Out-of-sample structure
 
-- **Combinatorial purged cross-validation** with an embargo after each train→test boundary: a
-  distribution of out-of-sample Sharpes rather than one path.
+- **Combinatorial purged path resampling** with an embargo after each train→test boundary: a
+  distribution of Sharpes across paths rather than one path. For the signal funnel nothing is refit
+  (signals are fixed rules), so this measures stability across paths, not out-of-sample fit; trained
+  policies get real out-of-sample tests from walk-forward below.
 - **Embargoed holdout** for final validation, touched once.
 - **Walk-forward** across calendar windows for trained policies, reporting the median across seeds.
 - **Recent out-of-sample** on the most recent window before anything is deployed.
@@ -114,6 +116,9 @@ construction.
 
 Confidence intervals use a **circular block bootstrap** (`block_bootstrap_sharpe_ci`), because
 overlapping and autocorrelated returns inflate a naive t-statistic. Read the interval, not the t.
+Since `crucible-v14.0` the funnel's IC t-statistic and deflated-Sharpe observation count also use a
+Newey-West effective count when forward-return labels overlap (see
+[LEAKS_FOUND](LEAKS_FOUND.md#found-in-the-pre-release-audit-crucible-v140)).
 
 ### Power, before anything else
 

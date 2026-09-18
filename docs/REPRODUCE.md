@@ -30,6 +30,23 @@ DECISION: GO
 Net Sharpe is at 2 bps per trade; the script also prints frictionless and 10 bps figures, and
 cross-sectional momentum for comparison. Results go to `results/xsec_momentum/results.json`.
 
+**0.601 is the flattering end of the range.** It is a total-return Sharpe (cash earns nothing, shorts
+pay no borrow) on 18 ETFs chosen during development. Restated in excess of T-bills:
+
+```bash
+python scripts/research/tsmom_excess_return_check.py
+```
+
+```
+pooled TSMOM net Sharpe, total return        0.601
+  in excess of T-bills on net exposure        0.511
+  ... and 50 bp/yr borrow on shorts           0.485
+```
+
+The same frozen rule on 32 ETFs never used in development scored **0.389**
+([fable_verdict_2026-06-11.md](research/fable_verdict_2026-06-11.md)); that run's universe is not
+cached by these scripts.
+
 ## 2. Why it still is not deployable: deflation
 
 ```bash
@@ -45,9 +62,13 @@ R1 CLEARS (DSR>=0.95 AND PBO<=0.5): False
 VERDICT: BLOCK_multiplicity
 ```
 
-A probability of backtest overfitting near zero says the choice among configurations was not
-overfit; a deflated Sharpe below the bar says the edge is not large enough to be distinguished from
-the best of 24 trials with the required confidence. Write-up:
+The DSR is computed on the book with momentum cut to the untouched-universe **0.389**, not the
+curated 0.601; on the curated book it would read 0.974 and pass. The project graded the honest
+number. A probability of backtest overfitting near zero says the choice among the 18 *book types* in
+the grid was not overfit; it does not measure universe curation, which is the larger risk here. A
+deflated Sharpe below the bar says the edge is not large enough to be distinguished from the best of
+24 trials with the required confidence. The two sleeves are combined with risk-parity weights from
+their full-sample volatilities, a mild look-ahead in the combination step. Write-up:
 [tailwind_v1_R1_dsr_pbo_2026-07-01.md](research/tailwind_v1_R1_dsr_pbo_2026-07-01.md).
 
 ## 3. The value test the epilogue is careful about
@@ -78,7 +99,7 @@ python scripts/research/forward_power.py
 
 The first is arithmetic and runs in about a second: the idealised minimum detectable ΔSharpe on 4
 and 16 years of daily bars. The second measures the deployed validation contract on a synthetic
-panel and takes longer. See [METHODOLOGY.md §4](METHODOLOGY.md).
+panel and takes about 13 minutes on a desktop CPU. See [METHODOLOGY.md §4](METHODOLOGY.md).
 
 ## 5. The validation funnel on synthetic data
 

@@ -5,6 +5,7 @@ Monitor GPU runs whose WandB connection died (401 Unauthorized on Apr 6 23:05).
 Checks progress via SSH log tails, detects completion, and auto-syncs wandb.
 Designed to be called repeatedly (e.g. via /loop).
 """
+import os
 import sys
 import io
 import json
@@ -21,7 +22,7 @@ PROJECT_ROOT = Path(__file__).resolve().parent.parent
 INSTANCES_FILE = PROJECT_ROOT / "instances.json"
 STATE_FILE = PROJECT_ROOT / "results" / "wandb_orphan_state.json"
 
-WANDB_KEY = "<REDACTED_WANDB_KEY>"
+WANDB_KEY = os.environ.get("WANDB_API_KEY", "")  # never hardcode credentials
 WANDB_BIN = "/root/miniconda3/bin/wandb"
 
 # Orphaned runs: WandB shows "finished" but training is still active on GPU

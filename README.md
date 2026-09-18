@@ -10,8 +10,9 @@ with real capital.**
 
 It is published for two reasons. The validation machinery is reusable, and the record of what
 it rejected, and why, saves you rebuilding the same things. And along the way the project caught
-itself shipping look-ahead bugs that had manufactured the results it was about to act on. Those
-are written up in **[docs/LEAKS_FOUND.md](docs/LEAKS_FOUND.md)**, the best place to start.
+itself shipping bugs, two of them look-ahead leaks, that had manufactured or disguised the results
+it was about to act on. Those are written up in **[docs/LEAKS_FOUND.md](docs/LEAKS_FOUND.md)**, the
+best place to start.
 
 > **Not investment advice. Not a trading product.** Every performance figure in this repository
 > comes from a historical simulation or a paper run. Read [DISCLAIMER.md](DISCLAIMER.md).
@@ -28,14 +29,27 @@ Each claim below points at evidence you can re-run.
    with the number that closed it and the evidence that ships, is in
    **[NEGATIVE_RESULTS.md](NEGATIVE_RESULTS.md)**.
 
-2. **One weak survivor: cross-asset time-series momentum (TSMOM).** 18 ETFs across four asset
-   classes, built from **free daily public OHLCV**, net Sharpe **≈ 0.60 at 2 bps**. The book built
-   on it (TSMOM plus a betting-against-beta sleeve) has a probability of backtest overfitting of
-   0.0009, but a **deflated Sharpe of 0.896 against a 0.95 bar**, so it failed. A real but
-   sub-threshold edge, not a product. See
-   [`tailwind_v1_R1_dsr_pbo_2026-07-01.md`](docs/research/tailwind_v1_R1_dsr_pbo_2026-07-01.md).
+2. **One weak survivor: cross-asset time-series momentum (TSMOM),** built from **free daily public
+   OHLCV**. Its honest size is a range, and the top of it is the flattering end:
 
-3. **Three bugs had manufactured or disguised results.** A multi-timeframe look-ahead was the
+   | Measurement | Net Sharpe |
+   |---|---|
+   | 18 ETFs chosen during development, total return, 2 bps | 0.60 |
+   | Same book, in excess of T-bills on its net exposure | 0.51 |
+   | Same frozen rule on 32 ETFs never used in development | **0.39** |
+
+   The deployment test was run on the honest end. The book built on it (TSMOM plus a
+   betting-against-beta sleeve), with momentum cut to the untouched-universe 0.39, has a
+   **deflated Sharpe of 0.896 against a 0.95 bar**, so it failed. (On the curated 0.60 it would
+   pass at 0.974; the project did not take that number because the curation is exactly the
+   overfitting channel the test exists to price.) Its probability of backtest overfitting is
+   0.0009, but that grid compares book *types*, not universes, so it says little about curation.
+   A real but sub-threshold edge, not a product. See
+   [`tailwind_v1_R1_dsr_pbo_2026-07-01.md`](docs/research/tailwind_v1_R1_dsr_pbo_2026-07-01.md) and
+   [`fable_verdict_2026-06-11.md`](docs/research/fable_verdict_2026-06-11.md).
+
+3. **Three bugs had manufactured or disguised results.** Two were look-ahead leaks, one a seeding
+   defect. A multi-timeframe look-ahead was the
    *entire* edge of one strategy (profit factor 1.69 → 1.02 once fixed); a signal gate read the bar
    it was about to trade; and `--seed` never reached the environments, so every earlier multi-seed
    comparison measured noise. [docs/LEAKS_FOUND.md](docs/LEAKS_FOUND.md).
@@ -85,10 +99,10 @@ This scores four demo signals on a synthetic panel through the full validation f
 ```
 | # | signal  | verdict | IC-IR  | DSR   | FDR-q | cpcvOOS | fricSh | netSh@std |
 |---|---------|---------|--------|-------|-------|---------|--------|-----------|
-| 1 | mom_60d | LOGGED  |  0.045 | 0.474 | 0.835 |    0.22 |   0.23 |     -0.59 |
-| 2 | mom_20d | LOGGED  | -0.014 | 0.013 | 0.835 |   -0.15 |  -0.31 |     -1.66 |
-| 3 | rev_5d  | LOGGED  | -0.043 | 0.000 | 0.835 |   -0.08 |  -0.27 |     -3.10 |
-| 4 | vol_20d | LOGGED  | -0.054 | 0.000 | 0.835 |   -0.33 |  -0.22 |     -1.60 |
+| 1 | mom_60d | LOGGED  |  0.045 | 0.485 | 0.835 |    0.22 |   0.23 |     -0.59 |
+| 2 | mom_20d | LOGGED  | -0.014 | 0.097 | 0.835 |   -0.15 |  -0.31 |     -1.66 |
+| 3 | rev_5d  | LOGGED  | -0.043 | 0.018 | 0.835 |   -0.08 |  -0.27 |     -3.10 |
+| 4 | vol_20d | LOGGED  | -0.054 | 0.016 | 0.835 |   -0.33 |  -0.22 |     -1.60 |
 ```
 
 `LOGGED` means fully measured and did not clear the promotion bar. That is where almost every
@@ -105,6 +119,7 @@ in about a minute on free data:
 
 ```bash
 python scripts/research/xsec_momentum_falsification.py   # net Sharpe 0.601, 4/4 classes
+python scripts/research/tsmom_excess_return_check.py     # 0.511 in excess of T-bills
 python scripts/research/audit_tailwind_book.py           # DSR 0.896 < 0.95, PBO 0.0009
 python scripts/research/value_falsification.py           # value factor -0.364, NO-GO
 ```
@@ -126,7 +141,7 @@ lies:
 | 1 | Multi-horizon IC, decile spread, breadth, decay half-life |
 | 2 | Capturability: net Sharpe per cost model, cost wall, turnover |
 | 3 | Subperiod stability and recent out-of-sample |
-| 3.5 | Combinatorial purged cross-validation with embargo |
+| 3.5 | Combinatorial purged path resampling with embargo. Signals are fixed rules, nothing is refit, so this measures stability across paths rather than out-of-sample fit |
 | 4 | Deflated Sharpe, effective N, FDR/BHY, Harvey-Liu-Zhu hurdle |
 | 5 | Orthogonality to a factor book (residual Sharpe) |
 
@@ -196,7 +211,9 @@ The hub is [docs/README.md](docs/README.md).
 
 ## Invariants worth stealing
 
-Each is enforced by a **negative** test: one that must fail if the defect is reintroduced.
+Each is guarded by a **negative** test (one that must fail if the defect is reintroduced), except
+`DATA-CLEAN`, which is a working rule: the cleaner is tested, but nothing forces an experiment to
+use it, and the TSMOM scripts read yfinance directly.
 
 | ID | Rule |
 |---|---|
@@ -204,14 +221,18 @@ Each is enforced by a **negative** test: one that must fail if the defect is rei
 | `LEAK-2` | No input at bar *t* may carry data stamped after *t*, including coarse-timeframe bars (map to the last **closed** one) and anything a gate or filter reads |
 | `BUG-03` | Any hindsight-shaped reward term is zero in backtests |
 | `DATA-CLEAN` | All OHLCV passes `scripts/clean_ohlcv.py` before an experiment |
-| `CRU-1` | Crucible's gate definitions are hash-frozen; a new capability may not change a past verdict |
+| `CRU-1` | Crucible's gate definitions are hash-frozen; a new capability may not change a past verdict. Correctness fixes that do are MAJOR versions (`crucible-v14.0` moved one) |
 | `CRU-2` | Crucible's hypothesis agent can read only dedup keys and killed families, never verdicts |
 
-Gate thresholds live in `configs/*.gates.yaml`, never in code.
+Gate thresholds are read from `configs/*.gates.yaml`. A few Crucible modules still carry in-code
+fallback defaults for when a config block is missing; the frozen gates hash does not cover those.
 
 The project was run semi-agentically: an AI coding agent did most of the implementation under the
-rules in [CLAUDE.md](CLAUDE.md). That file ships as it was used, minus private hostnames, including
-the rules that were added after something went wrong.
+rules in [CLAUDE.md](CLAUDE.md). That file ships as it was last used, minus private hostnames,
+including the rules that were added after something went wrong. It reads as a live working file
+because it was one: its "Active" list and prop-firm milestone describe plans at the time, none
+of which reached capital. Session tags such as `S553` throughout the docs refer to the private
+R&D log, which is not published.
 
 ---
 

@@ -34,6 +34,7 @@ from ._ic import (
     block_bootstrap_mean,
     cross_sectional_ic,
     effective_n_trials,
+    hac_effective_n,
     one_sided_p,
     spearman_ic,
 )
@@ -130,7 +131,7 @@ class HorizonIC:
     ic_mean: float          # direction-adjusted (positive = good)
     ic_std: float
     ic_ir: float            # ic_mean / ic_std (per-period information ratio)
-    ic_tstat: float         # ic_ir * sqrt(n_days)
+    ic_tstat: float         # ic_ir * sqrt(n_eff); n_eff = HAC count for overlapping labels
     n_days: int
     ci_low: float           # block-bootstrap CI on mean IC
     ci_high: float
@@ -247,10 +248,10 @@ def tier1_gross_power(
     for h in horizons:
         fwd = panel.forward_returns(h)
         eff = scores * sign
-        r = cross_sectional_ic(eff, fwd, active=panel.active, min_names=min_names)
+        r = cross_sectional_ic(eff, fwd, active=panel.active, min_names=min_names, overlap=h)
         ci_low = ci_high = p_le_0 = float("nan")
         if bootstrap and h == primary_horizon and r.n_days >= 23:  # CI only needed at primary
-            bb = block_bootstrap_mean(r.ic_series)
+            bb = block_bootstrap_mean(r.ic_series, block=max(21, int(h)))  # block >= overlap
             if bb is not None:
                 ci_low, ci_high, p_le_0 = bb["ci_low"], bb["ci_high"], bb["p_le_0"]
         spread, mono = _decile_spread(eff, fwd, panel.active, n_quantiles)
@@ -264,7 +265,8 @@ def tier1_gross_power(
     if primary_eff is None:  # primary_horizon not in horizons -> compute its IC directly
         primary_eff = scores * sign
         pr = cross_sectional_ic(primary_eff, panel.forward_returns(primary_horizon),
-                                active=panel.active, min_names=min_names)
+                                active=panel.active, min_names=min_names,
+                                overlap=primary_horizon)
         primary_series = pr.ic_series
         primary_days = pr.kept_days
 
@@ -361,10 +363,15 @@ def tier4_deflation(primary_results: dict[str, GrossPower],
             pvals.append(float(hp.p_le_0))
         else:
             s = g.primary_ic_series
-            se = float(np.std(s, ddof=1) / np.sqrt(s.size)) if s.size > 1 else 0.0
+            s_neff = hac_effective_n(s, g.primary_horizon - 1)          # overlap-aware SE
+            se = float(np.std(s, ddof=1) / np.sqrt(s_neff)) if s.size > 1 else 0.0
             pvals.append(one_sided_p(hp.ic_mean, se))
-    qs = bh_fdr(pvals)
-    qs_bhy = bhy_fdr(pvals)
+    # BH/BHY over the DECLARED family (n_mult), not the submitted batch: pad the undeclared
+    # members with p=1, the most generous value consistent with m = n_mult tests. Before v14.0 the
+    # q-values used m = batch size, so splitting a family into small batches loosened FDR.
+    pad = [1.0] * max(0, int(n_mult) - len(pvals))
+    qs = bh_fdr(pvals + pad)[:len(pvals)]
+    qs_bhy = bhy_fdr(pvals + pad)[:len(pvals)]
 
     out: dict[str, Deflation] = {}
     for i, n in enumerate(pool):
@@ -377,7 +384,8 @@ def tier4_deflation(primary_results: dict[str, GrossPower],
         # conjure a DSR where there is no dispersion to measure (that would be looser, not
         # stricter -- a NaN today reads as LOGGED).
         d = (deflated_sharpe_ratio(
-            hp.ic_ir, irs, n_obs=hp.n_days, skew=skewness(series.tolist()),
+            hp.ic_ir, irs, n_obs=max(2, int(round(hac_effective_n(series, g.primary_horizon - 1)))),
+            skew=skewness(series.tolist()),
             excess_kurt=excess_kurtosis(series.tolist()), n_trials=n_dsr,
             periods_per_year=1) if n_trials >= 2 else None)
         psr = float(probabilistic_sharpe_ratio(series, sr_benchmark=0.0, periods_per_year=1))
@@ -681,18 +689,22 @@ class Orthogonality:
     corr_by_factor: dict[str, float]
     max_abs_corr: float
     r2_explained: float       # R^2 of the signal's L/S returns on the factor book
-    residual_sharpe: float    # annualized Sharpe of the OLS residual (the orthogonal alpha)
+    residual_sharpe: float    # annualized Sharpe of alpha + eps = y - X.beta (the orthogonal alpha)
     n_days: int
 
 
 def _daily_ls_returns(eff: np.ndarray, panel: Panel) -> tuple[np.ndarray, np.ndarray]:
+    """Daily L/S book returns, each stamped at the END of its holding period (``dates[t+1]`` for the
+    t -> t+1 return). Factor books (Ken French style) stamp the t-1 -> t return at t, so end-of-period
+    stamping is what makes the Tier-5 date join line up the SAME calendar interval (v14.0; it was
+    stamped at t, a one-day misalignment that understated factor exposure)."""
     fwd1 = panel.forward_returns(1)
     dates: list = []
     rets: list[float] = []
     for t in range(panel.T - 1):
         w = _ls_weights(eff[t], panel.active[t])
         if np.abs(w).sum() > 0:
-            dates.append(panel.dates[t])
+            dates.append(panel.dates[t + 1])
             rets.append(float(np.nansum(w * fwd1[t])))
     return np.asarray(dates, dtype="datetime64[ns]"), np.asarray(rets, dtype=np.float64)
 
@@ -716,6 +728,9 @@ def tier5_orthogonality(sig: "Signal", panel: Panel, factor_book: FactorBook, *,
     a = np.column_stack([np.ones(n), x])
     coef, *_ = np.linalg.lstsq(a, y, rcond=None)
     resid = y - a @ coef
+    # The orthogonal alpha stream is alpha + eps = y - X.beta. The OLS residual alone has mean
+    # exactly 0 by construction (intercept in the fit), so its Sharpe was always ~0 (v14.0 fix).
+    alpha_stream = y - x @ coef[1:]
     ss_tot = float(((y - y.mean()) ** 2).sum())
     r2 = 1.0 - float((resid ** 2).sum()) / ss_tot if ss_tot > 0 else float("nan")
     corr: dict[str, float] = {}
@@ -725,4 +740,4 @@ def tier5_orthogonality(sig: "Signal", panel: Panel, factor_book: FactorBook, *,
     finite_c = [abs(v) for v in corr.values() if np.isfinite(v)]
     return Orthogonality(
         factor_book.names, corr, max(finite_c) if finite_c else float("nan"),
-        float(r2), sharpe_ratio(resid, periods_per_year=TRADING_DAYS), n)
+        float(r2), sharpe_ratio(alpha_stream, periods_per_year=TRADING_DAYS), n)
