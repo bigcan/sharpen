@@ -336,7 +336,8 @@ goes beyond what this repository shows.
 ## Support
 
 If Sharpen is useful to you, you can support its development through
-[GitHub Sponsors](https://github.com/sponsors/bigcan) or [Ko-fi](https://ko-fi.com/bigcan).
+[GitHub Sponsors](https://github.com/sponsors/bigcan),
+[Open Collective](https://opencollective.com/sharpen) or [Ko-fi](https://ko-fi.com/bigcan).
 Sponsorship pays for compute and upkeep of the open research. It buys no access to strategies,
 signals or advice, and nothing here is a claim about future returns.
 
