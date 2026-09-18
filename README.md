@@ -314,7 +314,9 @@ Session tags such as `S553` in the docs refer to the private R&D log, which is n
 python -m pytest
 ```
 
-On the published tree at release: `3261 passed, 25 skipped, 28 deselected, 1 xfailed`. The 28
+About 3,300 tests run by default and pass on every push in CI (Windows, CPU-only). Exact counts
+vary by machine, because some tests skip when local data caches, optional dependencies or full
+git history are missing. The 28
 deselected tests are slow or integration tests excluded by default; at least one can hang rather
 than fail, so run them individually with a timeout.
 
