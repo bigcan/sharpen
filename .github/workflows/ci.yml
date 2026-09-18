@@ -63,9 +63,13 @@ jobs:
 
       # sharpen/ and tests/ are clean today (measured 2026-09-01), so this is a real gate:
       # it fails the moment the package or the suite regresses. scripts/oss/ is the tracked
-      # publication tooling and is also clean.
+      # publication tooling and is also clean. The public Sharpen build strips scripts/oss/,
+      # so lint it only where it exists -- naming a missing path makes ruff exit 1 (E902).
       - name: Ruff (package, tests, publication tooling)
-        run: ruff check sharpen tests scripts/oss
+        run: |
+          paths="sharpen tests"
+          if [ -d scripts/oss ]; then paths="$paths scripts/oss"; fi
+          ruff check $paths
 
       # The rest of the repo carries a 269-error backlog, concentrated in scripts/ (213),
       # contest/ (34) and sync_1h_export/ (17). Reported so the number stays visible, but
