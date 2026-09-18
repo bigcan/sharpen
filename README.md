@@ -21,7 +21,7 @@ best place to start.
 
 ## What the record shows
 
-Each claim below points at evidence you can re-run.
+Each claim below points at evidence you can re-run; claim 4 needs free Taiwan data you fetch yourself.
 
 1. **76 strategies and probes, across eight families, were tested and closed.** Directional RL,
    options and volatility premium, arbitrage and market making, equity cross-section, sleeves and
@@ -57,7 +57,11 @@ Each claim below points at evidence you can re-run.
 4. **The automated alpha miner has never produced a discovery, and the record cannot say why.** A
    search of the same size, run on data containing no signal at all, reaches a *higher* gate
    statistic (`marginal_t` **3.68**) than anything the real mining record ever produced (**2.12**).
-   Re-run with `scripts/research/null_grid_sim.py`; see
+   That figure needs the Taiwan panel (free via FinMind, `scripts/data/fetch_taiwan_finmind.py`,
+   not shipped) and the full search budget, about 10 minutes per replicate:
+   `python scripts/research/null_grid_sim.py --substrate taiwan --mode null --pop-size 200
+   --n-generations 40 --replicates 4 --base-sharpe -0.007`. The default synthetic run is a smoke
+   test and reaches a lower ceiling (about 2.2). See
    [`f4_null_grid_reproduction_2026-09-03.md`](docs/research/f4_null_grid_reproduction_2026-09-03.md).
 
 5. **Free daily data sets a hard floor on what any honest test here could detect.** An idealised
@@ -262,7 +266,7 @@ python -m pytest
 On the published tree at release, pytest's own summary read:
 
 ```
-3248 passed, 25 skipped, 28 deselected, 1 xfailed, 21 warnings in 252.36s (0:04:12)
+3261 passed, 25 skipped, 28 deselected, 1 xfailed, 22 warnings in 302.44s (0:05:02)
 ```
 
 The 28 deselected tests are slow or integration tests excluded by the default `addopts`. They are
