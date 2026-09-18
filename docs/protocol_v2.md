@@ -1,5 +1,11 @@
 # Training → Live Protocol v2.7
 
+> **Reading this as a published document.** This is the protocol as it was used internally, kept
+> verbatim. Session tags (`S488`, `S553-cont-...`) point into the private R&D log, links to
+> `decision_*.md` and `.agent/` files point at notes that are not published, and "active" workstreams
+> describe the state at the time: none reached capital (see [NEGATIVE_RESULTS](../NEGATIVE_RESULTS.md)).
+> The stage contract itself is what `scripts/validate_config.py` enforces.
+
 > **Status:** Active. Standardizes the training-to-live workflow across all Sharpen workstreams (GMGP1, SG-1, CMGP1, AlphaSeek, Funding-Arb).
 > **Reference run:** GMGP1 staged approach. **Anti-pattern:** AlphaSeek `k28l6ef8` monolithic 5.7-day run.
 > **Owner:** R&D. **Last updated:** 2026-06-02 (Protocol v2.7-B — Stage 3.5 observation-noise robustness SHIPPED, Phase α).

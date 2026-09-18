@@ -33,6 +33,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 
 import numpy as np
+import pandas as pd
 
 from ..agentic.card import DiscoveryCard
 from ..agentic.cohort_card import CohortCard
@@ -322,7 +323,8 @@ def _process_substrate(
     context = author.build_context(
         terminals, asset_classes=prepared.asset_classes, panel_n=prepared.panel.N,
         feature_slot_bars=_feature_slot_bars(prepared.panel),
-        mechanism_nonce=_mechanism_nonce(tick_ts))
+        mechanism_nonce=_mechanism_nonce(tick_ts),
+        killed_scope=f"tick-{sub.substrate_id}-")
     fresh_specs = author.propose(context, proposal_ts=tick_ts)
     # --- U4 power-aware RE-ADMISSION: candidates parked as UNDERPOWERED whose original test ran at a
     # materially worse MDE than this substrate now has. Injected on the SCORER side (the orchestrator is
@@ -436,7 +438,8 @@ def _process_substrate(
 
     # --- CR-8 lockbox: enroll every PROMISING survivor (idempotent). A fresh entry is INCUBATING with
     # an empty forward window; its card reflects that state (not the P2 PENDING_P4 stub). -----------
-    enrolled = _enroll_cards(sub, result.cards, tick_ts)
+    enrolled = _enroll_cards(sub, result.cards, tick_ts,
+                             scored_through_ts=_last_bar_iso(prepared.timestamps))
     tick_cards = ([updated_card(c, e) for c, e in zip(result.cards, enrolled)]
                   if enrolled else list(result.cards))
 
@@ -592,13 +595,25 @@ def _incubate_active(sub: Substrate, prepared: PreparedSubstrate, tick_ts: str) 
     return _IncubationPass(touched=touched, n_stalled=n_stalled, n_errors=n_errors)
 
 
-def _enroll_cards(sub: Substrate, cards: list[DiscoveryCard], tick_ts: str) -> list[LockboxEntry]:
+def _last_bar_iso(timestamps: np.ndarray) -> str | None:
+    """ISO timestamp of the panel's last bar (datetime64 axis or epoch-seconds axis), or None if empty."""
+    if timestamps is None or len(timestamps) == 0:
+        return None
+    last = timestamps[-1]
+    if np.issubdtype(np.asarray(timestamps).dtype, np.number):
+        return pd.Timestamp(float(last), unit="s", tz="UTC").isoformat()
+    return pd.Timestamp(last).isoformat()
+
+
+def _enroll_cards(sub: Substrate, cards: list[DiscoveryCard], tick_ts: str,
+                  scored_through_ts: str | None = None) -> list[LockboxEntry]:
     """Enroll each PROMISING survivor card into the lockbox (idempotent). Returns one entry per card,
-    aligned by index so the caller can map cards to their incubation state."""
+    aligned by index so the caller can map cards to their incubation state. ``scored_through_ts`` (the
+    last bar the survivor was scored on) floors the forward boundary — see ``Lockbox.enroll``."""
     if sub.lockbox is None or sub.incubation_criterion is None or not cards:
         return []
     return [sub.lockbox.enroll(c, sub.incubation_criterion, substrate_id=sub.substrate_id,
-                               tick_ts=tick_ts) for c in cards]
+                               tick_ts=tick_ts, scored_through_ts=scored_through_ts) for c in cards]
 
 
 def _lockbox_fields(sub: Substrate, touched: list[LockboxEntry], *, n_enrolled: int) -> dict:

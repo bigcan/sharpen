@@ -112,7 +112,7 @@ def test_versions_are_distinct_and_tagged_form() -> None:
     # trapped inside a probe script (the orchestrator could not import it), so the substrate carrying
     # six causally-aligned per-name channels — and the only PROMISING ever recorded — could be scored
     # but never mined. All five probe scorecards were re-run and verified numerically identical.
-    assert CRUCIBLE_VERSION == "crucible-v13.1"
+    assert CRUCIBLE_VERSION == "crucible-v14.0"
     assert CRUCIBLE_BASELINE_VERSION == "crucible-v1.0"
     assert CRUCIBLE_VERSION != CRUCIBLE_BASELINE_VERSION
 

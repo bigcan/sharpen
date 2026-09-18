@@ -10,16 +10,19 @@ re-run.
 
 **Evidence.** Each row points at what ships in this repository: a research document under
 [`docs/research/`](docs/research/README.md), or the script that produced the number under
-`scripts/research/`. Run artifacts (`results/`) and the raw R&D log are not published, and several
+`scripts/research/`. Run artifacts (`results/`, apart from four small verdict JSONs) and the raw
+R&D log are not published, and several
 early pre-registrations lived in internal notes that are not included. A row marked *not shipped*
 is recorded here from those notes and cannot be re-run from this repository as published.
 
 **Bugs are listed separately.** Three results were manufactured by defects rather than markets;
-see [docs/LEAKS_FOUND.md](docs/LEAKS_FOUND.md). The rows below are measured on the fixed code.
+see [docs/LEAKS_FOUND.md](docs/LEAKS_FOUND.md). The rows below are measured on the fixed code, with
+one exception flagged in its row (the risk-overlay lab).
 
-**The one survivor** is not in this file: cross-asset time-series momentum, net Sharpe ≈ 0.60, and
-the book built on it (TSMOM plus a betting-against-beta sleeve), which failed deflation at 0.896
-against a 0.95 bar. See [`tailwind_v1_R1_dsr_pbo_2026-07-01.md`](docs/research/tailwind_v1_R1_dsr_pbo_2026-07-01.md).
+**The one survivor** is not in this file: cross-asset time-series momentum, net Sharpe 0.60 on the
+18 ETFs used in development (0.51 in excess of T-bills, 0.39 on 32 untouched ETFs), and the book
+built on it (TSMOM plus a betting-against-beta sleeve), which failed deflation at 0.896 against a
+0.95 bar when graded on the untouched-universe figure. See [`tailwind_v1_R1_dsr_pbo_2026-07-01.md`](docs/research/tailwind_v1_R1_dsr_pbo_2026-07-01.md).
 
 ---
 
@@ -59,7 +62,7 @@ features, plus every attempt to rescue them.
 | PPO-GAE vs SAC | The failure is SAC-specific | Same env, PPO with GAE | Same no-edge result: the failure is the signal, not the algorithm | [PPO-GAE screen](docs/research/ppo_ge_gmgp1_btc_screen_2026-06-19.md) · `ppo_ge_gmgp1_btc_screen.py` |
 | High-confidence reward | Rewarding only confident trades exposes a conditional edge | Step-0 conditional-alpha probe (CPU) | No directional signal to rescue. The one positive-IC signal, short-horizon reversal, fails even as a passive maker with rebate | `gmgp1_btc_conviction_probe.py` · `gmgp1_btc_meanrev_maker_probe.py` |
 | BTC loss-regime overlay | Avoiding loss regimes (vol, volume, weekend, hour, loss streaks) makes it profitable | Discovery / confirmation split | Loss is diffuse; the only OOS-stable slice is BTC beta and seasonality | `gmgp1_btc_loss_regime_discovery.py` · `…_confirm.py` |
-| Risk overlays on GMGP1 and SG-1 | Stops, take-profit, time stops, vol targeting or DD throttles rescue the P&L | 54 arms, each re-scored with the edge sign flipped | **0/54 reach PF ≥ 1.** Every helpful feature reverses when the sign flips; stops are cost-killed | `risk_overlay_lab.py` |
+| Risk overlays on GMGP1 and SG-1 | Stops, take-profit, time stops, vol targeting or DD throttles rescue the P&L | 54 arms, each re-scored with the edge sign flipped | **0/54 reach PF ≥ 1.** Every helpful feature reverses when the sign flips; stops are cost-killed. The SG-1 trajectories it replays were recorded before the GATE-CAUSAL-01 fix; that leak biased them upward, so the NO-GO stands | `risk_overlay_lab.py` |
 | PRISM regime model | Regime features (L1) or regime sizing (L2) improve a gold policy | Gate test of both layers | Both layers fail their gates; a dormant daily→intraday look-ahead also found | [PRISM eval spec](docs/research/prism_regime_eval_spec_2026-06-18.md) |
 | Sync-1H multi-asset crypto RL | Portfolio RL over 20 crypto perps at 1h | Pilot runs | Pilot v1 **−62.84%**, v2 **−34.30%**; workstream closed | *not shipped* |
 | AlphaSeek DQN ensemble | A crypto-contest DQN ensemble is tradeable | Fee audit of all 12 checkpoints | Median PF **0.07–0.27** at realistic fees vs 2.02 at contest fees; a v3 redesign scored PF 0.00 | [fee audit report](docs/alphaseek_fee_audit_report.md) |
@@ -93,7 +96,7 @@ features, plus every attempt to rescue them.
 
 | Strategy | Hypothesis | Method / kill criterion | Result | Evidence |
 |---|---|---|---|---|
-| Cross-sectional equity momentum | Large-cap momentum is deployable | Survivorship-controlled, cost-inclusive | Correctly signed and survivorship-robust, but arbitraged to about cost and regime-fragile | `signal_momentum_confirmed.py` · `xsec_momentum_falsification.py` |
+| Cross-sectional equity momentum | Large-cap momentum is deployable | Survivorship-controlled, cost-inclusive | Correctly signed and survivorship-robust, but arbitraged to about cost and regime-fragile | `signal_momentum_confirmed.py` |
 | Low-turnover reversal + distress filter | Filtering distress rescues the reversal lead | The named delisting-exit escape hatch, tested | Reversal edge and survivorship exposure are the same trade | `signal_lead_distress_filter.py` |
 | PEAD, post-pandemic | Post-earnings drift survives 2023–2026 | Event study + literature | Dead in the investable universe; survives only in untradeable microcaps | *not shipped* |
 | XLG entry timing (10 rules) | Timing rules beat buy-and-hold on a mega-cap ETF | 2005–2026, survivorship-clean | 8/10 are cash drag; best active IR negative, DSR 0.043; two survive only as drawdown insurance | `xlg_alpha_overlay_backtest.py` · `xlg_pit_validation.py` |
@@ -101,7 +104,7 @@ features, plus every attempt to rescue them.
 | Value factor sleeve | Cross-asset value adds to momentum | Pre-registered falsification | Pooled net Sharpe **−0.364** vs momentum +0.545; decayed after 2011; combining halved Sharpe and roughly doubled drawdown | [spec](docs/research/value_falsification_spec_2026-06-18.md) · `value_falsification.py` |
 | "ETFs that beat SPY" | Long-run ETF outperformance is persistent skill | 354 funds, factor attribution, FDR | Concentrated tech/semiconductor beta; **0/351 survive BH-FDR**; the lookback selection rule has zero predictive power | [research](docs/research/etf_outperformance_research_2026-08-14.md) · `etf_outperformance_*.py` |
 | Taiwan large-cap momentum | Cross-sectional momentum on TWSE | First pass, then size control | The first-pass PROMISING was a size confound | `taiwan_xsec_momentum_eval.py` |
-| Taiwan small-cap P1 (monthly revenue drift) | Revenue surprises drift in small caps | Round-1 alt-data probe; longer hold to beat the cost wall | The only PROMISING ever recorded; the 63-day hold rescues the cost wall but not the Sharpe (net ≈ 0.52 flat) | [prereg](docs/research/taiwan_smallcap_altdata_probes_preregistration_2026-07-15.md) · [lower turnover](docs/research/taiwan_smallcap_p1_lower_turnover_2026-07-31.md) |
+| Taiwan small-cap P1 (monthly revenue drift) | Revenue surprises drift in small caps | Round-1 alt-data probe; longer hold to beat the cost wall | The only PROMISING on record; the 63-day hold rescues the cost wall but not the Sharpe (net ≈ 0.52 flat). Re-scored under `crucible-v14.0` (revenue now usable the session after the filing deadline; overlap-aware significance): still PROMISING, DSR 1.000 → 0.944. A second earlier PROMISING, small-cap idiosyncratic vol, was an artifact of the overlap and FDR-family bugs (either fix alone demotes it) and is now LOGGED | [prereg](docs/research/taiwan_smallcap_altdata_probes_preregistration_2026-07-15.md) · [lower turnover](docs/research/taiwan_smallcap_p1_lower_turnover_2026-07-31.md) |
 | Taiwan small-cap price signals (R1 reversal, R2 IVOL) | Classic price anomalies in small caps | Pre-registered | Frictionless Sharpe **−0.182** and **−0.627** | [prereg](docs/research/taiwan_smallcap_price_probes_preregistration_2026-07-31.md) · `taiwan_smallcap_price_eval.py` |
 | Taiwan small-cap flows and short interest (Q1, Q2, S1) | Institutional flow and short interest predict returns | Pre-registered with committed sign | Q1 and Q2 **falsified on sign** (t −6.57 against a committed +); S1 CI straddles zero and flips sign at 63d | [flow prereg](docs/research/taiwan_smallcap_institutional_flow_preregistration_2026-07-31.md) · [short interest](docs/research/taiwan_smallcap_short_interest_preregistration_2026-07-31.md) |
 | Illiquidity premium (R1) | Illiquid assets carry exploitable structure | 92 asset × horizon cells, cost-inclusive | Real structure (TRY, ZAR, mid-cap alts), but **0/92 cells survive cost** | [spec](docs/research/r1_illiquidity_probe_spec_2026-06-12.md) · `r1_illiquidity_probe.py` |
@@ -158,7 +161,7 @@ negative control.
 | Crypto cross-sectional reversal (K1) | Reversal across 10 perps | Pre-registered | Fails t, CI and economics | [prereg](docs/research/crypto_xsec_preregistration_2026-07-31.md) · `crypto_xsec_eval.py` |
 | Crypto cross-sectional momentum (K2) | Momentum across 10 perps | Pre-registered | Wrong sign | same |
 | Dynamic sleeve timing | Time-varying sleeve weights beat static weights (the cheap gate before an RL allocator) | Linear dynamic allocation vs static, train/OOS split | Does not beat static weights: an RL sleeve allocator is not justified | `sleeve_timing_falsification.py` |
-| Portfolio frontier (100%/yr target) | An honest book can reach the north-star return | Frontier over sleeves | Not honestly reachable; best honest Sharpe 0.601 | `portfolio_frontier.py` · [multi-sleeve report](docs/research/multi_sleeve_strategy_report_2026-06-18.md) |
+| Portfolio frontier (100%/yr target) | An honest book can reach the north-star return | Frontier over sleeves | Not honestly reachable; best honest combined Sharpe 0.601 (momentum at the untouched 0.389 plus rates carry, which later reversed out of sample; the match with the TSMOM headline 0.601 is a coincidence) | `portfolio_frontier.py` · [multi-sleeve report](docs/research/multi_sleeve_strategy_report_2026-06-18.md) |
 | Breadth expansion of the momentum book | More instruments raise the book's Sharpe | Breadth test | No deployable improvement over the base | [breadth expansion](docs/research/tailwind_v1_breadth_expansion_2026-07-01.md) · `breadth_expansion.py` |
 
 ## 8. Automated mining substrates

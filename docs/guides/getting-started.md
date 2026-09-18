@@ -54,8 +54,8 @@ Expected output — a ranked scorecard, plus `scorecard.json` / `scorecard.md` i
 ```
 | # | signal   | family    | verdict | IC-IR  | DSR   | FDR-q | cpcvOOS | fricSh | netSh@std |
 |---|----------|-----------|---------|--------|-------|-------|---------|--------|-----------|
-| 1 | mom_60d  | technical | LOGGED  |  0.045 | 0.474 | 0.835 |    0.22 |   0.23 |     -0.59 |
-| 2 | mom_20d  | technical | LOGGED  | -0.014 | 0.013 | 0.835 |   -0.15 |  -0.31 |     -1.66 |
+| 1 | mom_60d  | technical | LOGGED  |  0.045 | 0.485 | 0.835 |    0.22 |   0.23 |     -0.59 |
+| 2 | mom_20d  | technical | LOGGED  | -0.014 | 0.097 | 0.835 |   -0.15 |  -0.31 |     -1.66 |
 ```
 
 **You just built four strategies and validated all of them.** `LOGGED` means "fully

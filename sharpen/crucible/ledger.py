@@ -378,7 +378,7 @@ class TrialLedger:
             "SELECT 1 FROM trial_ledger WHERE semantic_hash = ? AND verdict IS NOT NULL LIMIT 1",
             (sh,)).fetchone() is not None
 
-    def killed_families(self) -> list[str]:
+    def killed_families(self, run_prefix: str | None = None) -> list[str]:
         """Families that are dead — the NO-GOs the agent must not rediscover (spec §6). Family NAMES
         only; no scores leak.
 
@@ -387,14 +387,26 @@ class TrialLedger:
         or, since U4, a ``rejection_class = 'DECISIVE'`` row — a rejection the substrate had the power to
         make meaningful (:mod:`crucible.search_memory`). An ``UNDERPOWERED`` rejection is deliberately
         NOT terminal: at Crucible's measured MDE that is every rejection, and killing families off
-        underpowered tests would manufacture NO-GOs out of low power."""
+        underpowered tests would manufacture NO-GOs out of low power.
+
+        v14.0 fixes:
+        - The PROMISING subquery excludes NULL families. Evolved offspring carry ``family=None``; one
+          PROMISING offspring put a NULL inside ``NOT IN (...)``, which makes the predicate NULL for
+          every row and silently emptied this list.
+        - ``run_prefix`` (``f"tick-{substrate_id}-"``) scopes the kill to one substrate. ``family`` is a
+          coarse 4-value enum, so an unscoped kill let one DECISIVE rejection on one substrate block the
+          whole family on every substrate. Unscoped (``None``) keeps the legacy global behaviour.
+          Within a substrate the kill is still family-wide; see docs/guides/crucible.md."""
         killed = ", ".join("?" for _ in KILLED_VERDICTS)
         promising = ", ".join("?" for _ in PROMISING_VERDICTS)
+        scope = " AND first_seen_run LIKE ?" if run_prefix else ""
+        scope_args = (f"{run_prefix}%",) if run_prefix else ()
         rows = self._conn.execute(
             f"SELECT DISTINCT family FROM trial_ledger "
-            f"WHERE family IS NOT NULL AND (verdict IN ({killed}) OR rejection_class = ?) "
-            f"AND family NOT IN (SELECT family FROM trial_ledger WHERE verdict IN ({promising}))",
-            (*KILLED_VERDICTS, REJECTION_DECISIVE, *PROMISING_VERDICTS),
+            f"WHERE family IS NOT NULL AND (verdict IN ({killed}) OR rejection_class = ?){scope} "
+            f"AND family NOT IN (SELECT family FROM trial_ledger "
+            f"WHERE family IS NOT NULL AND verdict IN ({promising}){scope})",
+            (*KILLED_VERDICTS, REJECTION_DECISIVE, *scope_args, *PROMISING_VERDICTS, *scope_args),
         ).fetchall()
         return sorted(r[0] for r in rows)
 
@@ -430,10 +442,10 @@ class TrialLedger:
                 out.append(dict(r))
         return out
 
-    def agent_view(self) -> dict:
+    def agent_view(self, run_prefix: str | None = None) -> dict:
         """The complete agent-VISIBLE projection (CR-1): dedup rows (candidate_hash / semantic_hash /
         type / family) + the killed-family list. Contains NO verdict / DSR / OOS-delta / holdout /
-        rejection-class field."""
+        rejection-class field. ``run_prefix`` scopes only the killed-family list (dedup stays global)."""
         rows = self._conn.execute(
             f"SELECT {', '.join(_AGENT_VIEW_COLUMNS)} FROM ledger_agent_view"
         ).fetchall()
@@ -441,7 +453,7 @@ class TrialLedger:
             "candidates": [dict(r) for r in rows],
             "candidate_hashes": sorted(r["candidate_hash"] for r in rows),
             "semantic_hashes": sorted({r["semantic_hash"] for r in rows if r["semantic_hash"]}),
-            "killed_families": self.killed_families(),
+            "killed_families": self.killed_families(run_prefix),
         }
 
     @staticmethod
