@@ -1,5 +1,7 @@
 # Sharpen
 
+[![Sponsor](https://img.shields.io/badge/Sponsor-%E2%9D%A4-ea4aaa?logo=githubsponsors&logoColor=white)](https://github.com/sponsors/bigcan)
+
 **S**emi-agentic **H**ypothesis-to-**A**lpha **R**esearch **P**latform with **E**mpirical **N**ull-testing.
 
 Sharpen is a quantitative research platform and the research record of the program that built
