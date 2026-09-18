@@ -291,7 +291,8 @@ goes beyond what this repository shows.
 ## Support
 
 If this work saved you from running a test you would otherwise have had to run yourself, you can
-support its maintenance through [GitHub Sponsors](https://github.com/sponsors/bigcan). Sponsorship
+support its maintenance through [GitHub Sponsors](https://github.com/sponsors/bigcan) or
+[Ko-fi](https://ko-fi.com/bigcan). Sponsorship
 pays for compute and upkeep of the open research; it buys no access to strategies, signals, or
 advice, and nothing here is a claim about future returns.
 
