@@ -5,7 +5,7 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "sharpen"
 version = "0.1.0"
-description = "Semi-agentic Hypothesis-to-Alpha Research Platform with Empirical Null-testing."
+description = "The all-in-one agentic platform for building quant trading strategies, from idea to alpha, with empirical null-testing."
 authors = [{ name = "Keng Lee" }]
 license = { text = "Apache-2.0" }
 classifiers = ["License :: OSI Approved :: Apache Software License"]
