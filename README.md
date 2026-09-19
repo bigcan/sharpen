@@ -1,6 +1,6 @@
 # Sharpen
 
-[![Sponsor](https://img.shields.io/badge/Sponsor-%E2%9D%A4-ea4aaa?logo=githubsponsors&logoColor=white)](https://github.com/sponsors/bigcan)
+[![Support on Ko-fi](https://img.shields.io/badge/Support-Ko--fi-ff5e5b?logo=kofi&logoColor=white)](https://ko-fi.com/bigcan)
 
 The all-in-one agentic platform for building quant trading strategies, from idea to alpha, with empirical null-testing.
 
@@ -335,10 +335,9 @@ goes beyond what this repository shows.
 
 ## Support
 
-If Sharpen is useful to you, you can support its development through
-[GitHub Sponsors](https://github.com/sponsors/bigcan),
-[Open Collective](https://opencollective.com/sharpen) or [Ko-fi](https://ko-fi.com/bigcan).
-Sponsorship pays for compute and upkeep of the open research. It buys no access to strategies,
+If Sharpen is useful to you, you can support its development on
+[Ko-fi](https://ko-fi.com/bigcan).
+Support pays for compute and upkeep of the open research. It buys no access to strategies,
 signals or advice, and nothing here is a claim about future returns.
 
 ---
