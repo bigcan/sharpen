@@ -56,7 +56,12 @@ from sharpen.crucible import (  # noqa: E402
     load_incubation_criterion,
     run_orchestrator_tick,
 )
-from sharpen.crucible.agentic import LibrarySeedProposer, LlmProposer  # noqa: E402
+from sharpen.crucible.agentic import (  # noqa: E402
+    JevRanker,
+    LibrarySeedProposer,
+    LlmProposer,
+    RankedProposer,
+)
 from sharpen.crucible.corrected_contract import CorrectedConfig  # noqa: E402
 from sharpen.crucible.search_memory import SearchMemoryConfig  # noqa: E402
 from sharpen.crucible.orchestrator.orchestrator import _safe  # noqa: E402
@@ -460,13 +465,26 @@ def _build_substrate(args, cfg, ek, meta, sweep, sweep_hash) -> tuple[Substrate,
     # bit-reproducible); opt-in LLM proposer spends real tokens per tick, so it also carries the CR-7
     # est_tokens_per_tick (feeds the tick budget + the manifest token_cost; the offline proposer's is
     # 0). main()'s fail-closed guard already rejected --proposer llm without ANTHROPIC_API_KEY.
-    proposer: LibrarySeedProposer | LlmProposer
+    proposer: LibrarySeedProposer | LlmProposer | RankedProposer
     if args.proposer == "llm":
         proposer = LlmProposer(model=args.llm_model)
         est_tokens = int(args.est_tokens_per_tick)
     else:
         proposer = LibrarySeedProposer(extended_cs_bank=args.extended_seed_bank)
         est_tokens = 0
+    if args.rank_with_jev:
+        # CR-7 accounting: Jev tokens are deliberately NOT added to `est_tokens`. That budget is
+        # denominated in LLM tokens, and Jev input tokens are ~3 orders of magnitude cheaper
+        # ($0.042/M vs frontier pricing, output free), so charging them 1:1 would spuriously exhaust
+        # a tick budget on a cost that rounds to nothing. Actual Jev spend is reported separately
+        # from `RankedProposer.ranker.last_usage`. Revisit if Jev ever enters the same price band.
+        proposer = RankedProposer(proposer, JevRanker(model=args.jev_model),
+                                  oversample=args.jev_oversample)
+        log.warning("Jev RANKER active (%s): the proposal pool is oversampled x%d and ordered by an "
+                    "outcome-blind economic prior before the --max-proposals cut. Ranking is "
+                    "stratified by (candidate_type, source). Batches are NOT comparable to "
+                    "unranked runs — agent_model_id %s", args.jev_model, args.jev_oversample,
+                    proposer.model_id)
     # crucible-v6.0 DECISION CONTRACT (operator choice, never the agent's). "shipped" keeps the
     # historical 6-way AND; "corrected" swaps the holdout decision for the audit §5 contract, whose
     # thresholds live in their own file so the frozen funnel gates_hash is untouched (ADR-1).
@@ -648,6 +666,19 @@ def main() -> int:
     ap.add_argument("--est-tokens-per-tick", type=int, default=12000,
                     help="CR-7 per-tick token estimate charged to the tick budget for --proposer llm "
                          "(the offline library proposer always charges 0).")
+    ap.add_argument("--rank-with-jev", action="store_true",
+                    help="wrap the chosen proposer in the Jev RankedProposer: oversample the pool, "
+                         "rank it by outcome-blind economic plausibility, keep the best "
+                         "--max-proposals. Needs TYPESAFE_API_KEY, opt-in only — never the default "
+                         "(CRU-1: off = every existing batch/manifest/verdict is byte-identical). "
+                         "Ranking is STRATIFIED by (candidate_type, source), so it reorders within a "
+                         "leg but can never let the cap starve one.")
+    ap.add_argument("--jev-model", default="jev-latest",
+                    help="model id for --rank-with-jev (stamped into the manifest agent_model_id).")
+    ap.add_argument("--jev-oversample", type=int, default=4,
+                    help="pool multiplier for --rank-with-jev: the inner proposer is asked for "
+                         "oversample x --max-proposals candidates before ranking. 1 = rank only what "
+                         "would have been mined anyway (a pure reorder, no extra search).")
     ap.add_argument("--max-candidates", type=int, default=256, help="per-tick candidate cap (CR-7)")
     ap.add_argument("--start-ts", default=None,
                     help="ISO timestamp base for reproduce/explicit replay only (CR-2/CR-8); nights step "
@@ -706,6 +737,10 @@ def main() -> int:
     if args.proposer == "llm" and not os.environ.get("ANTHROPIC_API_KEY"):
         log.error("--proposer llm requires ANTHROPIC_API_KEY in the environment (fails closed, like "
                   "the FRED/EDGAR credentials) — not set, aborting before the (possibly slow) build.")
+        return 1
+    if args.rank_with_jev and not os.environ.get("TYPESAFE_API_KEY"):
+        log.error("--rank-with-jev requires TYPESAFE_API_KEY in the environment (fails closed, like "
+                  "ANTHROPIC_API_KEY) — not set, aborting before the (possibly slow) build.")
         return 1
 
     cfg, ek = load_generation_config(args.config)
