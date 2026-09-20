@@ -18,6 +18,7 @@ from __future__ import annotations
 
 from .card import DiscoveryCard
 from .hypothesis import HypothesisAuthor, PreRegisteredSpec
+from .jev_ranker import JevRanker, RankedProposer
 from .llm_proposer import LlmProposer
 from .loop import HypothesisLoopResult, run_hypothesis_loop
 from .proposer import (
@@ -34,11 +35,13 @@ __all__ = [
     "HypothesisAuthor",
     "HypothesisLoopResult",
     "HypothesisProposal",
+    "JevRanker",
     "LibrarySeedProposer",
     "LlmProposer",
     "PreRegisteredSpec",
     "ProposalContext",
     "Proposer",
+    "RankedProposer",
     "ScoutFinding",
     "ScoutReport",
     "run_hypothesis_loop",
