@@ -66,7 +66,6 @@ before you build** — it is the cheapest step in the workflow, and it regularly
 |---|---|
 | `CLAUDE.md` | Project brief, invariants, skill dispatch for Claude Code |
 | `docs/claude_md_reference.md` | Extended reference — project map, env contracts, Docker/Crucible internals |
-| `AGENTS.md`, `GEMINI.md` | Equivalents for other agent harnesses |
 
 Human contributors want the [guides](#guides) instead.
 
