@@ -206,7 +206,7 @@ Design specs: `docs/research/crucible_agentic_discovery_spec.md` (canonical, §0
 
 ## Prediction-Market Research (Polymarket) -- moved out
 
-The Polymarket 5-min up/down maker-diagnostic + forward paper-test (`pm-updown-mm-v0`) that used to live at `scripts/data/*polymarket*` / `scripts/research/polymarket_updown_mm_diagnostic.py` / `configs/polymarket_updown_mm_paper.gates.yaml` was spun off 2026-07-05 into its own repo: [`Chiwin-Technology/polymarket-updown-research`](https://github.com/Chiwin-Technology/polymarket-updown-research). It was always self-contained (zero `sharpen` imports, no fleet/Docker/skill integration), so nothing else in this repo depended on it. The Windows Scheduled Task that pulls the remote forward-collector's output now points at the new repo's checkout.
+The Polymarket 5-min up/down maker-diagnostic + forward paper-test (`pm-updown-mm-v0`) that used to live at `scripts/data/*polymarket*` / `scripts/research/polymarket_updown_mm_diagnostic.py` / `configs/polymarket_updown_mm_paper.gates.yaml` was spun off 2026-07-05 into its own repo: a separate private repository. It was always self-contained (zero `sharpen` imports, no fleet/Docker/skill integration), so nothing else in this repo depended on it. The Windows Scheduled Task that pulls the remote forward-collector's output now points at the new repo's checkout.
 
 Kalshi credentials remain in this repo (`.env` `KALSHI_API_KEY_ID`, gitignored `kalshi_private_key.pem`) but there is no active Kalshi code here or in the new repo -- a prior SecureFinAI-contest client was deleted post-contest 2026-05-02.
 
