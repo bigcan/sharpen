@@ -8,7 +8,7 @@ The all-in-one agentic platform for building quant trading strategies, from idea
 from a concept to a validated, trained and paper-deployed system.**
 
 Sharpen is built to be driven by an AI coding agent such as Claude Code or Codex. The rules the
-agent follows ship in the repository ([CLAUDE.md](CLAUDE.md), [AGENTS.md](AGENTS.md)): how to
+agent follows ship in the repository ([CLAUDE.md](CLAUDE.md)): how to
 turn an idea into a pre-registered spec, which gates it must pass, how RL training is staged, and
 what must never happen (look-ahead, cross-split normalization, fused train-and-evaluate runs). You
 say what you want, in whatever language you work in; the agent writes the signal, the config and
@@ -110,9 +110,9 @@ The step-by-step guide, with every gate spelled out, is
 ## Features
 
 ### Agent-driven workflow
-- **Rules the agent actually follows.** [CLAUDE.md](CLAUDE.md) and [AGENTS.md](AGENTS.md) encode
-  the invariants, the training protocol, the config schema and the audit chain. Every rule in them
-  was written after something went wrong.
+- **Rules the agent actually follows.** [CLAUDE.md](CLAUDE.md) encodes the invariants, the
+  training protocol, the config schema and the audit chain. Every rule in it was written after
+  something went wrong.
 - **Deterministic gates, not self-review.** Config validation, the OHLCV cleaner, pytest, ruff and
   cross-checked profit factors are tool executions the agent must pass. It can't mark its own work
   as done.
