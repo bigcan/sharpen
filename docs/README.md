@@ -1,8 +1,9 @@
 # Sharpen Documentation
 
 Sharpen is an agentic-AI, full-featured quant strategy builder with built-in alpha
-mining: mine alphas, build strategies, validate them, size a portfolio, and trade them
-live — one data layer, one set of gates.
+mining: mine alphas, build strategies, validate them, size a portfolio, and take them to
+paper or live execution — one data layer, one set of gates. Nothing here is validated
+for live trading; see [DISCLAIMER.md](../DISCLAIMER.md).
 
 Start at [**Getting started**](guides/getting-started.md) — `git clone` to a real scorecard
 in about 30 seconds, with no data and no API keys. Then
