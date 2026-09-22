@@ -1,6 +1,6 @@
 # Sharpen Documentation
 
-Sharpen is an end-to-end, all-in-one strategy development platform with built-in alpha
+Sharpen is an agentic-AI, full-featured quant strategy builder with built-in alpha
 mining: mine alphas, build strategies, validate them, size a portfolio, and trade them
 live — one data layer, one set of gates.
 

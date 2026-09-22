@@ -5,7 +5,7 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "sharpen"
 version = "0.1.0"
-description = "The all-in-one agentic platform for building quant trading strategies, from idea to alpha, with empirical null-testing."
+description = "An agentic-AI, full-featured quant strategy builder — from a concept to a validated, trained and deployment-ready system."
 authors = [{ name = "Keng Lee" }]
 license = { text = "Apache-2.0" }
 classifiers = ["License :: OSI Approved :: Apache Software License"]
