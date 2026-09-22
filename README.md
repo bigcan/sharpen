@@ -2,10 +2,11 @@
 
 [![Support on Ko-fi](https://img.shields.io/badge/Support-Ko--fi-ff5e5b?logo=kofi&logoColor=white)](https://ko-fi.com/bigcan)
 
-The all-in-one agentic platform for building quant trading strategies, from idea to alpha, with empirical null-testing.
+Sharpen is an agentic-AI, full-featured quant strategy builder — from a concept to a validated, trained and deployment-ready system.
 
-**Build full-featured quant trading strategies in any natural language. Sharpen carries each one
-from a concept to a validated, trained and paper-deployed system.**
+**Describe what you want in any natural language. Sharpen turns it into a pre-registered spec,
+writes the signal and the tests, trains it, and then tries to break it — with every result
+deflated for the number of things you tried.**
 
 Sharpen is built to be driven by an AI coding agent such as Claude Code or Codex. The rules the
 agent follows ship in the repository ([CLAUDE.md](CLAUDE.md)): how to
