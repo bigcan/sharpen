@@ -1,0 +1,52 @@
+# Pre-registered decision rules for the ATL x Jev workstream
+# (docs/research/atl_jev_strategy_plan_2026-09-23.md). Phase 0 section written 2026-09-23 BEFORE any
+# probe ran. NEVER hardcode these numbers in code or scripts (CLAUDE.md): the phase-0 scripts load this
+# file and stamp its sha256 into every artifact, so an edit after the fact is visible.
+# The funnel verdict itself (P1) stays on the frozen configs/signal_eval.gates.yaml — nothing here
+# loosens or replaces it. Phase 1 appends its own section (questionnaire, trial budget, P3/P4 bars).
+
+jev:
+  model: jev-latest                  # requested alias; the SERVED version (e.g. jev-1.13.0) is recorded
+                                     # on every cached answer (plan C6) — a change is a new trial
+  price_usd_per_m_input: 0.042       # list price 2026-09, output tokens free (cost accounting, not a gate)
+  max_questions_per_request: 64
+  concurrency: 8
+  max_retries: 4
+
+phase0:
+  cutoff_probe:                      # plan C1 — empirical knowledge cutoff T_c
+    start_month: "2018-01"
+    end_month: "2026-08"
+    extra_top_names: 70              # SPY + ATL DJIA-30 + the next N largest S&P 500 names
+    polarity_seed: 20260923          # each item asks "higher" or "lower" at random => chance = 0.5
+    changepoint: two_segment_binomial_mle
+    min_segment_months: 6            # neither segment shorter than this
+    bootstrap_reps: 500              # resample tickers => CI on T_c
+    known_margin: 0.05               # pre-T_c segment counts as KNOWLEDGE only if its accuracy
+                                     # 95% CI lower bound exceeds 0.5 + known_margin
+    embargo_months: 1                # clean window starts at T_c + embargo
+  identification_probe:              # plan C3 — can Jev name the filer from anonymized text?
+    n_filings: 200
+    n_candidates: 10                 # true filer + 9 same-sector decoys => chance = 0.10
+    period_start: "2019-01-01"
+    period_end: "2025-12-31"
+    max_chars: 24000                 # ~6k tokens of cleaned text per filing
+    max_top1_accuracy: 0.20          # above this (2x chance) => anonymized filings are IDENTIFIABLE
+    sample_seed: 20260923
+  power_check:                       # plan K2 — can the frozen funnel detect a plausible text signal?
+    target_ics: [0.01, 0.02, 0.03, 0.05, 0.08]
+    seeds: 8
+    horizon_days: 5                  # frozen gates' primary horizon
+    coverage: 0.33                   # share of names carrying an active event score on a given day
+                                     # (quarterly event, ~21-trading-day decay window)
+    n_hypotheses: 8                  # Phase-1 trial budget the deflation is charged against
+    null_signals_per_batch: 7        # batch = 1 planted + 7 nulls, mirroring 8 tried variants
+    min_detection_rate: 0.80         # MDE80 = smallest planted IC detected (PROMISING) >= this often
+    plausible_ic_max: 0.03           # ASSUMPTION: upper end of a plausible 5d rank IC for a large-cap
+                                     # filing-text signal; K2 fires if MDE80 exceeds it on BOTH universes
+    djia_whatif_min_names: 8         # exploratory what-if ONLY (DJIA-30 fails the frozen T0 breadth
+                                     # floor of 50 by construction); never a verdict gate
+  feasibility:                       # plan K0
+    max_corpus_cost_usd: 500
+    max_corpus_wallclock_hours: 168
+    corpus_filings_estimate: 100000  # S&P 500 8-K + EX-99 corpus, re-estimated from measured tokens

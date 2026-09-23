@@ -1,0 +1,75 @@
+{
+ "probe": "C3 identification",
+ "gates_file": "configs\\atl_jev.gates.yaml",
+ "gates_sha256": "28bfb3ba0ffe15c7ee7315519609e11c9a84ea93df7f4ce1b38b297763f23f9a",
+ "gates": {
+  "n_filings": 200,
+  "n_candidates": 10,
+  "period_start": "2019-01-01",
+  "period_end": "2025-12-31",
+  "max_chars": 24000,
+  "max_top1_accuracy": 0.2,
+  "sample_seed": 20260923
+ },
+ "n_filings": 200,
+ "n_djia": 30,
+ "chance": {
+  "company": 0.1,
+  "year": 0.14285714285714285
+ },
+ "masked_with_residual_identifiers": 0,
+ "summary": {
+  "masked": {
+   "company_top1": 0.935,
+   "company_top1_wilson95": [
+    0.892,
+    0.9616
+   ],
+   "company_top1_djia": 0.9333,
+   "company_top1_other": 0.9353,
+   "mean_p_true_company": 0.923,
+   "year_top1": 0.495,
+   "year_top1_wilson95": [
+    0.4265,
+    0.5637
+   ]
+  },
+  "raw": {
+   "company_top1": 1.0,
+   "company_top1_wilson95": [
+    0.9812,
+    1.0
+   ],
+   "company_top1_djia": 1.0,
+   "company_top1_other": 1.0,
+   "mean_p_true_company": 0.9994,
+   "year_top1": 0.995,
+   "year_top1_wilson95": [
+    0.9722,
+    0.9991
+   ]
+  }
+ },
+ "decision": {
+  "identifiable": true,
+  "rule": "masked company_top1 > 0.2"
+ },
+ "wall_s": 31.3,
+ "jev_usage": {
+  "requests": 400,
+  "questions_sent": 782,
+  "cache_hits": 18,
+  "input_tokens": 2513168,
+  "output_tokens": 68816,
+  "retries": 0,
+  "latency_s": {
+   "p50": 0.594,
+   "p90": 0.672,
+   "max": 0.922
+  },
+  "served_models": {
+   "jev-1.13.0": 800
+  },
+  "cost_usd": 0.105553056
+ }
+}

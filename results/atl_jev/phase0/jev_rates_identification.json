@@ -1,0 +1,19 @@
+{
+ "source": "live run",
+ "at": "2026-09-23T18:58:30",
+ "requests": 400,
+ "questions_sent": 782,
+ "cache_hits": 18,
+ "input_tokens": 2513168,
+ "output_tokens": 68816,
+ "retries": 0,
+ "latency_s": {
+  "p50": 0.594,
+  "p90": 0.672,
+  "max": 0.922
+ },
+ "served_models": {
+  "jev-1.13.0": 800
+ },
+ "cost_usd": 0.105553056
+}
