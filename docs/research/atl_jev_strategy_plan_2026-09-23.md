@@ -270,6 +270,19 @@ hash `3fc01888e31f`; rules in `configs/atl_jev.gates.yaml` `phase1`). No filing 
 - **Phase 2 wiring obligations** (declared in `phase1`, not yet read by code): `universe`, `screening_window`,
   `construction.*`, `p2_placebo.*`, `p3_baseline.*`.
 
+**2026-09-23 — Phase 2 started** (design: `docs/research/atl_jev_phase2_architecture.md`, 8 ADRs).
+- **Step 1, the release row** (`sharpen/jev/release.py`):
+  - acceptance time → trading-day row, with the DST-aware cutoff read from `phase1.release_row`;
+  - beyond the calendar gives NaT (fail closed);
+  - 19 tests, 4/4 mutations caught, including the fixed-offset DST look-ahead.
+- **Step 2, the five registered signals** (`sharpen/signals/library/jev_filings.py`):
+  - built strictly per `phase1.construction`, date-aligned to the calendar;
+  - a screening-mode firewall past 2024, and P4's `min_filing_accepted`;
+  - 20 tests, including the funnel's own causality tripwire and parity with `asof_join`; 10/10 mutations caught.
+- **Blocker A10 is resolved:** the release row exists and is consumed by the signal, with negative tests.
+- **Next:** CIK map + corpus builder, scorer, baselines (Loughran–McDonald license check), evaluation legs, and the
+  DATA-CLEAN panel rebuild with a membership refresh past 2026-06-02.
+
 **Not in v1:**
 - ATL FinSearch news: its history starts around 2026-07 and it needs a token. It could be a forward-only add-on.
 - Low-confidence escalation to a generative System Two model: that adds a trial and a contamination vector.
