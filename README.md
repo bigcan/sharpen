@@ -4,6 +4,10 @@
 
 Sharpen is an agentic-AI, full-featured quant strategy builder — from a concept to a validated, trained and deployment-ready system.
 
+![The 30-second quickstart, run from a fresh clone: install, score four demo signals through the validation funnel, read the scorecard](docs/assets/quickstart.gif)
+
+<sub>A real run from a fresh clone of this repository. Waits are skipped ahead and labelled; the output is unedited.</sub>
+
 **Describe what you want in any natural language. Sharpen turns it into a pre-registered spec,
 writes the signal and the tests, trains it, and then tries to break it — with every result
 deflated for the number of things you tried.**
@@ -27,6 +31,8 @@ Underneath is a full research-to-execution stack:
   execution environments, distributed GPU hyper-parameter search, and a staged training protocol.
 - **Paper and live execution** across six broker adapters, with monitoring, drift detection and a
   kill switch.
+
+![Sharpen architecture: a coding agent under the agent contract drives six stages (pre-register, mine, validate, train, break, run), each ending at a gate, over guardrails that apply to every stage](docs/assets/sharpen-architecture.png)
 
 > **Not investment advice. Not a trading product.** Every performance figure in this repository
 > comes from a historical simulation or a paper run. Read [DISCLAIMER.md](DISCLAIMER.md).
@@ -139,6 +145,8 @@ Signal libraries: WorldQuant 101, TradingView indicators, a demo set, and a gene
 
 ### Crucible: automated alpha mining — `sharpen/crucible/`
 Systematic alpha mining with validation inside the loop.
+
+![Crucible architecture: acquire, hypothesize, mine, deflate, incubate in a lockbox, hand off to a human audit; the proposer reads only a score-free view of the trial ledger, and every run pins a manifest of version, gates, data and seeds](docs/assets/crucible-architecture.png)
 
 - **LLM hypothesis proposer** (`agentic/llm_proposer.py`, uses the Claude API). It turns
   natural-language priors into pre-registered specs. It is **structurally blind to scores**: the
