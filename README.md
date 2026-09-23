@@ -261,8 +261,6 @@ equities. The full record, with the number that decided each one, is in
 
 - **It found real signal.** Cross-asset time-series momentum on free daily ETF data came through
   at net Sharpe 0.60 (0.39 on 32 ETFs never used in development).
-- **It caught its own bugs.** Two look-ahead leaks and a seeding defect had manufactured or hidden
-  results. Each was found, fixed and guarded by a test. See [docs/LEAKS_FOUND.md](docs/LEAKS_FOUND.md).
 - **Every headline number reproduces** from a fresh clone in about a minute on free data:
 
 ```bash
