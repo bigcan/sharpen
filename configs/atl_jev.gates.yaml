@@ -50,3 +50,55 @@ phase0:
     max_corpus_cost_usd: 500
     max_corpus_wallclock_hours: 168
     corpus_filings_estimate: 100000  # S&P 500 8-K + EX-99 corpus, re-estimated from measured tokens
+
+# ---------------------------------------------------------------------------------------------------------
+# Phase 1 — pre-registration (docs/research/atl_jev_prereg.md; research: docs/research/atl_jev_phase1_research.md).
+# Appended 2026-09-23 BEFORE the instrument check and BEFORE any filing is scored for the strategy. The phase-0
+# section above is unchanged. questionnaire.hash is filled in once the instrument check passes; the Phase-3
+# scorer must refuse to run unless it equals sharpen.jev.questionnaire.questionnaire_hash().
+phase1:
+  questionnaire:
+    version: v1
+    hash: 3fc01888e31f               # frozen after the instrument check passed (results/atl_jev/phase1/); a test
+                                     # and the Phase-3 scorer both require it to equal questionnaire_hash()
+  instrument_check:                  # validity of the INSTRUMENT only — no return is read; runs before the freeze
+    window: ["2019-01-01", "2023-12-31"]   # screening era only: the clean window stays untouched
+    n_earnings: 40                   # Item 2.02 releases (EX-99.1)
+    n_events: 20                     # 8-Ks with an ADVERSE_ITEMS item and no 2.02
+    sample_seed: 20260924
+    min_answer_std: 0.10             # a question whose mapped answers barely vary carries no information
+    min_n_for_std: 10                # below this many answers the std rule is reported, not applied
+    max_guidance_conflict_frac: 0.10 # share of releases where E1 and E2 are BOTH answered yes (p > 0.5)
+  universe: sp500_pit
+  screening_window: ["2012-01-01", "2024-12-31"]   # contaminated era (Phase 0 C1/C3): screening only, UPPER BOUND
+  clean_window: ["2025-02-01", "2026-09-22"]       # adopted T_c 2025-01 + 1-month embargo; ONE pre-registered look
+  filings:
+    max_chars: 24000                 # masked document text per filing
+  n_hypotheses: 8                    # deflation floor = the trial budget announced in the plan (5 signals used)
+  release_row:                       # LEAK-2 (prereg §3), read by sharpen.jev.release
+    timezone: America/New_York       # DST-aware local exchange time
+    cutoff: "15:30"                  # accepted before this on a trading day -> that day's row; else the next trading day
+  construction:                      # daily-signal rules (prereg §4), read by the Phase-2 signal builder
+    surprise: latest_in_window       # the most recent earnings release within hold_days
+    tone: latest_in_window
+    quality: min_in_window           # the MOST ADVERSE in-window filing: a later routine filing (e.g. a 1.02
+                                     # refinancing) must not erase an earlier impairment or one-off flag
+    same_row: mean                   # several in-scope filings released on one row are averaged
+    composite: mean_of_blocks        # mean of the available block scores; NaN when none
+  signals:                           # all registered with expected_sign = +1 (question signs applied in the score)
+    - {name: jev-comp-63, blocks: [surprise, tone, quality], hold_days: 63, primary: true}
+    - {name: jev-comp-21, blocks: [surprise, tone, quality], hold_days: 21}
+    - {name: jev-surprise-63, blocks: [surprise], hold_days: 63}
+    - {name: jev-toneinfl-63, blocks: [tone], hold_days: 63}
+    - {name: jev-quality-63, blocks: [quality], hold_days: 63}
+  p2_placebo:                        # shuffled-firm placebo: scores permuted across same-day filers
+    permutations: 200
+    max_p: 0.05                      # the real IC must beat the placebo distribution at this level
+  p3_baseline:                       # Jev must add information beyond the non-LLM text baselines (B1)
+    min_marginal_t: 2.0              # Newey-West t of the Jev coefficient in daily Fama-MacBeth regressions
+    nw_lags: 5
+  p4_clean_window:                   # the single clean-window look (P4)
+    min_ic_t: 2.0                    # 5d IC t-stat on the clean window
+    min_frictionless_sharpe: 0.0     # long-short book must make money before costs
+    min_filing_accepted: "2025-01-01"  # adopted T_c: only filings accepted on/after it feed P4 (a Dec-2024 score
+                                       # held into Feb-2025 rows would carry the contaminated boundary year in)

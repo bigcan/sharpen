@@ -247,6 +247,29 @@ spend was $0.13.
   - **Open, and blocking Phase 3:** the LEAK-2 mapping from `acceptanceDateTime` to the first tradable row does not
     exist yet, and it needs its negative test (B9).
 
+**2026-09-23 — Phase 1 complete: pre-registration FROZEN** (`docs/research/atl_jev_prereg.md`; questionnaire `v1`
+hash `3fc01888e31f`; rules in `configs/atl_jev.gates.yaml` `phase1`). No filing has been scored for the strategy.
+- **Research** (`docs/research/atl_jev_phase1_research.md`): **CONDITIONAL GO**.
+  - *For:* PEAD.txt text drift persists where numeric PEAD died (2010–2019).
+  - *Against:* Lazy Prices is dead on the S&P 100 (t = −0.5), and LLM-news edge is small-cap and decaying.
+  - *Expectation:* a large-cap 5-day IC of ~0.01–0.02.
+- **Questionnaire:** six extraction-only questions — E1 raise (+), E2 lower (−), E3 forward momentum (+), E4 tone
+  beyond results (−), E5 one-off flattered (−), M1 adverse (−). Five signals (`jev-comp-63` primary), deflated at
+  n = 8.
+- **Math audit:** 5 findings.
+  - *M-1, fixed before the freeze:* yes/no answers now map to evidence p instead of 2p − 1.
+  - *M-2 and M-3:* the power claims are now measured rather than assumed.
+  - *M-4 and M-5:* the DST-aware ET rule and pinning every leg to the funnel's own functions, both written into the
+    pre-registration.
+- **Instrument check** (no returns read): Run 2 passed. M2 (unplanned CEO/CFO exit) was dropped by the pre-set rule.
+  The quality block takes the in-window minimum. Every change is logged in pre-registration §8 with its exact
+  timing.
+- **Measured power** (seasonal earnings timing, frozen funnel, n = 8; clean window = 411 NYSE days): pre-registration
+  §5. The primary 63-day hold detects a 5-day IC of 0.010 in 88% of screening batches, with 62% clean-window power.
+  At 0.020 both are 100%. The 21-day hold needs ~0.02, because 41% of its days fall under the 50-name floor.
+- **Phase 2 wiring obligations** (declared in `phase1`, not yet read by code): `universe`, `screening_window`,
+  `construction.*`, `p2_placebo.*`, `p3_baseline.*`.
+
 **Not in v1:**
 - ATL FinSearch news: its history starts around 2026-07 and it needs a token. It could be a forward-only add-on.
 - Low-confidence escalation to a generative System Two model: that adds a trial and a contamination vector.
