@@ -135,6 +135,13 @@ def test_retryable_http_is_retried_then_succeeds():
     assert c.usage.retries == 2 and c.usage.requests == 1
 
 
+def test_overloaded_529_is_retried_not_fatal():
+    t = _Transport(fail_codes=[529, 529])
+    c = _client(t, max_retries=4)
+    assert c.ask("s", {"a": _noul("A?")})["a"].value == pytest.approx(0.8)
+    assert c.usage.retries == 2
+
+
 def test_non_retryable_http_raises_immediately_with_the_body():
     t = _Transport(fail_codes=[400])
     with pytest.raises(JevError, match="400.*rate limited"):

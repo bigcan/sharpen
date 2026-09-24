@@ -40,7 +40,8 @@ logger = logging.getLogger("sharpen.jev")
 API_URL = "https://api.typesafe.ai/v1/systemone"
 DEFAULT_MODEL = "jev-latest"
 QUESTION_TYPES = frozenset({"noul", "score", "choice"})
-_RETRYABLE_HTTP = frozenset({408, 429, 500, 502, 503, 504})
+# 529 is TypeSafe's "system_overloaded, try again later" (first seen 2026-09-24, corpus scoring).
+_RETRYABLE_HTTP = frozenset({408, 429, 500, 502, 503, 504, 529})
 
 Transport = Callable[[str, dict, dict], dict]
 

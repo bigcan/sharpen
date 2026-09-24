@@ -25,7 +25,7 @@ from dotenv import load_dotenv
 ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT))
 
-from sharpen.jev import JevClient  # noqa: E402
+from sharpen.jev import JevClient, JevError  # noqa: E402
 from sharpen.jev.corpus import build_stamp, corpus_window, read_corpus  # noqa: E402
 from sharpen.jev.scoring import (  # noqa: E402
     ServedVersionChanged,
@@ -42,6 +42,9 @@ JEV_CACHE = ROOT / "results" / "atl_jev" / "jev_cache.sqlite"
 # (questions included), so text_chars / 2.5 over-counts; cache hits are not subtracted, which over-counts again.
 # The hard stop is the per-chunk check of the actual bill against --max-usd.
 CHARS_PER_TOKEN_LOWER_BOUND = 2.5
+# Waits after a JevError that outlasted the client's own retries (e.g. HTTP 529 "system_overloaded"), then a cap.
+OVERLOAD_WAITS_S = (60, 120, 240, 480, 900)
+MAX_OVERLOAD_WAIT_S = 2 * 3600
 
 log = logging.getLogger("jev_score_filings")
 
@@ -106,9 +109,22 @@ def main() -> int:
     manifest = {"built_utc": datetime.now(timezone.utc).isoformat(timespec="seconds"), "mode": args.mode,
                 "smoke": smoke, "corpus": str(corpus_dir), "corpus_stamp": stamp, "gates_sha": gates_sha(GATES),
                 "questionnaire": phase1["questionnaire"], "model_requested": jcfg["model"], **git_commit(ROOT)}
+    waited, attempt = 0, 0
     try:
-        df, stats = score_corpus(corpus, client, concurrency=int(jcfg["concurrency"]), chunk=args.chunk,
-                                 on_chunk=on_chunk)
+        while True:
+            try:
+                df, stats = score_corpus(corpus, client, concurrency=int(jcfg["concurrency"]), chunk=args.chunk,
+                                         on_chunk=on_chunk)
+                break
+            except JevError as exc:
+                # A sustained overload outlasts the client's per-call retries. Answers already received are
+                # cached, so waiting and rerunning costs nothing twice; the same client keeps the spend total.
+                wait = OVERLOAD_WAITS_S[min(attempt, len(OVERLOAD_WAITS_S) - 1)]
+                if waited + wait > MAX_OVERLOAD_WAIT_S:
+                    raise
+                log.warning("Jev unavailable (%s); resuming from the cache in %d min", str(exc)[:160], wait // 60)
+                time.sleep(wait)
+                waited, attempt = waited + wait, attempt + 1
     except ServedVersionChanged as exc:
         out_dir.mkdir(parents=True, exist_ok=True)
         (out_dir / "_manifest.json").write_text(json.dumps({**manifest, "status": "STOPPED", "reason": str(exc),
