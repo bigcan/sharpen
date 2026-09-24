@@ -352,8 +352,24 @@ the era is contaminated and the panel is survivorship-biased.
 - **P2 passes** for jev-surprise-63: 0 of 200 same-week placebos reach the real IC (placebo mean 0.0007, 95th
   percentile 0.0036), p = 0.005 ≤ 0.05. P2 reproduced P1's IC exactly.
 - All 24,831 filing-ticker rows mapped onto panel tickers.
-- **Next:** P3 against the text baselines, which is blocked until the operator supplies the Loughran–McDonald
-  file; then the K3 decision.
+- **P3 passes** for jev-surprise-63: controlling for LM net tone and prior-release similarity, the daily
+  Fama–MacBeth coefficient averages 0.0092 with a Newey–West t of 3.18 (n_eff 921 of 3,259 days; bar 2.0).
+  - LM file pinned: March 2026 release, sha256 `e2d13286…`.
+  - The bar proved low. On their own, the baselines carry no information in large caps: 5d IC +0.0002 for LM
+    tone and +0.0010 for similarity, and neither adds to the other (t −0.60 and +0.17). Jev's surprise score
+    correlates only +0.16 with LM tone.
+- **K3 decision: PROCEED to P4.** The candidate is `jev-surprise-63`, the only screening passer.
+- **Before the one look:** the clean window can be opened once. CLAUDE.md requires a Tier-2 deep lifecycle
+  audit before reading a deploy-gating OOS verdict, and a latent bug found after P4 would cost the only look.
+  P4 then needs building (ADR-11): the clean panel (Alpaca SIP daily bars plus a PIT membership refresh past
+  2026-06-02), the clean corpus (EDGAR, from 2025-01-01), clean scoring (≈ $1.2 of Jev), then the sentinel and
+  the look.
+- **Expectation:** P4 needs a 5d IC t ≥ 2.0 on 411 days **and** a frictionless long-short Sharpe > 0.
+  - At the screening IC (0.009), the IC leg alone has power of about 5/8.
+  - The screening frictionless Sharpe was only 0.02, so the book leg is close to a coin flip.
+  - One sign cuts against pure memory leakage: the signal was weakest (IC-IR 0.01) in the 2018–2021 quarter of
+    the window, which falls inside the 2018–2023 regimes Jev remembers, and strongest in 2012–2018. This is
+    weak evidence.
 
 **Not in v1:**
 - ATL FinSearch news: its history starts around 2026-07 and it needs a token. It could be a forward-only add-on.

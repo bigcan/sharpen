@@ -4,4 +4,5 @@ lm_lexicon:
   # research (ADR-9); gitignored, never downloaded by code. The version is fixed here before any Jev score exists.
   path: data/lexicons/Loughran-McDonald_MasterDictionary_1993-2025.csv
   release: "2026-03"
-  sha256: null                       # pinned from the operator's file at step 5; null refuses P3 (fail closed)
+  # Pinned 2026-09-24 from the operator's file (9,093,460 bytes; 86,553 words, 347 positive, 2,345 negative).
+  sha256: e2d1328682bab7d2187684fb9f5420bb730401c9eefc00daf835edd203f4859d

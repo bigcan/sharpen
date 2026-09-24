@@ -1,0 +1,49 @@
+{
+ "leg": "screening",
+ "run_utc": "2026-09-24T14:03:11+00:00",
+ "stamps": {
+  "gates_sha": "77b9a306392784824b5612acf2a428548527222f924fcced4107ef6c279c8f54",
+  "funnel_gates_hash": "519158fa1450",
+  "questionnaire": {
+   "version": "v1",
+   "hash": "3fc01888e31f"
+  },
+  "panel_sha256": "b3bf8490f1261a701ace17162c6b12656d28bf1ff036e6b0246b979f470478eb",
+  "scores_built_utc": "2026-09-24T05:45:30+00:00",
+  "served_models": {
+   "jev-1.13.0": 140614
+  },
+  "corpus_stamp": {
+   "mode": "screening",
+   "since": "2011-09-17T00:00:00+00:00",
+   "until": "2025-01-01T00:00:00+00:00",
+   "rows": [
+    "2012-01-01",
+    "2024-12-31"
+   ],
+   "form": "8-K",
+   "doc_types": [
+    "8-K",
+    "EX-99.1",
+    "EX-99.01",
+    "EX-99"
+   ],
+   "max_chars": 24000,
+   "questionnaire_hash": "3fc01888e31f",
+   "pipeline_sha": "4877e0f424a1"
+  }
+ },
+ "commit": "5f172b322de866d65f8e3f832ff8d8013fae5115",
+ "dirty": true,
+ "status": "COMPLETE",
+ "promising": [
+  "jev-surprise-63"
+ ],
+ "passers": [
+  "jev-surprise-63"
+ ],
+ "k3_fired": false,
+ "p4_candidate": "jev-surprise-63",
+ "verdict": "PROCEED to P4",
+ "elapsed_min": 0.0
+}
