@@ -22,6 +22,7 @@ import time
 from datetime import datetime, timezone
 from pathlib import Path
 
+import numpy as np
 import pandas as pd
 import yaml
 
@@ -40,7 +41,7 @@ from sharpen.jev.evaluation import (  # noqa: E402
     run_p2,
     run_p3,
 )
-from sharpen.jev.scoring import check_questionnaire  # noqa: E402
+from sharpen.jev.scoring import check_questionnaire, to_filing_scores  # noqa: E402
 from sharpen.jev.stamps import gates_sha, git_commit  # noqa: E402
 from sharpen.signals.gates import Gates  # noqa: E402
 from sharpen.signals.scorecard import to_json  # noqa: E402
@@ -113,9 +114,16 @@ def main() -> int:
 
     if args.leg == "p1":
         rs = run_p1(registered(phase1, scores, calendar), panel, gates, phase1)
-        rec = {**base, "status": "COMPLETE", "promising": promising(rs), "scorecard": to_json(rs)}
+        # a ticker spelled differently in the corpus and the panel would drop its filings without an error
+        fs = to_filing_scores(scores)
+        in_panel = np.isin(fs.ticker, np.asarray(panel.tickers, dtype=str))
+        coverage = {"filing_ticker_rows": int(fs.ticker.size), "in_panel": int(in_panel.sum()),
+                    "tickers_not_in_panel": sorted(set(fs.ticker[~in_panel].tolist()))}
+        rec = {**base, "status": "COMPLETE", "promising": promising(rs), "filing_coverage": coverage,
+               "scorecard": to_json(rs)}
     elif args.leg in ("p2", "p3"):
-        names = _require_p1(stamps)["promising"]
+        p1 = _require_p1(stamps)
+        names = p1["promising"]
         results: dict = {}
         if args.leg == "p3":
             cfg = yaml.safe_load(BASELINES_CFG.read_text(encoding="utf-8"))["lm_lexicon"]
@@ -135,6 +143,11 @@ def main() -> int:
             log.info("%s: %s", args.leg, n)
             results[n] = (run_p2(n, phase1, scores, calendar, panel, gates) if args.leg == "p2"
                           else run_p3(n, phase1, scores, baselines, calendar, panel, gates))
+            if args.leg == "p2":
+                card = next(c for c in p1["scorecard"]["cards"] if c["name"] == n)
+                p1_ic = card["gross"]["by_horizon"][str(gates.primary_horizon)]["ic_mean"]
+                if p1_ic is None or abs(results[n]["real_ic"] - p1_ic) > 1e-9:
+                    raise SystemExit(f"{n}: P2's IC {results[n]['real_ic']} does not reproduce P1's {p1_ic}")
         rec = {**base, "status": "COMPLETE", "signals": results,
                "note": "" if names else "no PROMISING signal in P1: K3 fires regardless"}
     else:

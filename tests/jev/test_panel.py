@@ -90,6 +90,30 @@ def test_bracketing_fixes_exactly_the_violating_active_bars():
     assert np.array_equal(fixed.high[untouched], bad.high[untouched])
 
 
+def test_trailing_adv_never_reads_the_current_bar():
+    """LEAK-2 tripwire for the reused helper: row t's ADV must not move when row t's volume does."""
+    from sharpen.crucible.data.us_equity_panel import _trailing_adv
+    rng = np.random.default_rng(5)
+    close, vol = rng.uniform(10, 20, (80, 2)), rng.uniform(1e5, 2e5, (80, 2))
+    base = _trailing_adv(close, vol)
+    bumped_vol = vol.copy()
+    bumped_vol[50, 0] *= 100
+    bumped = _trailing_adv(close, bumped_vol)
+    np.testing.assert_array_equal(bumped[:51, 0], base[:51, 0])
+    assert bumped[51, 0] > base[51, 0]
+
+
+def test_membership_takes_effect_on_its_change_date_never_before(tmp_path, monkeypatch):
+    """As-of join tripwire for the reused helper: a name added on 2016-03-01 is not a member the day before."""
+    import sharpen.crucible.data.us_equity_panel as uep
+    members = tmp_path / "members.csv"
+    members.write_text('date,tickers\n2016-01-04,"AAA"\n2016-03-01,"AAA,BRK.B"\n', encoding="utf-8")
+    monkeypatch.setattr(uep, "MEMBERS", members)
+    dates = np.array(["2016-02-26", "2016-02-29", "2016-03-01", "2016-03-02"], dtype="datetime64[ns]")
+    m = uep._membership_matrix(dates, ("AAA", "BRK-B"))
+    assert m[:, 0].all() and list(m[:, 1]) == [False, False, True, True]
+
+
 def test_sector_ids_bucket_former_members(tmp_path):
     sid, names = sector_ids(("AAA", "BBB", "OLD", "BRK.B"), _cons(tmp_path))
     assert names == ["Energy", "Utilities", "Unknown"] and list(sid) == [0, 1, 2, 2]

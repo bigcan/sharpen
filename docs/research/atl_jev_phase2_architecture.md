@@ -196,8 +196,13 @@ def baseline_signal(name, scores, column, hold_days, construction, calendar, rul
   - P2, P3 and `screening` refuse unless `p1.json` is complete on the same stamps.
   - Every leg refuses unless the funnel gates hash to the frozen `519158fa1450`.
   - P3 writes BLOCKED while the lexicon is unpinned.
-- 12 evaluation tests and 6 panel tests. P2 and P3 are each shown to pass a planted signal and fail noise.
+- 14 evaluation tests and 8 panel tests. P2 and P3 are each shown to pass a planted signal and fail noise.
   7/7 planted bugs are caught in the evaluation code.
+- **Tier-1 audit follow-ups (2026-09-24):**
+  - The panel's look-ahead guarantees rest on two reused helpers, `us_equity_panel._trailing_adv` and
+    `_membership_matrix`, which had no tripwire anywhere in the repo. Both now have one, mutation-verified.
+  - P1 records how many filing rows map onto a panel ticker, so a spelling mismatch cannot silently drop filings.
+  - P2 must reproduce P1's IC for the same signal to 1e-9, or it stops.
 
 | Leg | Computation | Reads | Writes |
 |---|---|---|---|

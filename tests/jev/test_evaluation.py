@@ -150,6 +150,24 @@ def test_p3_fails_when_the_information_is_the_baselines_and_jev_is_noise():
     assert r["t"] < PHASE1["p3_baseline"]["min_marginal_t"] and not r["pass"]
 
 
+def test_p1_deflates_at_the_preregistered_count(monkeypatch):
+    import sharpen.jev.evaluation as ev
+    seen = {}
+
+    def fake(signals, panel, gates, batch_name, factor_book=None, multiplicity=None):
+        seen.update(n=multiplicity.n_hypotheses, source=multiplicity.source, prov=multiplicity.provenance)
+        return "scorecard"
+
+    monkeypatch.setattr(ev, "evaluate_batch", fake)
+    ev.run_p1({}, P, GATES, PHASE1)
+    assert seen["n"] == PHASE1["n_hypotheses"] and seen["source"] == "preregistered"
+    assert "atl_jev_prereg.md" in seen["prov"] and PHASE1["questionnaire"]["hash"] in seen["prov"]
+    moved = copy.deepcopy(PHASE1)
+    moved["n_hypotheses"] = 40
+    ev.run_p1({}, P, GATES, moved)
+    assert seen["n"] == 40, "n_hypotheses must be READ from phase1"
+
+
 def test_p2_and_p3_bars_are_read_from_phase1():
     strict = _p1()
     strict["p2_placebo"]["max_p"] = 0.01                        # below the 1/20 floor of 19 permutations
