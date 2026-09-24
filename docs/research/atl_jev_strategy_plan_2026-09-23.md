@@ -319,8 +319,41 @@ hash `3fc01888e31f`; rules in `configs/atl_jev.gates.yaml` `phase1`). No filing 
   - **The screening panel was rebuilt** through the project cleaner (ADR-8). The cached fetch had never been
     cleaned, was labelled survivorship-free although it drops 270 delisted names, and had an ADV that included the
     current bar. Cleaning changed no close, so returns are untouched.
-- **Next:** finish the pull (~13:30 today); the operator pins the LM file; score the corpus (≈ $6.50, operator
-  go-ahead); then Phase 3: `atl_jev_evaluate.py --leg p1 → p2 → p3 → screening`.
+- **2026-09-24 — screening corpus complete** (304 min, 584 CIKs, 0 failed; manifests in `results/atl_jev/phase2/`):
+  - 98,119 8-Ks listed, of which 21,363 fell outside membership spells. **24,676 in scope:** 23,214 earnings
+    releases and 1,462 event filings.
+  - Press-release labels: 20,192 `EX-99.1`, 2,298 `EX-99`, 345 `EX-99.01`. The last two, 2,643 releases or 11%,
+    would have been one-paragraph stubs under a literal match. 357 releases (1.5%) fall back to the 8-K body.
+  - 22 filings have no readable document and are scored as missing. 61% exceed the pre-registered 24,000
+    characters, so Jev reads their first 24,000.
+- **Scoring started** (operator-approved, `--max-usd 10`, upper bound $8.42). The first run stopped after 505
+  answers on TypeSafe HTTP 529 ("system overloaded"). 529 is now retried, with waits of up to 2 hours; resumed
+  from the cache.
+- **Scoring complete:** 24,654 filings scored (22 empty), 140,614 answers, **all served by `jev-1.13.0`**
+  (no mid-study version change), $6.57. It paused once when TypeSafe credits ran out (HTTP 402) and resumed from
+  the cache after the operator added credits.
+
+**2026-09-24 — Phase 3 screening (P1, P2)** (`results/atl_jev/phase3/`). All screening numbers are UPPER BOUNDS:
+the era is contaminated and the panel is survivorship-biased.
+
+| Signal | P1 verdict | 5d IC | IC t | IC-IR | DSR (n=8) | FDR q | Frictionless SR |
+|---|---|---|---|---|---|---|---|
+| **jev-surprise-63** | **PROMISING** | 0.0090 | 3.21 | 0.102 | 0.946 | 0.025 | 0.02 |
+| jev-toneinfl-63 | LOGGED | 0.0058 | 2.28 | 0.073 | 0.764 | 0.10 | −0.04 |
+| jev-comp-63 (primary) | LOGGED | 0.0072 | 2.16 | 0.069 | 0.723 | 0.10 | −0.13 |
+| jev-comp-21 | LOGGED | 0.0032 | 0.71 | 0.026 | 0.251 | 0.45 | −0.12 |
+| jev-quality-63 | LOGGED | 0.0015 | 0.66 | 0.021 | 0.178 | 0.45 | −0.15 |
+
+- **jev-surprise-63:**
+  - The IC is positive at every horizon from 1 to 63 days and in all four subperiods.
+  - The funnel's caveats: cost-blocked (the net Sharpe is ≤ 0 at standard cost), and CPCV-fragile (p05 OOS
+    Sharpe −0.28; 47% of 15 paths positive).
+  - Its IC of 0.009 is at the measured power edge: at 0.010, P4 detects 5 times in 8.
+- **P2 passes** for jev-surprise-63: 0 of 200 same-week placebos reach the real IC (placebo mean 0.0007, 95th
+  percentile 0.0036), p = 0.005 ≤ 0.05. P2 reproduced P1's IC exactly.
+- All 24,831 filing-ticker rows mapped onto panel tickers.
+- **Next:** P3 against the text baselines, which is blocked until the operator supplies the Loughran–McDonald
+  file; then the K3 decision.
 
 **Not in v1:**
 - ATL FinSearch news: its history starts around 2026-07 and it needs a token. It could be a forward-only add-on.

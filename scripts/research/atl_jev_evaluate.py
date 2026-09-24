@@ -125,7 +125,7 @@ def main() -> int:
         p1 = _require_p1(stamps)
         names = p1["promising"]
         results: dict = {}
-        if args.leg == "p3":
+        if args.leg == "p3" and names:                     # with no PROMISING signal K3 needs no baseline
             cfg = yaml.safe_load(BASELINES_CFG.read_text(encoding="utf-8"))["lm_lexicon"]
             try:
                 lex = load_lm_lexicon(ROOT / cfg["path"], sha256=cfg["sha256"])

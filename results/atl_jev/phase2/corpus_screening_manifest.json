@@ -1,0 +1,52 @@
+{
+ "built_utc": "2026-09-24T05:42:33+00:00",
+ "smoke": false,
+ "stamp": {
+  "mode": "screening",
+  "since": "2011-09-17T00:00:00+00:00",
+  "until": "2025-01-01T00:00:00+00:00",
+  "rows": [
+   "2012-01-01",
+   "2024-12-31"
+  ],
+  "form": "8-K",
+  "doc_types": [
+   "8-K",
+   "EX-99.1",
+   "EX-99.01",
+   "EX-99"
+  ],
+  "max_chars": 24000,
+  "questionnaire_hash": "3fc01888e31f",
+  "pipeline_sha": "4877e0f424a1"
+ },
+ "gates_sha": "77b9a306392784824b5612acf2a428548527222f924fcced4107ef6c279c8f54",
+ "edgar_filings_sha": "98d8a7a47e96",
+ "commit": "85a15a461f0b2e4ca544c2788d7874e672c030f6",
+ "dirty": true,
+ "n_filers": 584,
+ "stats": {
+  "filers": 584,
+  "reused": 1,
+  "built": 583,
+  "failed": {},
+  "listed": 98119,
+  "outside_spells": 21363,
+  "in_scope": 24607,
+  "earnings": 23156,
+  "events": 1451,
+  "empty_text": 22,
+  "truncated": 15139,
+  "doc_sources": {
+   "EX-99.1": 20134,
+   "EX-99": 2298,
+   "8-K": 1393,
+   "8-K+EX-99.1": 377,
+   "EX-99.01": 345,
+   "8-K+EX-99": 30,
+   "(none)": 22,
+   "8-K+EX-99.01": 8
+  }
+ },
+ "elapsed_min": 304.1
+}

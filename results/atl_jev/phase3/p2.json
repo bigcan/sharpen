@@ -1,0 +1,54 @@
+{
+ "leg": "p2",
+ "run_utc": "2026-09-24T06:54:58+00:00",
+ "stamps": {
+  "gates_sha": "77b9a306392784824b5612acf2a428548527222f924fcced4107ef6c279c8f54",
+  "funnel_gates_hash": "519158fa1450",
+  "questionnaire": {
+   "version": "v1",
+   "hash": "3fc01888e31f"
+  },
+  "panel_sha256": "b3bf8490f1261a701ace17162c6b12656d28bf1ff036e6b0246b979f470478eb",
+  "scores_built_utc": "2026-09-24T05:45:30+00:00",
+  "served_models": {
+   "jev-1.13.0": 140614
+  },
+  "corpus_stamp": {
+   "mode": "screening",
+   "since": "2011-09-17T00:00:00+00:00",
+   "until": "2025-01-01T00:00:00+00:00",
+   "rows": [
+    "2012-01-01",
+    "2024-12-31"
+   ],
+   "form": "8-K",
+   "doc_types": [
+    "8-K",
+    "EX-99.1",
+    "EX-99.01",
+    "EX-99"
+   ],
+   "max_chars": 24000,
+   "questionnaire_hash": "3fc01888e31f",
+   "pipeline_sha": "4877e0f424a1"
+  }
+ },
+ "commit": "166edc074a5f88010bce6bd96d6f23657304113c",
+ "dirty": true,
+ "status": "COMPLETE",
+ "signals": {
+  "jev-surprise-63": {
+   "signal": "jev-surprise-63",
+   "real_ic": 0.00903724225396139,
+   "permutations": 200,
+   "placebo_ge_real": 0,
+   "null_mean": 0.0007445712730492058,
+   "null_p95": 0.003639959960274737,
+   "p": 0.004975124378109453,
+   "max_p": 0.05,
+   "pass": true
+  }
+ },
+ "note": "",
+ "elapsed_min": 5.4
+}
