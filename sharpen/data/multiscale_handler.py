@@ -11,6 +11,11 @@ Features per scale (8 dims, TC-aligned):
   4-7. open_z, high_z, low_z, close_z = SymLog → EMA-Z(span=120) → tanh
   8. volume_z = SymLog → EMA-Z(span=120) → tanh (market participation)
 
+Features 1 and 3 (log_return, parkinson_vol; array columns 0 and 2) are raw-scale (~1e-3) by
+default, ~300x smaller than the rest. ``features.raw_channel_norm: ema_z`` puts them through the same
+EMA-Z → tanh path (research option, full-codebase audit 2026-09-23 §3.7 planted-signal ladder).
+It is NOT wired into ``LiveObsBuilder``: never deploy a checkpoint trained with it.
+
 LEAK-1 compliant: norm_cutoff_date splits normalization.
 """
 import logging
@@ -20,6 +25,9 @@ import numpy as np
 import pandas as pd
 
 logger = logging.getLogger(__name__)
+
+
+RAW_CHANNEL_NORMS = ("raw", "ema_z")
 
 
 def _symlog(x: np.ndarray) -> np.ndarray:
@@ -76,6 +84,7 @@ def compute_features_with_warmup(
     live_df: pd.DataFrame,
     span: int = 120,
     n_features: int = 8,
+    raw_channel_norm: str = "raw",
 ) -> np.ndarray:
     """Compute features for `live_df` using `warmup_df` as the EMA-Z warmup buffer.
 
@@ -92,6 +101,7 @@ def compute_features_with_warmup(
         live_df:   Live/eval bars to compute features for.
         span:      EMA span (must match training).
         n_features: Output feature count (TC-aligned 8).
+        raw_channel_norm: "raw" or "ema_z" (must match training).
 
     Returns:
         ndarray of shape `(len(live_df), n_features)` — features for `live_df`
@@ -99,7 +109,8 @@ def compute_features_with_warmup(
     """
     if warmup_df is None or len(warmup_df) == 0:
         return _compute_scale_features(live_df, norm_cutoff_idx=None,
-                                        span=span, n_features=n_features)
+                                        span=span, n_features=n_features,
+                                        raw_channel_norm=raw_channel_norm)
     n_warmup = len(warmup_df)
     combined = pd.concat(
         [warmup_df[['timestamp', 'open', 'high', 'low', 'close', 'volume']],
@@ -107,22 +118,26 @@ def compute_features_with_warmup(
         ignore_index=True,
     )
     full = _compute_scale_features(combined, norm_cutoff_idx=n_warmup,
-                                    span=span, n_features=n_features)
+                                    span=span, n_features=n_features,
+                                    raw_channel_norm=raw_channel_norm)
     return full[n_warmup:]
 
 
-def _compute_scale_features(df: pd.DataFrame, norm_cutoff_idx: Optional[int] = None, span: int = 120, n_features: int = 8) -> np.ndarray:
+def _compute_scale_features(df: pd.DataFrame, norm_cutoff_idx: Optional[int] = None, span: int = 120,
+                            n_features: int = 8, raw_channel_norm: str = "raw") -> np.ndarray:
     """Compute features for a single timescale DataFrame.
 
     Features (8 dims, TC-aligned for Conv1d Tensor Core acceleration):
-      0. log_return
+      0. log_return (raw; EMA-Z → tanh when raw_channel_norm="ema_z")
       1. atr_norm (centered around 0)
-      2. parkinson_vol
+      2. parkinson_vol (raw; EMA-Z → tanh when raw_channel_norm="ema_z")
       3-6. open_z, high_z, low_z, close_z (SymLog → EMA-Z → tanh)
       7. volume_z (SymLog → EMA-Z → tanh) — market participation signal
 
     Returns: (N, n_features) float32 array
     """
+    if raw_channel_norm not in RAW_CHANNEL_NORMS:
+        raise ValueError(f"raw_channel_norm={raw_channel_norm!r}; expected one of {RAW_CHANNEL_NORMS}")
     close = df['close'].values.astype(np.float64)
     high = df['high'].values.astype(np.float64)
     low = df['low'].values.astype(np.float64)
@@ -138,7 +153,8 @@ def _compute_scale_features(df: pd.DataFrame, norm_cutoff_idx: Optional[int] = N
     safe_prev = np.where(prev_close > 0, prev_close, 1e-9)
     log_ret = np.log(close / safe_prev)
     log_ret[0] = 0.0
-    features[:, 0] = np.clip(log_ret, -0.1, 0.1).astype(np.float32)
+    log_ret = np.clip(log_ret, -0.1, 0.1)
+    features[:, 0] = log_ret.astype(np.float32)
 
     # 2. atr_norm = ATR(14) / EMA(ATR, 50)
     tr = np.maximum(
@@ -154,25 +170,25 @@ def _compute_scale_features(df: pd.DataFrame, norm_cutoff_idx: Optional[int] = N
 
     # 3. parkinson_vol
     hl_ratio = np.where(low > 0, high / low, 1.0)
-    parkinson = np.sqrt(np.log(hl_ratio) ** 2 / (4.0 * np.log(2.0)))
-    features[:, 2] = np.clip(parkinson, 0.0, 0.1).astype(np.float32)
+    parkinson = np.clip(np.sqrt(np.log(hl_ratio) ** 2 / (4.0 * np.log(2.0))), 0.0, 0.1)
+    features[:, 2] = parkinson.astype(np.float32)
 
     # 4-7. OHLC z-scores: SymLog → EMA-Z → tanh
     # FIX MATH-N03: Carry forward warm-up buffer across norm cutoff so EMA-Z
     # converges before genuine post-cutoff data begins (matching parquet_handler.py).
     WARMUP_BUFFER = 200  # ~1.7 half-lives for span=120 EMA
 
-    def normalize_series(arr):
+    def normalize_series(arr, transform=_symlog):
         if norm_cutoff_idx is not None and 0 < norm_cutoff_idx < len(arr):
-            part1 = _ema_zscore_tanh(_symlog(arr[:norm_cutoff_idx]), span)
+            part1 = _ema_zscore_tanh(transform(arr[:norm_cutoff_idx]), span)
             # Carry forward last WARMUP_BUFFER rows from pre-cutoff as warm-up
             buffer_size = min(WARMUP_BUFFER, norm_cutoff_idx)
             arr_after_with_buffer = arr[norm_cutoff_idx - buffer_size:]
-            part2_full = _ema_zscore_tanh(_symlog(arr_after_with_buffer), span)
+            part2_full = _ema_zscore_tanh(transform(arr_after_with_buffer), span)
             # Strip buffer rows — only keep genuine post-cutoff output
             part2 = part2_full[buffer_size:]
             return np.concatenate([part1, part2])
-        return _ema_zscore_tanh(_symlog(arr), span)
+        return _ema_zscore_tanh(transform(arr), span)
 
     features[:, 3] = normalize_series(open_)
     features[:, 4] = normalize_series(high)
@@ -183,6 +199,12 @@ def _compute_scale_features(df: pd.DataFrame, norm_cutoff_idx: Optional[int] = N
     # TC-OPT: 8th feature aligns Conv1d input channels to multiple of 8
     if n_features >= 8:
         features[:, 7] = normalize_series(volume)
+
+    # Research option: the raw-scale channels through the same EMA-Z → tanh path
+    # (no SymLog: they are already log-scale), same LEAK-1 cutoff and warm-up carry.
+    if raw_channel_norm == "ema_z":
+        features[:, 0] = normalize_series(log_ret, transform=np.asarray)
+        features[:, 2] = normalize_series(parkinson, transform=np.asarray)
 
     return features
 
@@ -216,6 +238,8 @@ class MultiScaleOHLCVHandler:
         # config but never consumed here — _compute_scale_features silently ran
         # with its own default. Wire it so the config key is authoritative.
         self.n_features = int(feature_config.get("features_per_scale", 8))
+        # "raw" (production) or "ema_z" (research only — see module docstring).
+        self.raw_channel_norm = str(feature_config.get("raw_channel_norm", "raw"))
 
         # v6: Summary-stats observation mode (725→50 dims)
         self.obs_mode = feature_config.get("obs_mode", "window")
@@ -308,6 +332,7 @@ class MultiScaleOHLCVHandler:
 
             features = _compute_scale_features(
                 resampled, norm_cutoff_idx, self.norm_span, self.n_features,
+                raw_channel_norm=self.raw_channel_norm,
             )
 
             # FIX GMGP1-F1: Apply start_date AFTER feature computation
