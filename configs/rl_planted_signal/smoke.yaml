@@ -1,0 +1,12 @@
+# GPU smoke for the planted-signal ladder: tiny budget, production geometry, AMP + torch.compile,
+# async vector envs, full data generation. Verifies the deploy path before the 3M-step slots.
+# Launch: python scripts/deploy_bare_metal.py --script scripts/research/rl_planted_signal/launch_fleet.py
+#   --config configs/rl_planted_signal/smoke.yaml --instance gpuhub-1 --gpu 0 --no_kill
+out_root: results/rl_planted_signal/smoke
+n_base_bars: 200000
+data_seed: 11
+datasets: {ic015: 0.15}
+threads_per_arm: 8
+stagger_seconds: 0
+arms:
+  - {name: gpu_smoke, data: ic015, overrides: {seed: 1, total_timesteps: 6000, learning_starts: 1000, max_eval_steps: 3000}}
