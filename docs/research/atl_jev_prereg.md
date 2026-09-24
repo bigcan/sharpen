@@ -201,3 +201,30 @@ does not undo. Surprise and tone keep the latest earnings release.
 **Stamps:** both runs, and the §5 power study, read the pre-freeze gates file. The frozen file adds only
 `questionnaire.hash`, `construction`, `release_row` and `p4_clean_window.min_filing_accepted`. Every section those
 runs read is unchanged.
+
+## 9. Clarifications after the freeze
+
+Made on 2026-09-23 while building the corpus (Phase 2 step 3). They come from document structure alone: no strategy
+filing had been scored and no return had been read.
+
+- **"The EX-99.1 press release" includes the release's other labels.** In a sample of 60 Item 2.02 filings from
+  2012–2024, 9 filed the release as `EX-99` or `EX-99.01`. In the 2019 smoke build it was 22 of 36. Read literally,
+  §2 would send Jev the one-paragraph 8-K body for those filings. The press release is exhibit 99.1 under either
+  label (`EX-99.1`, `EX-99.01`), otherwise an unnumbered `EX-99`. The 8-K body is used only when none exists.
+- **"8-Ks" means form `8-K`.** Amendments (`8-K/A`) are excluded, as in the instrument check.
+
+The §8 instrument check read `EX-99.1` only, so a few of its 40 releases may have been read from the 8-K body. Its
+rules concern whether answers vary, which this does not affect.
+
+**How P2 and P3 are computed** (fixed 2026-09-24 in Phase 2 step 6, before any strategy filing was scored):
+- **Which signals.** P2 and P3 run on every signal P1 finds `PROMISING`. A signal passes screening only if it passes
+  P1, P2 and P3. K3 fires when no signal does, and P4 takes the top-ranked passer in the funnel's order.
+- **P2 unit.** Each filing's three block scores move together. They are shuffled among the filings whose release
+  rows fall in the same ISO week; a filing released outside the calendar stays put.
+- **P3 regressors.** The Jev signal and both baselines are scored by the funnel's own `compute_scores` (its default
+  neutralization), then ranked each day. The forward return is at the funnel's primary horizon (5 days). The t is
+  `mean(β) / sqrt(γ0 / hac_effective_n(β, 5))`, with γ0 the population variance of the daily coefficients.
+- **"Previous in-scope release"** for the similarity baseline means the same company's previous earnings release:
+  like is compared with like, as in Lazy Prices. Both baselines are defined on earnings releases only.
+- **Seeds.** Each random draw is seeded from the questionnaire hash, the leg and the signal name, so no seed can be
+  chosen after a result.

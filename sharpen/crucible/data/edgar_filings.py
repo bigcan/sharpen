@@ -72,19 +72,29 @@ class _Throttle:
         if delay > 0:
             time.sleep(delay)
 
+    def hold(self, seconds: float) -> None:
+        """Stop every caller for ``seconds`` from now: the server has blocked us, not one request."""
+        with self._lock:
+            self._next = max(self._next, time.monotonic() + seconds)
 
-_RETRYABLE_HTTP = frozenset({429, 500, 502, 503, 504})
+
+_RETRYABLE_HTTP = frozenset({500, 502, 503, 504})
+# SEC fair-access: a client over the rate limit gets HTTP 429 until its rate has stayed below the limit for
+# 10 minutes. Retrying quickly only prolongs the block, so a 429 pauses ALL requests past that window.
+_RATE_LIMITED = 429
 
 
 def _default_transport_factory(user_agent: str, per_second: float, max_retries: int = 3,
-                               backoff_s: float = 2.0) -> Transport:
-    """Throttled GET with retry on transient failures (429/5xx, timeouts, resets). A transient error
-    must not silently DROP a filing: at corpus scale, skips are non-random (they cluster on the large
-    filers whose submission indexes span many pages) and would bias the sample."""
+                               backoff_s: float = 2.0, cooldown_s: float = 660.0,
+                               max_cooldowns: int = 6) -> Transport:
+    """Throttled GET with retry on transient failures (5xx, timeouts, resets) and a shared cool-down on
+    HTTP 429. A transient error must not silently DROP a filing: at corpus scale, skips are non-random
+    (they cluster on the large filers whose submission indexes span many pages) and would bias the sample."""
     throttle = _Throttle(per_second)
 
     def _get(url: str) -> bytes:
-        for attempt in range(max_retries + 1):
+        attempt = cooldowns = 0
+        while True:
             throttle.wait()
             req = urllib.request.Request(url, headers={"User-Agent": user_agent,
                                                        "Accept-Encoding": "gzip"})
@@ -93,16 +103,22 @@ def _default_transport_factory(user_agent: str, per_second: float, max_retries: 
                     data = resp.read()
                     return gzip.decompress(data) if resp.headers.get("Content-Encoding") == "gzip" else data
             except urllib.error.HTTPError as exc:
+                if exc.code == _RATE_LIMITED and cooldowns < max_cooldowns:
+                    cooldowns += 1
+                    logger.warning("EDGAR rate limit (HTTP 429) on %s: pausing every request for %.0fs "
+                                   "(%d/%d)", url, cooldown_s, cooldowns, max_cooldowns)
+                    throttle.hold(cooldown_s)
+                    continue
                 if exc.code not in _RETRYABLE_HTTP or attempt == max_retries:
                     raise
             except (urllib.error.URLError, TimeoutError, ConnectionError):
                 if attempt == max_retries:
                     raise
             wait = backoff_s * (2 ** attempt)
-            logger.warning("EDGAR transient failure on %s; retry %d/%d in %.0fs", url, attempt + 1,
+            attempt += 1
+            logger.warning("EDGAR transient failure on %s; retry %d/%d in %.0fs", url, attempt,
                            max_retries, wait)
             time.sleep(wait)
-        raise RuntimeError("unreachable")                            # loop returns or raises
     return _get
 
 

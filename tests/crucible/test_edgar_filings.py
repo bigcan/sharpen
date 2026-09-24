@@ -123,5 +123,30 @@ def test_non_retryable_http_error_propagates_immediately(monkeypatch):
     assert len(calls) == 1
 
 
+def _429():
+    import urllib.error
+    return urllib.error.HTTPError("u", 429, "Too Many Requests", {}, None)
+
+
+def test_rate_limit_pauses_every_request_past_the_sec_window_then_retries(monkeypatch):
+    ef, calls = _patch_urlopen(monkeypatch, [_429(), b"ok"])
+    slept: list[float] = []
+    monkeypatch.setattr(ef.time, "sleep", slept.append)
+    get = ef._default_transport_factory("UA test@example.com", per_second=1000.0, cooldown_s=660.0)
+    assert get("https://www.sec.gov/x") == b"ok" and len(calls) == 2
+    # SEC lifts a block only after 10 minutes below its limit; a seconds-scale retry would prolong it
+    assert max(slept) > 600
+
+
+def test_rate_limit_spends_no_transient_retry_and_is_bounded(monkeypatch):
+    import urllib.error
+    ef, calls = _patch_urlopen(monkeypatch, [_429(), _429(), _429(), _429()])
+    get = ef._default_transport_factory("UA test@example.com", per_second=1000.0, max_retries=0,
+                                        max_cooldowns=3)
+    with pytest.raises(urllib.error.HTTPError, match="Too Many"):
+        get("https://www.sec.gov/x")
+    assert len(calls) == 4, "three cool-downs, then the fourth 429 propagates"
+
+
 def test_html_to_text_passes_plain_text_through():
     assert html_to_text("plain   text\n\n  line") == "plain text\nline"

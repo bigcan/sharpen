@@ -39,6 +39,9 @@ All five legs are pre-registered before any filing is scored.
 After P5, a Tier-2 deep lifecycle audit (`deep_strategy_audit`) is still required before any capital. The funnel's
 verdict tops out at `PROMISING`, never GO.
 
+P3's Loughran–McDonald baseline is used on a research-use reading of its academic-only license. If P1–P4 pass and the
+result is pursued, a commercial license is requested before P5 begins (ADR-9 in the Phase 2 architecture).
+
 ## 2. What we are working with (verified 2026-09-23)
 
 **Jev.** A System One model: typed answers only (`choice`, `score`, `noul`), each with probabilities and confidence. It
@@ -280,8 +283,44 @@ hash `3fc01888e31f`; rules in `configs/atl_jev.gates.yaml` `phase1`). No filing 
   - a screening-mode firewall past 2024, and P4's `min_filing_accepted`;
   - 20 tests, including the funnel's own causality tripwire and parity with `asof_join`; 10/10 mutations caught.
 - **Blocker A10 is resolved:** the release row exists and is consumed by the signal, with negative tests.
-- **Next:** CIK map + corpus builder, scorer, baselines (Loughran–McDonald license check), evaluation legs, and the
-  DATA-CLEAN panel rebuild with a membership refresh past 2026-06-02.
+- **Loughran–McDonald license (2026-09-23):** free for academic research only. The operator chose to use it as
+  research now and to request a commercial license only if a result is worth pursuing (ADR-9).
+- **Step 3, the corpus builder** (`sharpen/jev/corpus.py`, `scripts/research/jev_build_corpus.py`):
+  - **CIK coverage** by exact key covers 98.9% of the panel's priced member-days (97.8% in 2012, 100% from 2022);
+    the price panel, not the map, limits coverage.
+  - **Press-release labels:** 9 of 60 sampled earnings 8-Ks label the release `EX-99` or `EX-99.01`, so the builder
+    accepts both (prereg §9, ADR-10). Otherwise Jev would have read a one-paragraph stub.
+  - **Membership filter:** filings are fetched only while a name is a member (plus warm-up), which saves about 27%.
+  - 24 tests, 19/19 planted bugs caught. A live smoke test (8 names, 2019) gave 39 in-scope filings, no failures,
+    and no surviving name, ticker or year in the masked text.
+  - **Full screening pull, estimated:** about 26–28k in-scope filings from 584 CIKs, 3–5 h of EDGAR downloads and
+    ~0.5 GB. Later Jev scoring ≈ $6–7.
+- **2026-09-24 — full screening pull started** (operator go-ahead). The first attempt, at 4 requests/s over 4
+  connections, drew SEC HTTP 429 blocks after about 200 requests. It now runs at 1 connection and 2/s, and a 429
+  pauses every request for 11 minutes.
+- **Step 4, the scorer** (`sharpen/jev/scoring.py`, `scripts/research/jev_score_filings.py`):
+  - refuses a questionnaire other than the frozen one, a corpus from another text pipeline, and any frame
+    carrying more than the corpus columns;
+  - stops if Jev's served version changes, and enforces a spend ceiling;
+  - 10 tests, 9/9 planted bugs caught.
+  - A live smoke scored 39 filings for $0.0093, all by `jev-1.13.0`. Answers match known events: Apple's
+    January 2019 guidance cut, the raises by Northrop and GE, and Kraft Heinz's impairments and restatement.
+- **Step 5, the baselines** (`sharpen/jev/baselines.py`):
+  - LM net tone and prior-release similarity, computed on the text Jev reads and placed on the Jev signal's own
+    release rows;
+  - the LM loader refuses until the operator's file is pinned in `configs/atl_jev_baselines.yaml`;
+  - 7 tests, 7/7 planted bugs caught.
+- **Step 6, the evaluation** (`sharpen/jev/evaluation.py`, `sharpen/jev/panel.py`, `scripts/research/atl_jev_evaluate.py`,
+  `scripts/research/atl_jev_build_panel.py`):
+  - legs P1, P2, P3 and the K3 decision, each stamped with its inputs;
+  - P2 and P3 are shown to pass a planted signal and fail noise; 12 + 6 tests, 7/7 planted bugs caught;
+  - the P2/P3 computation rules are fixed in prereg §9, and P4 is deferred until a signal passes screening
+    (ADR-11).
+  - **The screening panel was rebuilt** through the project cleaner (ADR-8). The cached fetch had never been
+    cleaned, was labelled survivorship-free although it drops 270 delisted names, and had an ADV that included the
+    current bar. Cleaning changed no close, so returns are untouched.
+- **Next:** finish the pull (~13:30 today); the operator pins the LM file; score the corpus (≈ $6.50, operator
+  go-ahead); then Phase 3: `atl_jev_evaluate.py --leg p1 → p2 → p3 → screening`.
 
 **Not in v1:**
 - ATL FinSearch news: its history starts around 2026-07 and it needs a token. It could be a forward-only add-on.

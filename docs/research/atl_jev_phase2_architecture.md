@@ -1,6 +1,6 @@
 # ATL × Jev Phase 2: architecture design
 
-> **Created:** 2026-09-23 | **Status:** APPROVED. Build order below; step 1 is being implemented now.
+> **Created:** 2026-09-23 | **Status:** APPROVED. Build order below; steps 1–6 are built (P4 deferred, ADR-11).
 > **Scope:** everything between the frozen pre-registration (`9c7f6df1`) and running legs P1–P4: timestamps, corpus,
 > scoring, signals, baselines and evaluation. The B8 lockbox seam is designed here but deferred (ADR-5).
 > **Inputs:** `docs/research/atl_jev_prereg.md` (the contract this code must implement), `configs/atl_jev.gates.yaml`
@@ -72,36 +72,70 @@ def release_dates(accepted_utc: np.ndarray, calendar: np.ndarray, rule: ReleaseR
 - **Config keys:** `phase1.release_row.timezone`, `phase1.release_row.cutoff`.
 - **Breaking changes:** none (new module).
 
-### 2. Corpus — `sharpen.jev.corpus` + `scripts/research/jev_build_corpus.py` (step 3)
+### 2. Corpus — `sharpen.jev.corpus` + `scripts/research/jev_build_corpus.py` (step 3, built)
 
 **Universe to CIKs:**
 ```
-def build_cik_map(tickers: Iterable[str]) -> CikMap
+def universe_tickers(dates, members, start, end) -> set[str]         # members on any day of the window
+def build_cik_map(tickers, *, constituents, sec_tickers) -> CikMap
+def membership_spells(dates, members, tickers, start, end) -> list[(first day, day after the last)]
 ```
-- Exact-key sources only: `sp500_constituents.csv` and SEC `company_tickers.json` (cached under `data/`).
-- Returns `mapped` and `unmapped`, plus a per-year coverage report.
+- Exact-key sources only: `sp500_constituents.csv` and SEC `company_tickers.json` (cached under
+  `data/raw/fundamentals/`). `CikMap` holds `mapped` (ticker → CIKs), `unmapped` and `conflicts`; where the sources
+  disagree, every CIK is kept. `coverage_by_year` reports the share of members and of member-days mapped.
+- The membership file is read fail-closed: a window before its first row or past its last row (2026-06-02) raises.
 
 **Builder:**
 ```
-def build_corpus(names, window, edgar, out_dir, *, max_chars, mode) -> CorpusStats
+def corpus_window(phase1, *, mode, p4_authorization=None, narrow=None) -> CorpusWindow
+def build_corpus(filers, window, edgar, out_dir, *, max_chars, workers=4) -> CorpusStats
+def read_corpus(out_dir, *, expect_stamp=None) -> DataFrame
 ```
-- Resumable: existing accessions are skipped.
-- A filing is in scope when `questions_for(items)` is non-empty.
-- Masking: `anonymize` with `drop_cover_page = (doc_type == "8-K")`.
-- Records `text_sha256`, the hash of exactly the text Jev will see.
-- **Firewall:** `mode="screening"` refuses any `accepted_utc` after `screening_window[1]`. `mode="clean"` needs a P4
-  authorization (ADR-3).
-- **Config keys:** `phase1.filings.max_chars`, `phase1.screening_window`, `phase1.clean_window`, `phase1.universe`.
+- **Scope:** form `8-K` with a non-empty `questions_for(items)`. A filing is fetched only if accepted during one of
+  the filer's membership spells, each opened early by the warm-up (`acceptance_spells`). A non-member row is NaN
+  in every signal, so this changes no signal value; it saves about 27% of the pull.
+- **Text** per prereg §2 and §9: the press release is `EX-99.1`, else `EX-99.01`, else `EX-99` (ADR-10). Masked with
+  `anonymize` (the cover page is stripped from the 8-K body only) and cut to `max_chars`. Each row records
+  `text_sha256` (exactly the text Jev will see), `doc_source`, `raw_chars` and `truncated`.
+- **Storage and resume (ADR-6):** one shard per CIK, then a sidecar holding the stamp (window, form, document types,
+  `max_chars`, questionnaire hash, text-pipeline hash) and the filer's spells. A current shard is skipped, a failed
+  filer keeps no shard, and a changed stamp or spell rebuilds. `read_corpus(expect_stamp=...)` refuses a stale or
+  mixed corpus.
+- **Firewall (ADR-3):** a screening build ends at `screening_window[1]`. A filing outside the window, or of another
+  form, raises `FirewallError`, which aborts the whole build rather than skipping. Clean mode requires the P4
+  sentinel.
+- **Config keys:** `phase1.universe`, `phase1.screening_window`, `phase1.clean_window`,
+  `phase1.p4_clean_window.min_filing_accepted`, `phase1.filings.max_chars`, and `phase1.signals[].hold_days` (for
+  the warm-up).
+- **EDGAR rate limit:** the first full pull, at 4 requests/s over 4 connections, drew HTTP 429 after about 200
+  requests, although SEC states a 10/s ceiling. The pull now runs 1 connection at 2/s, and on a 429 the client pauses
+  every request for 11 minutes: SEC lifts a block only after 10 minutes below its limit, and a quick retry prolongs it.
 
-### 3. Scorer — `sharpen.jev.scoring` + `scripts/research/jev_score_filings.py` (step 4)
+### 3. Scorer — `sharpen.jev.scoring` + `scripts/research/jev_score_filings.py` (step 4, built)
 
 ```
-def score_corpus(corpus, client, phase1, out) -> ScoreStats
+def check_questionnaire(phase1) -> None                    # SystemExit unless version and hash are this code's
+def check_corpus_stamp(stamp, *, mode) -> None             # same mode, questionnaire and text pipeline, or SystemExit
+def score_corpus(corpus, client, *, concurrency, chunk=256) -> (DataFrame, ScoreStats)
+def to_filing_scores(scores) -> FilingScores               # one row per share class, for the step-2 signals
 ```
-- **Pre:** `phase1.questionnaire.hash == questionnaire_hash()` and `version == VERSION`. Otherwise `SystemExit`
-  (fail closed).
-- **Post:** per-filing block scores computed with `filing_score(..., blocks=[b])` for each `b` in `BLOCKS`.
+- **Pre:** `phase1.questionnaire` must be `VERSION` with hash `questionnaire_hash()`, and the corpus stamp must
+  match the current questionnaire and text pipeline. A full run also needs the corpus's full window and no failed
+  filer. Otherwise `SystemExit` (fail closed).
+- **Information boundary:** `score_corpus` accepts exactly the corpus columns, so a frame carrying a price, return
+  or verdict is refused before any call. Jev's request is the masked text plus the filing's questions; a test
+  checks that no accession, ticker, date or CIK reaches it.
+- **Post:** per-filing block scores from `filing_score(..., blocks=[b])` for each `b` in `BLOCKS`. An unasked block
+  is NaN, and empty text is never sent. Every mapped answer is kept (`ans_E1` … `ans_M1`) for audits.
 - Every row carries `served_model`. A second served version appearing mid-run **stops the run** (plan C6).
+- **Budget:** `--max-usd` is required. The run refuses to start if a pre-run estimate exceeds it, and stops between
+  chunks if the actual bill does.
+- **Smoke (2019, 8 names):**
+  - 39 filings and 219 questions for $0.0093, all served by `jev-1.13.0`, the Phase 1 model.
+  - Answers match known events: Apple's January 2019 guidance cut scores E2 = 0.99; Northrop's and GE's raises
+    score E1 = 0.95–0.99; Kraft Heinz's impairment, restatement and other adverse filings score M1 = 0.94–0.99.
+  - About 5.7k billed tokens per filing, so the screening corpus should cost about $6.50.
+  - 10 tests; 9/9 planted bugs caught.
 
 ### 4. Signals — `sharpen/signals/library/jev_filings.py` (step 2; pure logic, testable before any data)
 
@@ -128,16 +162,42 @@ def build_registered_signals(phase1, filings, calendar, *, mode) -> list[JevFili
 - Reads `phase1.signals` and `phase1.construction`.
 - **Rejects any construction value it does not implement** (`ValueError`). No silent default.
 
-### 5. Baselines — `sharpen.jev.baselines` (step 5)
+### 5. Baselines — `sharpen.jev.baselines` (step 5, built)
 
-- `lm_net_tone(text, lexicon) -> float`: (positive − negative) / tokens.
-- `prior_similarity(text, prev_text) -> float`: cosine of term-frequency vectors against the name's previous
-  earnings release.
-- Both become daily signals through the same construction machinery (latest in window, earnings releases only).
-- **The LM lexicon is downloaded by the operator into `data/lexicons/`.** It is never committed; its terms of use are
-  checked at step 5. The loader refuses if the lexicon is absent: P3 cannot pass without its baseline.
+```
+def load_lm_lexicon(path, *, sha256) -> Lexicon      # refuses unpinned, missing, or a different file
+def lm_net_tone(text, lexicon) -> float              # (positive − negative) / words; NaN with no words
+def prior_similarity(corpus) -> Series               # cosine of word counts vs the same CIK's previous release
+def baseline_scores(corpus, lexicon) -> DataFrame    # per filing; NaN on event filings
+def baseline_signal(name, scores, column, hold_days, construction, calendar, rule) -> JevFilingSignal
+```
+- Computed on the corpus text, exactly what Jev reads. "Previous release" is the same company's previous
+  earnings release (prereg §9).
+- The daily signal is built by the Jev signal's own machinery (latest release in the hold window, on its LEAK-2
+  release row). A test checks it occupies exactly the Jev signal's rows.
+- **The LM lexicon is used on a research-use reading (ADR-9).** Its free license covers academic research only;
+  a commercial license is requested if a result is pursued. Therefore:
+  - the operator supplies the file in `data/lexicons/` (gitignored); the code never downloads it;
+  - the pin lives in `configs/atl_jev_baselines.yaml` (`lm_lexicon.sha256`, `null` until the file arrives). The
+    loader refuses if the pin is unset, the file is missing, or its sha256 differs (fail closed). P3 cannot pass
+    without its baseline.
+- 7 tests; 7/7 planted bugs caught.
 
-### 6. Evaluation — `sharpen.jev.evaluation` + `scripts/research/atl_jev_evaluate.py --leg {p1,p2,p3,p4}` (step 6)
+### 6. Evaluation — `sharpen.jev.evaluation` + `scripts/research/atl_jev_evaluate.py --leg {p1,p2,p3,screening}` (step 6, built; P4 deferred by ADR-11)
+
+- **Screening panel** (`sharpen.jev.panel`, `scripts/research/atl_jev_build_panel.py`), per ADR-8:
+  - cut at `screening_window[1]` before anything runs, then the project cleaner and a recorded OHLC bracketing;
+  - `active` = S&P 500 member (the audited as-of join) and priced; ADV excludes the current bar; current GICS
+    sectors, with an Unknown bucket;
+  - saved with the full trading calendar from 2007. Signals must get that calendar: with the 2012+ rows alone, a
+    late-2011 filing would land on the first 2012 row as if it were new.
+- **Legs:** each writes `results/atl_jev/phase3/<leg>.json` stamped with the panel hash, the scores manifest,
+  both gates hashes and the questionnaire.
+  - P2, P3 and `screening` refuse unless `p1.json` is complete on the same stamps.
+  - Every leg refuses unless the funnel gates hash to the frozen `519158fa1450`.
+  - P3 writes BLOCKED while the lexicon is unpinned.
+- 12 evaluation tests and 6 panel tests. P2 and P3 are each shown to pass a planted signal and fail noise.
+  7/7 planted bugs are caught in the evaluation code.
 
 | Leg | Computation | Reads | Writes |
 |---|---|---|---|
@@ -191,6 +251,10 @@ def build_registered_signals(phase1, filings, calendar, *, mode) -> list[JevFili
   2. Fuzzy name matching, which risks attaching another company's filings. That is a silent error, worse than a gap.
 - **Decision:** 1. Unmapped names get NaN signals and drop out of the cross-section. Coverage by year is reported
   beside the survivorship caveat the panel already carries.
+- **Measured (2026-09-23):**
+  - 98.9% of the panel's priced S&P 500 member-days in 2012–2024 map to a CIK (97.8% in 2012, 100% from 2022).
+    The price panel, not the map, is the binding limit: only 13 priced tickers are unmapped (e.g. ESRX, AET, TWX).
+  - One conflict: XOM. ExxonMobil moved to a new holding-company CIK in July 2026, so both CIKs are kept.
 
 #### ADR-5: B8 lockbox seam — deferred to Phase 5
 - **Status:** Proposed, deferred.
@@ -202,9 +266,11 @@ def build_registered_signals(phase1, filings, calendar, *, mode) -> list[JevFili
 - **Decision:** 1, built only if P4 passes. Building it now is effort a likely K3/K4 NO-GO would waste.
 
 #### ADR-6: Storage
-- **Status:** Accepted.
-- **Decision:** Parquet partitioned by acceptance year, with masked text zstd-compressed. The EDGAR document cache
-  (`json.gz`) and the SQLite answer cache are reused. Estimated ≤ 2 GB against ~13 GB free.
+- **Status:** Accepted; revised at step 3.
+- **Decision:** one zstd parquet shard per CIK under `data/atl_jev/corpus/<mode>/`, instead of year partitions. The
+  pull is resumable at company granularity, and a shard is only trusted with its stamp sidecar. The EDGAR document
+  cache (`json.gz`) and the SQLite answer cache are reused. Measured: about 17 KB per filing, so about 0.5 GB for the
+  screening corpus.
 
 #### ADR-7: Gates stamps hash LF-normalized bytes
 - **Status:** Accepted.
@@ -219,13 +285,80 @@ def build_registered_signals(phase1, filings, calendar, *, mode) -> list[JevFili
   (`cross_asset_loader._clean_wide`) with a manifest. No in-memory repair.
 - **Clean panel (P4 only):** prices through 2026-09-22 from Alpaca SIP daily bars, plus a refresh of PIT membership
   past 2026-06-02 (the file's last date).
+- **Built 2026-09-24** (`data/atl_jev/panels/screening.pkl` + manifest). 3,270 rows (2012-01-03 → 2024-12-31),
+  about 420 members per day. What the rebuild found in the cached fetch (`_pit_union_2007.pkl`):
+  - **It was never cleaned.** The script that fetched it skipped `_clean_wide`. The cleaner, built for intraday
+    futures, clamps daily high/low wicks beyond 5%: 7,656 highs and 7,604 lows in the screening rows (27,094
+    over 2007–2024). It changed 0 of 2,006,533 closes, so every close-to-close return is untouched. Afterwards no
+    OHLC violation remained and the bracketing had nothing to do.
+  - **Its metadata said `survivorship_free: True`.** The fetch dropped 270 delisted members it could not price, so
+    the flag was wrong; the funnel adds its UPPER BOUND caveat only when it is False. The screening panel sets it
+    False.
+  - **Its ADV included the current bar.** The screening panel uses the audited trailing ADV, which excludes it.
+  - 12 tickers are flagged for stale prints; 5 are members in the window (AMCR, COL, EP, HOT, SW). COL and HOT
+    have no CIK, so they never carry a signal.
+
+#### ADR-9: The Loughran–McDonald baseline and its license
+- **Status:** Accepted — the operator's decision, 2026-09-23.
+- **Context:** the pre-registered P3 baseline includes LM net tone. The license, verified from the raw pages on
+  2026-09-23, reads:
+  - dictionary page ([sraf.nd.edu](https://sraf.nd.edu/loughranmcdonald-master-dictionary/)): "free for use in
+    academic research … For commercial licenses, please contact us at loughranmcdonald@gmail.com";
+  - repository-wide ([SRAF](https://sraf.nd.edu/)): all software and data are supplied as-is, without warranty,
+    for non-commercial purposes only.
+
+  This workstream's research is aimed at trading for profit, so the free academic grant does not clearly cover it.
+- **Options:**
+  1. Ask the authors for a commercial license now. Keeps the pre-registration exactly as written.
+  2. Use LM now on a research-use reading, and request the license only if a result is worth pursuing. Also keeps
+     the pre-registration exactly as written.
+  3. Amend P3, with a written amendment in the prereg, to a license-clean tone baseline **at least as demanding**
+     as LM. There is no verified candidate:
+     - a general-purpose lexicon such as VADER would make P3 *easier* to pass, which is disqualifying;
+     - the two most-used FinBERT checkpoints (`ProsusAI/finbert`, `yiyanghkust/finbert-tone`) declare no license
+       on Hugging Face (checked 2026-09-23), so they are not clean either.
+  4. Keep only the self-implemented Lazy-Prices similarity baseline. Also an amendment, and a weaker P3.
+- **Decision:** option 2. It is the operator's call on the license risk; the pre-registration is unchanged.
+- **Consequences:**
+  - the operator downloads the March 2026 release (`Loughran-McDonald_MasterDictionary_1993-2025.csv`) from the
+    official page into `data/lexicons/`. That path is gitignored (`/data/`), so the file is never committed and
+    never reaches the public Sharpen repo. The code never downloads it.
+  - the version is fixed by name before any Jev score exists: `configs/atl_jev_baselines.yaml` names the March 2026
+    release and its file. Choosing a version after Jev scores exist would be a forking path. The sha256 pin, set when
+    the operator's file arrives, only verifies that the bytes are that release.
+  - **License trigger:** if P1–P4 pass and the operator decides to pursue the result, the commercial license is
+    requested before Stage 5 (forward lockbox) begins. Holding it is a precondition for the Tier-2 audit and for
+    any capital.
+
+#### ADR-10: The press release is exhibit 99.1 under any of its observed labels
+- **Status:** Accepted, step 3. Recorded in the prereg as §9.
+- **Context:** an exhibit census of 60 Item 2.02 filings (2012–2024) found 9 releases filed as `EX-99` or
+  `EX-99.01`; in the 2019 smoke build it was 22 of 36 (e.g. TXN, NOC, CMI, SO). A literal `EX-99.1` match would have
+  sent Jev the one-paragraph 8-K body instead.
+- **Decision:** the press release is the first of `EX-99.1`, `EX-99.01`, `EX-99`; the 8-K body is used only when none
+  exists. `doc_source` records which label was read, so remaining fallbacks can be audited on the full corpus.
+
+#### ADR-11: The screening decision rule, and P4 built only when needed
+- **Status:** Accepted, step 6. The rule is recorded in the prereg as §9, before any score existed.
+- **Context:** the prereg names P1–P3 and K3 ("no signal is `PROMISING` … or none clears P3") but not which signals
+  P2 and P3 run on, nor how P4 picks among several passers.
+- **Decision:**
+  - P2 and P3 run on every `PROMISING` signal. A signal passes screening only if it passes P1, P2 and P3; P2 is part
+    of the pass bar, so it cannot be skipped.
+  - K3 fires when no signal passes. P4 takes the top-ranked passer in the funnel's order.
+  - **P4 is built only after a signal passes screening.** It needs a clean-window panel (Alpaca SIP prices), a
+    membership refresh past 2026-06-02, and the clean corpus and scores. A likely K3 NO-GO would waste that work,
+    the same reasoning as ADR-5. Its contract (sentinel, one look, the funnel's own T1/T2) is unchanged.
+- **Consequences:** `atl_jev_evaluate.py` has legs p1, p2, p3 and `screening`. The `screening` leg writes the K3
+  verdict and names the P4 candidate.
 
 ## Dependency map
 
 | Module | Impact | Changes |
 |---|---|---|
 | `sharpen/jev/release.py` | new | step 1 |
-| `sharpen/jev/corpus.py`, `scoring.py`, `baselines.py`, `evaluation.py` | new | steps 3–6 |
+| `sharpen/jev/corpus.py` (+ `stamps.py`, ADR-7), `scoring.py`, `baselines.py`, `panel.py`, `evaluation.py` | new | steps 3–6 |
+| `sharpen/crucible/data/edgar_filings.py` | changed | a shared 11-minute pause on HTTP 429 (step 3) |
 | `sharpen/signals/library/jev_filings.py` | new | step 2 |
 | `sharpen/signals/*` (funnel), `configs/signal_eval.gates.yaml` | **read only** | none (CRU-1) |
 | `sharpen/crucible/lockbox/*` | none now | ADR-5 (Phase 5) |
@@ -252,7 +385,7 @@ def build_registered_signals(phase1, filings, calendar, *, mode) -> list[JevFili
 | Manifest contract | PASS | p4 consumes p1–p3 only when `status == "PASS"`. Every manifest records the git commit, `gates_sha` and questionnaire hash. |
 | Pre-flight validation | N/A | No run config. Loaders refuse unknown or missing keys (fail closed). |
 | HPO search space | N/A | Nothing is tuned. The design is pre-registered. |
-| Fail direction | PASS | Beyond-calendar → NaT; hash or version mismatch → refuse; a second P4 → refuse; missing lexicon → P3 refuses; unmapped CIK → NaN. |
+| Fail direction | PASS | Beyond-calendar → NaT; hash or version mismatch → refuse; a second P4 → refuse; missing or unpinned lexicon → P3 refuses; unmapped CIK → NaN. |
 | Information boundary | PASS | Jev sees the masked document only. The scorer's request body is built from `text` + `questionnaire` alone, with a tripwire test against price, return or verdict fields reaching it. |
 | Causality argument | PASS | ADR-2 plus the §1/§4 negative tests. |
 | Frozen-artifact respect | PASS | Funnel gates and `phase1` are unchanged. The questionnaire hash is bound by an existing test. |
@@ -263,10 +396,12 @@ Everything is additive. Each step is independently committable and tested:
 1. `release.py` + negative tests (A10).
 2. `jev_filings.py` signal construction + `build_registered_signals` + causality, parity and wiring tests, all on
    synthetic filings.
-3. CIK map + corpus builder, with a small live smoke test (a few names, 2019).
-4. Scorer with hash, version and firewall gates.
-5. Baselines, after the LM lexicon's terms are checked.
-6. Evaluation legs, plus DATA-CLEAN screening-panel rebuild (ADR-8).
+3. CIK map + corpus builder, with a small live smoke test (a few names, 2019). **Built:** 24 tests, 19/19 planted
+   bugs caught; smoke of 8 names in 2019 gave 39 in-scope filings, no failures, no surviving name, ticker or year.
+4. Scorer with hash, version and firewall gates. **Built:** 10 tests, 9/9 planted bugs caught; live smoke above.
+5. Baselines, with the operator-supplied LM file pinned by sha256 (ADR-9). **Built;** the pin waits for the file.
+6. Evaluation legs, plus DATA-CLEAN screening-panel rebuild (ADR-8). **Built:** p1, p2, p3 and the K3 decision, and
+   the screening panel; P4 is deferred (ADR-11).
 7. **Phase 3 run:** build and score the screening corpus, then p1 → p3. Phase 2 ends here.
 
 **Rollback:** revert any step's commit. Nothing downstream consumes a Phase 2 artifact until step 7.

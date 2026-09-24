@@ -1,0 +1,7 @@
+# ATL x Jev P3 baselines (docs/research/atl_jev_phase2_architecture.md §5, ADR-9). Not a gates file: no thresholds.
+lm_lexicon:
+  # Operator-supplied Loughran-McDonald Master Dictionary, March 2026 release. Academic-only license, used as
+  # research (ADR-9); gitignored, never downloaded by code. The version is fixed here before any Jev score exists.
+  path: data/lexicons/Loughran-McDonald_MasterDictionary_1993-2025.csv
+  release: "2026-03"
+  sha256: null                       # pinned from the operator's file at step 5; null refuses P3 (fail closed)
