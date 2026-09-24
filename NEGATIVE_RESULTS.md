@@ -15,8 +15,7 @@ R&D log are not published, and several
 early pre-registrations lived in internal notes that are not included. A row marked *not shipped*
 is recorded here from those notes and cannot be re-run from this repository as published.
 
-**Bugs are listed separately.** Three results were manufactured by defects rather than markets;
-see [docs/LEAKS_FOUND.md](docs/LEAKS_FOUND.md). The rows below are measured on the fixed code, with
+**Measured on corrected code.** The rows below are measured on the current, corrected code, with
 one exception flagged in its row (the risk-overlay lab).
 
 **The one survivor** is not in this file: cross-asset time-series momentum, net Sharpe 0.60 on the
@@ -30,7 +29,7 @@ built on it (TSMOM plus a betting-against-beta sleeve), which failed deflation a
 
 | Family | Closed | What killed it, mostly |
 |---|---|---|
-| [1. Directional RL and its rescues](#1-directional-rl-and-its-rescues) | 14 | No edge after removing leaks; rescues added nothing |
+| [1. Directional RL and its rescues](#1-directional-rl-and-its-rescues) | 14 | No edge out of sample; rescues added nothing |
 | [2. Options and volatility premium](#2-options-and-volatility-premium) | 7 | Data contamination, lucky subsamples, tail risk |
 | [3. Arbitrage, carry and market making](#3-arbitrage-carry-and-market-making) | 7 | Real gross structure that costs or execution cannot harvest |
 | [4. Equity cross-section and factors](#4-equity-cross-section-and-factors) | 12 | Survivorship, sector beta, arbitraged to cost |
@@ -53,17 +52,17 @@ features, plus every attempt to rescue them.
 
 | Strategy | Hypothesis | Method / kill criterion | Result | Evidence |
 |---|---|---|---|---|
-| SG-1-BTC (signal-gated SAC) | Volatility-gated swing trading on BTC has an edge | Cost-corrected walk-forward, 8 folds; ≥7/8 folds at PF ≥ 1.10 | **Leak-borne.** PF 1.689 → 1.016 once the look-ahead was fixed; 0/8 folds; every seed loses money | [strategy audit](docs/research/sg1_btc_strategy_audit_2026-05-29.md) · [LEAKS_FOUND §1](docs/LEAKS_FOUND.md) |
-| GMGP1-BTC clean canary | De-leaked SAC swing on BTC 15m is profitable | HPO → 4-fold WF → stress gates; net WF PF < 1.1 kills | Best-solo median PF **0.977**; all 20 solo PFs 0.834–0.997; worst DD −33%. Edge absent even before fees | [lifecycle audit](docs/research/gmgp1-btc_deep_lifecycle_audit_2026-06-03.md) · [reinvestigation](docs/research/gmgp1_btc_canary_reinvestigation_2026-06-09.md) · `reverify_gmgp1_btc_canary.py` |
-| GMGP1-BTC clean re-baseline | A fresh HPO on clean code finds what the canary missed | Protocol v2 HPO probe on de-leaked env | NO-GO: directional single-asset RL is unprofitable, not merely unproven | [runbook](docs/research/gmgp1_btc_clean_rebaseline_runbook_2026-07-19.md) |
-| GMGP1-Gold | The gold policy's edge survives the leak fix | De-leaked 4-fold WF, same config as the paper ensemble | Edge real but regime-dependent, decays to breakeven; 2/4 folds, uplift gate fails | *not shipped* |
-| GMGP1-XAUUSD regime gate | A regime detector can gate a leak-free price signal | Causal regime separation test | Detector backward-looking and never accuracy-validated; exact use failed 9/9 | [R0 regime spec](docs/research/r0_regime_spec_2026-06-02.md) · `r0_regime_separation.py` |
+| SG-1-BTC (signal-gated SAC) | Volatility-gated swing trading on BTC has an edge | Cost-corrected walk-forward, 8 folds; ≥7/8 folds at PF ≥ 1.10 | **NO-GO.** PF 1.016 on the corrected pipeline (an earlier 1.689 did not survive a data-timing fix); 0/8 folds; every seed loses money | [strategy audit](docs/research/sg1_btc_strategy_audit_2026-05-29.md) |
+| GMGP1-BTC clean canary | Corrected SAC swing on BTC 15m is profitable | HPO → 4-fold WF → stress gates; net WF PF < 1.1 kills | Best-solo median PF **0.977**; all 20 solo PFs 0.834–0.997; worst DD −33%. Edge absent even before fees | [lifecycle audit](docs/research/gmgp1-btc_deep_lifecycle_audit_2026-06-03.md) · [reinvestigation](docs/research/gmgp1_btc_canary_reinvestigation_2026-06-09.md) · `reverify_gmgp1_btc_canary.py` |
+| GMGP1-BTC clean re-baseline | A fresh HPO on clean code finds what the canary missed | Protocol v2 HPO probe on the corrected env | NO-GO: directional single-asset RL is unprofitable, not merely unproven | [runbook](docs/research/gmgp1_btc_clean_rebaseline_runbook_2026-07-19.md) |
+| GMGP1-Gold | The gold policy's edge survives the data-timing fix | Corrected 4-fold WF, same config as the paper ensemble | Edge real but regime-dependent, decays to breakeven; 2/4 folds, uplift gate fails | *not shipped* |
+| GMGP1-XAUUSD regime gate | A regime detector can gate a clean price signal | Causal regime separation test | Detector backward-looking and never accuracy-validated; exact use failed 9/9 | [R0 regime spec](docs/research/r0_regime_spec_2026-06-02.md) · `r0_regime_separation.py` |
 | GMGP1-SPX500 (long/short vs long-only) | Swing RL on the S&P 500 index adds skill | A/B across all protocol stages + WF multiseed | Both NO-GO. What survived was beta; an apparent regime effect disappeared under multiseeding | *not shipped* |
 | PPO-GAE vs SAC | The failure is SAC-specific | Same env, PPO with GAE | Same no-edge result: the failure is the signal, not the algorithm | [PPO-GAE screen](docs/research/ppo_ge_gmgp1_btc_screen_2026-06-19.md) · `ppo_ge_gmgp1_btc_screen.py` |
 | High-confidence reward | Rewarding only confident trades exposes a conditional edge | Step-0 conditional-alpha probe (CPU) | No directional signal to rescue. The one positive-IC signal, short-horizon reversal, fails even as a passive maker with rebate | `gmgp1_btc_conviction_probe.py` · `gmgp1_btc_meanrev_maker_probe.py` |
 | BTC loss-regime overlay | Avoiding loss regimes (vol, volume, weekend, hour, loss streaks) makes it profitable | Discovery / confirmation split | Loss is diffuse; the only OOS-stable slice is BTC beta and seasonality | `gmgp1_btc_loss_regime_discovery.py` · `…_confirm.py` |
-| Risk overlays on GMGP1 and SG-1 | Stops, take-profit, time stops, vol targeting or DD throttles rescue the P&L | 54 arms, each re-scored with the edge sign flipped | **0/54 reach PF ≥ 1.** Every helpful feature reverses when the sign flips; stops are cost-killed. The SG-1 trajectories it replays were recorded before the GATE-CAUSAL-01 fix; that leak biased them upward, so the NO-GO stands | `risk_overlay_lab.py` |
-| PRISM regime model | Regime features (L1) or regime sizing (L2) improve a gold policy | Gate test of both layers | Both layers fail their gates; a dormant daily→intraday look-ahead also found | [PRISM eval spec](docs/research/prism_regime_eval_spec_2026-06-18.md) |
+| Risk overlays on GMGP1 and SG-1 | Stops, take-profit, time stops, vol targeting or DD throttles rescue the P&L | 54 arms, each re-scored with the edge sign flipped | **0/54 reach PF ≥ 1.** Every helpful feature reverses when the sign flips; stops are cost-killed. The SG-1 trajectories it replays were recorded before the GATE-CAUSAL-01 fix; that bug biased them upward, so the NO-GO stands | `risk_overlay_lab.py` |
+| PRISM regime model | Regime features (L1) or regime sizing (L2) improve a gold policy | Gate test of both layers | Both layers fail their gates; a dormant daily→intraday data-timing bug also found | [PRISM eval spec](docs/research/prism_regime_eval_spec_2026-06-18.md) |
 | Sync-1H multi-asset crypto RL | Portfolio RL over 20 crypto perps at 1h | Pilot runs | Pilot v1 **−62.84%**, v2 **−34.30%**; workstream closed | *not shipped* |
 | AlphaSeek DQN ensemble | A crypto-contest DQN ensemble is tradeable | Fee audit of all 12 checkpoints | Median PF **0.07–0.27** at realistic fees vs 2.02 at contest fees; a v3 redesign scored PF 0.00 | [fee audit report](docs/alphaseek_fee_audit_report.md) |
 | BALLAST v1 (long-only S&P 500 RL) | RL managing a long-only S&P 500 core beats SPY | Free-data build, survivorship bound from index-exit cohort | The whole +0.104 margin over SPY is survivorship inflation (bound +0.237); OOS never opened | [design](docs/research/ballast_v1_design.md) · `ballast_g1b_inflation.py` |
