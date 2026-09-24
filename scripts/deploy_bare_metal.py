@@ -43,7 +43,14 @@ DEPLOY_EXCLUDES = [
     # of ~7MB and shipping 8 stale divergent copies of sharpen/scripts/configs to
     # the training box. Nothing on the remote ever reads them.
     '.claude',
+    # Secrets. Nothing on the remote reads them: the WandB key and the distributed-HPO DB URL
+    # are exported into the launch shell, and instances.json / .env are read only by the local
+    # launchers. Shipping them copied every API key, the GPUHub passwords and the Kalshi private
+    # key to each rented box. Name- and suffix-based matching: see SECRET_FILE_PREFIXES/SUFFIXES.
+    '.env', 'env.txt', 'instances.json', 'kalshi_private_key.pem',
 ]
+SECRET_FILE_PREFIXES = ('.env',)          # .env, .env.local, .env.bak, ...
+SECRET_FILE_SUFFIXES = ('.pem', '.key')   # private keys and certificates
 ROOT_DATA_EXCLUDE = ['data'] # Only exclude root data folder
 
 INSTANCES_FILE = PROJECT_ROOT / "instances.json"
@@ -155,7 +162,8 @@ def create_filtered_zip(source_dir, output_filename):
             for file in files:
                 if file.endswith((".pyc", ".pyo", ".zip", ".ds_store", ".pdf")):
                     continue  # .pdf: docs/textbooks are never a training input
-                if file in DEPLOY_EXCLUDES or file.startswith("hpo.db"):
+                if (file in DEPLOY_EXCLUDES or file.startswith("hpo.db")
+                        or file.startswith(SECRET_FILE_PREFIXES) or file.endswith(SECRET_FILE_SUFFIXES)):
                     continue  # Exclude specific files like hpo.db*
                 file_path = os.path.join(root, file)
                 arcname = os.path.relpath(file_path, source_dir)

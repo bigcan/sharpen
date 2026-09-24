@@ -58,7 +58,12 @@ DEPLOY_EXCLUDES = [
     "mlruns", "logs", "wandb", "results", "checkpoints", ".git", ".venv",
     "venv", "__pycache__", "market_data.parquet", "btc_lob_jan2023.parquet",
     "sharpen.egg-info", "finrl_pro_ds.egg-info", "hpo.db", "hpo.db-journal",
+    # Secrets: never read on the remote. Workers get DISTRIBUTED_HPO_DB_URL / WANDB_API_KEY via
+    # the exported launch environment, not from a shipped .env (see deploy_bare_metal.py).
+    ".env", "env.txt", "instances.json", "kalshi_private_key.pem",
 ]
+SECRET_FILE_PREFIXES = (".env",)          # .env, .env.local, .env.bak, ...
+SECRET_FILE_SUFFIXES = (".pem", ".key")   # private keys and certificates
 
 WANDB_ENTITY = "bigcan-chiwin-technology"
 WANDB_PROJECT = "FinRL-Pro-DS"
@@ -175,7 +180,8 @@ def create_filtered_zip(source_dir: Path, output_filename: str) -> str:
             for file in files:
                 if file.endswith((".pyc", ".pyo", ".zip", ".ds_store")):
                     continue
-                if file in DEPLOY_EXCLUDES or file.startswith("hpo.db"):
+                if (file in DEPLOY_EXCLUDES or file.startswith("hpo.db")
+                        or file.startswith(SECRET_FILE_PREFIXES) or file.endswith(SECRET_FILE_SUFFIXES)):
                     continue
                 file_path = os.path.join(root, file)
                 arcname = os.path.relpath(file_path, source_dir)

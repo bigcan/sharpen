@@ -43,7 +43,11 @@ DEPLOY_EXCLUDES = [
     "mlruns", "logs", "wandb", "results", "checkpoints", ".git", ".venv",
     "venv", "__pycache__", "market_data.parquet", "btc_lob_jan2023.parquet",
     "sharpen.egg-info", "finrl_pro_ds.egg-info", "hpo.db", "hpo.db-journal",
+    # Secrets: never read on the remote (see deploy_bare_metal.py DEPLOY_EXCLUDES).
+    ".env", "env.txt", "instances.json", "kalshi_private_key.pem",
 ]
+SECRET_FILE_PREFIXES = (".env",)          # .env, .env.local, .env.bak, ...
+SECRET_FILE_SUFFIXES = (".pem", ".key")   # private keys and certificates
 
 DEFAULT_IMAGE = "pytorch/pytorch:2.5.1-cuda12.4-cudnn9-devel"
 
@@ -191,7 +195,8 @@ def create_filtered_zip(source_dir: Path, output_filename: str) -> str:
             for file in files:
                 if file.endswith((".pyc", ".pyo", ".zip", ".ds_store")):
                     continue
-                if file in DEPLOY_EXCLUDES or file.startswith("hpo.db"):
+                if (file in DEPLOY_EXCLUDES or file.startswith("hpo.db")
+                        or file.startswith(SECRET_FILE_PREFIXES) or file.endswith(SECRET_FILE_SUFFIXES)):
                     continue
                 file_path = os.path.join(root, file)
                 arcname = os.path.relpath(file_path, source_dir)
