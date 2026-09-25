@@ -33,7 +33,8 @@ class SealedError(RuntimeError):
 
 
 def _sha256(path: Path) -> str:
-    return hashlib.sha256(path.read_bytes()).hexdigest()
+    """SHA-256 of the file with line endings normalised to LF (git's autocrlf rewrites them on checkout)."""
+    return hashlib.sha256(path.read_bytes().replace(b"\r\n", b"\n")).hexdigest()
 
 
 def prereg_status(gates_path: Path = GATES_PATH) -> tuple[bool, str]:

@@ -9,7 +9,6 @@ Usage: cd scripts && python -m research.finrlx_strategy.one_look
 from __future__ import annotations
 
 import datetime as dt
-import hashlib
 import json
 import logging
 import warnings
@@ -34,7 +33,7 @@ OUT = RESULTS / "one_look"
 
 
 def _sha(p: Path) -> str:
-    return hashlib.sha256(p.read_bytes()).hexdigest()
+    return seal._sha256(p)          # line-ending normalised, like the seal
 
 
 def fingerprint() -> dict:

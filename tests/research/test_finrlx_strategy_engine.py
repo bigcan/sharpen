@@ -216,3 +216,12 @@ def test_vectorised_fund_equals_reference_loop():
         b, kb = book._fund_reference(core, sleeve, lc, sc)
         assert ka == kb
         pd.testing.assert_series_equal(a, b, check_names=False, atol=1e-15, rtol=0)
+
+
+def test_prereg_hash_ignores_line_endings(tmp_path):
+    a, b = tmp_path / "a.md", tmp_path / "b.md"
+    a.write_bytes(b"rule: 1\nwindow: x\n")
+    b.write_bytes(b"rule: 1\r\nwindow: x\r\n")
+    assert seal._sha256(a) == seal._sha256(b)
+    b.write_bytes(b"rule: 2\r\nwindow: x\r\n")
+    assert seal._sha256(a) != seal._sha256(b)
