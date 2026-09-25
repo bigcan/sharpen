@@ -202,3 +202,17 @@ def test_guard_blocks_sealed_rows(tmp_path):
     with pytest.raises(seal.SealedError):
         seal.guard(s, purpose="test", gates_path=tmp_path / "missing.yaml")
     seal.guard(seal.dev_view(s), purpose="test", gates_path=tmp_path / "missing.yaml")
+
+
+def test_vectorised_fund_equals_reference_loop():
+    rng = np.random.default_rng(9)
+    names = ["SPY", "QQQ", "TLT", "GLD", "FXE", "DBC", "UUP"]
+    for _ in range(300):
+        core = pd.Series(0.0, index=names)
+        core["SPY"] = rng.uniform(0, 1)
+        sleeve = pd.Series(rng.normal(0, 0.6, len(names)), index=names)
+        lc, sc = 1.0, float(rng.choice([0.0, 0.5, 1.0]))
+        a, ka = book.fund(core, sleeve, lc, sc)
+        b, kb = book._fund_reference(core, sleeve, lc, sc)
+        assert ka == kb
+        pd.testing.assert_series_equal(a, b, check_names=False, atol=1e-15, rtol=0)

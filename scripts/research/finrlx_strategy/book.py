@@ -124,6 +124,19 @@ def fund(core: pd.Series, sleeve: pd.Series, long_cap: float, short_cap: float, 
     The core is never scaled: it is the benchmark exposure. The constraint is not monotone in k (a short SPY
     trend position offsets the long core), so k is found on a grid from 1 downward.
     """
+    ks = np.linspace(1.0, 0.0, grid + 1)
+    c, s = core.to_numpy(dtype=float), sleeve.reindex(core.index).fillna(0.0).to_numpy(dtype=float)
+    W = c[None, :] + ks[:, None] * s[None, :]
+    ok = (np.clip(W, 0, None).sum(axis=1) <= long_cap + 1e-12) & (-np.clip(W, None, 0).sum(axis=1) <= short_cap + 1e-12)
+    if not ok.any():
+        return core.copy(), 0.0
+    i = int(np.argmax(ok))            # first (largest) feasible k on the descending grid
+    return pd.Series(W[i], index=core.index), float(ks[i])
+
+
+def _fund_reference(core: pd.Series, sleeve: pd.Series, long_cap: float, short_cap: float,
+                    grid: int = 400) -> tuple[pd.Series, float]:
+    """Loop version of :func:`fund`, kept as the test oracle for the vectorised one."""
     for k in np.linspace(1.0, 0.0, grid + 1):
         w = core + k * sleeve
         if w.clip(lower=0).sum() <= long_cap + 1e-12 and (-w.clip(upper=0)).sum() <= short_cap + 1e-12:
