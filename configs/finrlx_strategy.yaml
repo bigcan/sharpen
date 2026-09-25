@@ -1,0 +1,49 @@
+# FinRL-X strategy mission (branch finrl-x-strategy): SPY core + implementable cross-asset trend sleeve.
+# Strategy definition and cost assumptions. Pass/fail thresholds live in finrlx_strategy.gates.yaml.
+workstream: finrlx-strategy
+
+data:
+  source: yfinance_etf_panel        # dev window: data/raw/cross_asset_panel/ohlcv_daily.parquet (total return)
+  frequency: daily
+  proxies: long_history             # sealed clean window: data/raw/long_history (see data_*.py manifests)
+
+windows:
+  dev_start: "2008-07-01"           # first month with every tranche live on the ETF panel (warm-up 320 bars)
+  dev_end: "2026-06-30"             # last Ken French RF date on disk
+  seal_end: "2005-12-31"            # everything on or before is the sealed clean window
+
+# Execution and account model (all of it reaches the P&L; see scripts/research/finrlx_strategy/pnl.py)
+execution:
+  lag_bars: 1                       # decide at close d, trade at close d+1
+  account: cash_funded_reg_t        # longs <= NAV (no margin loan); shorts collateralised by their proceeds
+
+costs:
+  default_cost_bps: 2.0             # one-way, liquid ETFs (project prior for liquid US large caps)
+  cost_bps: {SLV: 5.0, DBC: 5.0, USO: 5.0, DBA: 5.0, UUP: 5.0, FXE: 5.0, FXY: 5.0, FXB: 5.0, FXA: 5.0}
+  harsh_multiplier: 5.0             # stress: 10 bps on liquid, 25 bps on thin ETFs
+  default_borrow_bps_yr: 50.0
+  borrow_bps_yr: {SLV: 100.0, DBC: 100.0, USO: 100.0, DBA: 100.0, UUP: 100.0, FXE: 100.0, FXY: 100.0, FXB: 100.0, FXA: 100.0}
+  cash_spread_bps_yr: 15.0          # idle cash earns T-bill minus this (a T-bill ETF's fee)
+  short_rebate: 0.0                 # retail: no interest on short proceeds
+  # Proxies only (the pre-ETF clean window): each ETF's expense ratio, charged daily on the proxy return.
+  proxy_expense_bps_yr: {SPY: 9.45, QQQ: 20.0, IWM: 19.0, EFA: 35.0, EEM: 70.0, TLT: 15.0, IEF: 15.0, LQD: 14.0,
+                         GLD: 40.0, SLV: 50.0, DBC: 85.0, USO: 70.0, DBA: 85.0, UUP: 78.0, FXE: 40.0, FXY: 40.0,
+                         FXB: 40.0, FXA: 40.0}
+
+# Design grid evaluated on the DEV window only (every cell is a logged trial). Fixed across the grid:
+# core_weight 0.5, long_cap 1.0, 4 tranches spaced 5 trading days, cov_window 126, core_vol_ref 0.16.
+grid:
+  allocator: [linear, cov, class_rb]
+  sleeve_vol_target: [0.03, 0.06]
+  core_mode: [static, vol_managed]
+  short_cap: [0.0, 0.5]
+fixed:
+  core_weight: 0.5
+  long_cap: 1.0
+  n_tranches: 4
+  tranche_spacing: 5
+  cov_window: 126
+  core_vol_ref: 0.16
+selection:
+  metric: dev_alpha_t_monthly_nw    # H1 book = grid cell with the highest dev-window alpha t vs SPY
+  tie_break: lower_turnover
