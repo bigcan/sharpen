@@ -77,6 +77,9 @@ published Magnificent 7 beats every one of them.
 - The post-freeze window (1.21x vs QQQ 1.19x, 29 weeks) does not change this: it runs the same hindsight-chosen list
   forward for seven months and cannot separate the rotation logic from that list.
 
+**Correction to the pre-registration text** (left unedited above, since it is frozen): TSLA sat outside the pool
+because it joined the S&P 500 only on 2020-12-21, not merely because of its ~$50B size. The pool is unchanged.
+
 **Scope of the NO-GO:** the Rotation as designed, with any growth list chosen without hindsight. The real-assets group
 was left as published, and all arms share the 2018–2025 design window. Together with the reproduction (no costs in
 the P&L, stops not applied, Rolling Strategy not reproducible), nothing in FinRL-X's published results survives to
