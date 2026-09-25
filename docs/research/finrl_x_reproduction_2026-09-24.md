@@ -146,6 +146,10 @@ not a substitute for the Tier-2 lifecycle audit.
 
 ## Next (funnel, Adaptive Rotation only)
 
+**Update 2026-09-25:** item 2 ran pre-registered and returned HINDSIGHT — 0 of 35 growth groups drawn from 2017's 20
+largest tech/consumer names beat QQQ, so the Rotation is NO-GO and the items below are moot. See
+`finrl_x_hindsight_universe_2026-09-25.md`.
+
 1. Score at our own cost priors (2 bps for liquid large caps per the US-equity funnel; 10 / 25 bps standard / harsh
    single-name defaults in `sharpen/signals/costs.py`) and always report the break-even; at 62x turnover it sits at
    ~5 bps per side, so cost decides the sign against QQQ.
