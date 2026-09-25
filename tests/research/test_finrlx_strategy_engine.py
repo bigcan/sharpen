@@ -243,3 +243,10 @@ def test_prereg_hash_ignores_line_endings(tmp_path):
     assert seal._sha256(a) == seal._sha256(b)
     b.write_bytes(b"rule: 2\r\nwindow: x\r\n")
     assert seal._sha256(a) != seal._sha256(b)
+
+
+def test_lockbox_scores_only_days_after_registration():
+    from research.finrlx_strategy import lockbox
+    df = pd.DataFrame({"x": 1.0}, index=pd.bdate_range("2026-09-21", periods=10))
+    fwd = lockbox.forward_only(df)
+    assert fwd.index.min() > lockbox.REGISTERED and len(fwd) == 5          # 2026-09-28 .. 10-02

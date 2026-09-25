@@ -1,0 +1,12 @@
+{
+ "name": "parity_longonly_tc2",
+ "tc_bps": 2.0,
+ "n_days": 4527,
+ "start": "2008-07-01",
+ "end": "2026-06-30",
+ "final_ours": 4.56238301498378,
+ "final_finrlx": 4.562412585780152,
+ "max_abs_rel_nav_diff": 6.7033261129667565e-06,
+ "mean_abs_daily_ret_diff_bps": 0.00010292608090367746,
+ "ann_return_gap_bps": -0.0036079450772259027
+}

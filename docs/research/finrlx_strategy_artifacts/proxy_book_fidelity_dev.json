@@ -1,0 +1,168 @@
+{
+ "cell": "cov_sv03_static_sc0.5",
+ "provenance": {
+  "SPY": {
+   "source": "equity:SPY",
+   "first": "2006-01-03",
+   "n_ffilled": 0
+  },
+  "QQQ": {
+   "source": "equity:QQQ",
+   "first": "2006-01-03",
+   "n_ffilled": 0
+  },
+  "IWM": {
+   "source": "equity:IWM",
+   "first": "2006-01-03",
+   "n_ffilled": 5
+  },
+  "EFA": {
+   "source": "equity:EFA",
+   "first": "2006-01-03",
+   "n_ffilled": 5
+  },
+  "EEM": {
+   "source": "equity:EEM",
+   "first": "2006-01-03",
+   "n_ffilled": 0
+  },
+  "TLT": {
+   "source": "rates:TLT",
+   "first": "2006-01-02",
+   "n_ffilled": 1
+  },
+  "IEF": {
+   "source": "rates:IEF",
+   "first": "2006-01-02",
+   "n_ffilled": 1
+  },
+  "LQD": {
+   "source": "rates:LQD",
+   "first": "2006-01-02",
+   "n_ffilled": 5
+  },
+  "GLD": {
+   "source": "commodity:GLD",
+   "first": "2006-01-02",
+   "n_ffilled": 0
+  },
+  "SLV": {
+   "source": "commodity:SLV",
+   "first": "2006-01-02",
+   "n_ffilled": 0
+  },
+  "DBC": {
+   "source": "commodity:DBC",
+   "first": "2006-01-02",
+   "n_ffilled": 5
+  },
+  "USO": {
+   "source": "commodity:USO",
+   "first": "2006-01-02",
+   "n_ffilled": 5
+  },
+  "DBA": {
+   "source": null,
+   "first": null
+  },
+  "UUP": {
+   "source": "fx:UUP",
+   "first": "2006-01-02",
+   "n_ffilled": 3
+  },
+  "FXE": {
+   "source": "fx:FXE",
+   "first": "2006-01-02",
+   "n_ffilled": 3
+  },
+  "FXY": {
+   "source": "fx:FXY",
+   "first": "2006-01-02",
+   "n_ffilled": 3
+  },
+  "FXB": {
+   "source": "fx:FXB",
+   "first": "2006-01-02",
+   "n_ffilled": 3
+  },
+  "FXA": {
+   "source": "fx:FXA",
+   "first": "2006-01-02",
+   "n_ffilled": 3
+  },
+  "CASH": {
+   "source": "rates:CASH"
+  }
+ },
+ "cases": {
+  "no_lqd_dba_2008_2024": {
+   "window": [
+    "2008-07-01",
+    "2024-03-28"
+   ],
+   "dropped": [
+    "LQD",
+    "DBA"
+   ],
+   "books": {
+    "proxy": {
+     "sharpe": 0.6373172896301315,
+     "sharpe_spy": 0.5851959129639951,
+     "alpha_ann": 0.011886213492057965,
+     "t_alpha": 1.2400390941840957,
+     "beta": 0.48482914631111523,
+     "vol": 0.10695425550015733,
+     "gross": 1.0014460581864246
+    },
+    "etf": {
+     "sharpe": 0.6638503640902479,
+     "sharpe_spy": 0.5943780488235192,
+     "alpha_ann": 0.012762201528376003,
+     "t_alpha": 1.426703418401227,
+     "beta": 0.49317026828461136,
+     "vol": 0.10622745502944606,
+     "gross": 0.9924332522233165
+    }
+   },
+   "corr_daily": 0.9872040591126172,
+   "corr_weekly": 0.995133888932988,
+   "corr_monthly": 0.9972777636049565,
+   "te_ann": 0.017067215650551547,
+   "sleeve_corr_monthly": 0.9824719417153656
+  },
+  "with_lqd_2008_2016": {
+   "window": [
+    "2008-07-01",
+    "2016-09-30"
+   ],
+   "dropped": [
+    "DBA"
+   ],
+   "books": {
+    "proxy": {
+     "sharpe": 0.6413309814735066,
+     "sharpe_spy": 0.48849943757787817,
+     "alpha_ann": 0.021840000794703662,
+     "t_alpha": 1.8396915033769574,
+     "beta": 0.4755208543165267,
+     "vol": 0.10846667054942594,
+     "gross": 0.9839171491143089
+    },
+    "etf": {
+     "sharpe": 0.6648135107781651,
+     "sharpe_spy": 0.49399696342822064,
+     "alpha_ann": 0.022239167379441357,
+     "t_alpha": 1.912449391054251,
+     "beta": 0.48640915834926224,
+     "vol": 0.10726528303189375,
+     "gross": 0.9816856148205378
+    }
+   },
+   "corr_daily": 0.9841028806162269,
+   "corr_weekly": 0.9939007950032581,
+   "corr_monthly": 0.9969855622907714,
+   "te_ann": 0.01927070366640681,
+   "sleeve_corr_monthly": 0.9792465807776621
+  }
+ }
+}

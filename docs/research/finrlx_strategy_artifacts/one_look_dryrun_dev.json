@@ -1,0 +1,726 @@
+{
+ "window": [
+  "2008-07-01",
+  "2024-03-28"
+ ],
+ "provenance": {
+  "SPY": {
+   "source": "equity:SPY",
+   "first": "2006-01-03",
+   "n_ffilled": 0
+  },
+  "QQQ": {
+   "source": "equity:QQQ",
+   "first": "2006-01-03",
+   "n_ffilled": 0
+  },
+  "IWM": {
+   "source": "equity:IWM",
+   "first": "2006-01-03",
+   "n_ffilled": 5
+  },
+  "EFA": {
+   "source": "equity:EFA",
+   "first": "2006-01-03",
+   "n_ffilled": 5
+  },
+  "EEM": {
+   "source": "equity:EEM",
+   "first": "2006-01-03",
+   "n_ffilled": 0
+  },
+  "TLT": {
+   "source": "rates:TLT",
+   "first": "2006-01-02",
+   "n_ffilled": 1
+  },
+  "IEF": {
+   "source": "rates:IEF",
+   "first": "2006-01-02",
+   "n_ffilled": 1
+  },
+  "LQD": {
+   "source": "rates:LQD",
+   "first": "2006-01-02",
+   "n_ffilled": 5
+  },
+  "GLD": {
+   "source": "commodity:GLD",
+   "first": "2006-01-02",
+   "n_ffilled": 0
+  },
+  "SLV": {
+   "source": "commodity:SLV",
+   "first": "2006-01-02",
+   "n_ffilled": 0
+  },
+  "DBC": {
+   "source": "commodity:DBC",
+   "first": "2006-01-02",
+   "n_ffilled": 5
+  },
+  "USO": {
+   "source": "commodity:USO",
+   "first": "2006-01-02",
+   "n_ffilled": 5
+  },
+  "DBA": {
+   "source": null,
+   "first": null
+  },
+  "UUP": {
+   "source": "fx:UUP",
+   "first": "2006-01-02",
+   "n_ffilled": 3
+  },
+  "FXE": {
+   "source": "fx:FXE",
+   "first": "2006-01-02",
+   "n_ffilled": 3
+  },
+  "FXY": {
+   "source": "fx:FXY",
+   "first": "2006-01-02",
+   "n_ffilled": 3
+  },
+  "FXB": {
+   "source": "fx:FXB",
+   "first": "2006-01-02",
+   "n_ffilled": 3
+  },
+  "FXA": {
+   "source": "fx:FXA",
+   "first": "2006-01-02",
+   "n_ffilled": 3
+  },
+  "CASH": {
+   "source": "rates:CASH"
+  }
+ },
+ "n_trials": 84,
+ "h1": {
+  "cell": "cov_sv03_static_sc0.5",
+  "money": {
+   "sharpe": 0.6548355216316865,
+   "cagr": 0.07591931121466433,
+   "vol": 0.10535148600142952,
+   "mdd": -0.23116402850806272,
+   "sortino": 0.9127128156269653,
+   "mean_gross": 1.0414758489856206,
+   "mean_net": 0.6638647745147878,
+   "mean_longs": 0.8526703117502041,
+   "mean_shorts": 0.1888055372354164,
+   "turnover_ann": 3.9398621389764235,
+   "cost_ann": 0.0013838980847251333,
+   "borrow_ann": 0.0016011741308042688,
+   "years": 15.726190476190476
+  },
+  "alpha": {
+   "alpha": 0.001110943453822549,
+   "beta": 0.48008440466534236,
+   "t_alpha": 1.4748087264136633,
+   "t_beta": 20.824140054438402,
+   "resid_sd": 0.009034054035038088,
+   "n": 189,
+   "lags": 4,
+   "alpha_ann": 0.013331321445870589,
+   "ir_resid": 0.42599047977657817,
+   "t_alpha_daily": 1.2327069882033217
+  },
+  "sharpe_spy": 0.5851959129639951,
+  "money_spy": {
+   "sharpe": 0.5851959129639951,
+   "cagr": 0.11419916896558457,
+   "vol": 0.20370498006238819,
+   "mdd": -0.47349804510113647,
+   "sortino": 0.8196920244642809,
+   "mean_gross": 1.0,
+   "mean_net": 1.0,
+   "mean_longs": 1.0,
+   "mean_shorts": 0.0,
+   "turnover_ann": 0.06359113100418241,
+   "cost_ann": 1.2718226200836483e-05,
+   "borrow_ann": 0.0,
+   "years": 15.726190476190476
+  },
+  "sharpe_frictionless": 0.6678460985274595,
+  "sharpe_harsh": 0.6027784870407344,
+  "breakeven_cost_multiplier_sr": 6.350701719522476,
+  "breakeven_cost_multiplier_alpha": 10.785775572061539,
+  "battery_book": {
+   "dsr": {
+    "dsr": 0.9913522529724719,
+    "sr_star": 0.0029767893117322412,
+    "sr_star_ann": 0.04725506534567183,
+    "n_trials": 84
+   },
+   "psr": 0.994848637417127,
+   "min_trl_years": 6.466823675380572,
+   "block_bootstrap": {
+    "ci_low": 0.2285766418567084,
+    "ci_high": 1.1411853973715955,
+    "p_sharpe_lt_0": 0.0005,
+    "p_sharpe_lt_0_5": 0.2495,
+    "block": 21,
+    "n_boot": 2000
+   }
+  },
+  "battery_alpha": {
+   "dsr": {
+    "dsr": 0.6078761133839892,
+    "sr_star": 0.01989536634636757,
+    "sr_star_ann": 0.315829149570074,
+    "n_trials": 84
+   },
+   "psr": 0.9360187854501603,
+   "min_trl_years": 18.3622857671053,
+   "block_bootstrap": {
+    "ci_low": -0.10840267829511242,
+    "ci_high": 0.8839251924624804,
+    "p_sharpe_lt_0": 0.0625,
+    "p_sharpe_lt_0_5": 0.675,
+    "block": 21,
+    "n_boot": 2000
+   }
+  },
+  "pbo_grid": {
+   "pbo": 0.37614607614607615,
+   "n_combos": 12870,
+   "n_strategies": 24,
+   "logit_mean": 0.0956783971702898
+  },
+  "bootstrap_vs_spy": {
+   "sr_a_ci": [
+    0.2260108824827252,
+    1.1355644212140814
+   ],
+   "sr_b_ci": [
+    0.15717284921313804,
+    1.0601022384776582
+   ],
+   "dsr_ci": [
+    -0.0790809540863466,
+    0.22329228380412258
+   ],
+   "p_dsr_le_0": 0.1854,
+   "block": 21,
+   "n_boot": 5000
+  },
+  "subperiods": [
+   {
+    "start": "2008-07-01",
+    "end": "2012-06-04",
+    "alpha_ann": 0.019474886443407936,
+    "t": 1.4074313877460487,
+    "sharpe": 0.31186173430828784,
+    "sharpe_spy": 0.205213116414862
+   },
+   {
+    "start": "2012-06-05",
+    "end": "2016-05-12",
+    "alpha_ann": 0.018832131990257243,
+    "t": 0.9075838883807809,
+    "sharpe": 1.213963253011802,
+    "sharpe_spy": 1.130685543590237
+   },
+   {
+    "start": "2016-05-13",
+    "end": "2020-04-21",
+    "alpha_ann": -0.006594038734372601,
+    "t": -0.5939436065911023,
+    "sharpe": 0.3873165715774512,
+    "sharpe_spy": 0.4898318514535484
+   },
+   {
+    "start": "2020-04-22",
+    "end": "2024-03-28",
+    "alpha_ann": 0.018117748994189532,
+    "t": 0.9011082877389021,
+    "sharpe": 1.085660814256993,
+    "sharpe_spy": 0.9881821373486899
+   }
+  ],
+  "ts_ic": {
+   "pooled_spearman": 0.012490731639228404,
+   "n_asset_months": 3120,
+   "sign_hit_rate": 0.5246794871794872,
+   "t_naive": 0.6975250594003919
+  },
+  "p_one_sided_alpha": 0.07013198723430782,
+  "legs": {
+   "sharpe_exceeds_spy": true,
+   "alpha_t": false,
+   "alpha_dsr": false,
+   "book_dsr": true,
+   "psr": true,
+   "pbo": true,
+   "cost_gap": true,
+   "subperiods": true
+  },
+  "pass": false
+ },
+ "h2": {
+  "cell": "cov_sv03_static_sc0.5",
+  "baseline": "linear_sv03_static_sc0.5",
+  "sharpe": 0.6548355216316865,
+  "sharpe_baseline": 0.6278940852513957,
+  "uplift": 0.026941436380290784,
+  "p_uplift_le_0": 0.243,
+  "ci": [
+   -0.04922609482912514,
+   0.10544253851940234
+  ],
+  "pass": false,
+  "tested": false,
+  "level": 0.025
+ },
+ "h3": {
+  "cell": "cov_sv03_vol_managed_sc0.5",
+  "baseline": "cov_sv03_static_sc0.5",
+  "sharpe": 0.655142071549671,
+  "sharpe_baseline": 0.6548355216316865,
+  "uplift": 0.00030654991798451103,
+  "p_uplift_le_0": 0.4982,
+  "ci": [
+   -0.1520456429443503,
+   0.18765204938306942
+  ],
+  "pass": false,
+  "tested": false,
+  "level": 0.025
+ },
+ "grid": {
+  "linear_sv03_static_sc0": {
+   "sharpe": 0.6096,
+   "sharpe_spy": 0.5852,
+   "alpha_ann": 0.0026,
+   "t_alpha": 0.312,
+   "t_alpha_daily": 0.645,
+   "beta": 0.583,
+   "ir_resid": 0.082,
+   "cagr": 0.0752,
+   "vol": 0.1136,
+   "mdd": -0.2906,
+   "mean_gross": 0.99,
+   "mean_net": 0.99,
+   "turnover_ann": 3.05,
+   "cost_ann": 0.00103,
+   "borrow_ann": 0.0,
+   "years": 15.73
+  },
+  "linear_sv03_static_sc0.5": {
+   "sharpe": 0.6279,
+   "sharpe_spy": 0.5852,
+   "alpha_ann": 0.01331,
+   "t_alpha": 1.128,
+   "t_alpha_daily": 0.878,
+   "beta": 0.456,
+   "ir_resid": 0.308,
+   "cagr": 0.0729,
+   "vol": 0.1053,
+   "mdd": -0.2202,
+   "mean_gross": 1.17,
+   "mean_net": 0.677,
+   "turnover_ann": 4.91,
+   "cost_ann": 0.00173,
+   "borrow_ann": 0.00206,
+   "years": 15.73
+  },
+  "linear_sv03_vol_managed_sc0": {
+   "sharpe": 0.623,
+   "sharpe_spy": 0.5852,
+   "alpha_ann": 0.00546,
+   "t_alpha": 0.418,
+   "t_alpha_daily": 0.93,
+   "beta": 0.473,
+   "ir_resid": 0.126,
+   "cagr": 0.0663,
+   "vol": 0.0946,
+   "mdd": -0.219,
+   "mean_gross": 0.954,
+   "mean_net": 0.954,
+   "turnover_ann": 3.38,
+   "cost_ann": 0.00113,
+   "borrow_ann": 0.0,
+   "years": 15.73
+  },
+  "linear_sv03_vol_managed_sc0.5": {
+   "sharpe": 0.6128,
+   "sharpe_spy": 0.5852,
+   "alpha_ann": 0.0154,
+   "t_alpha": 0.938,
+   "t_alpha_daily": 1.027,
+   "beta": 0.344,
+   "ir_resid": 0.284,
+   "cagr": 0.0624,
+   "vol": 0.0894,
+   "mdd": -0.1882,
+   "mean_gross": 1.127,
+   "mean_net": 0.628,
+   "turnover_ann": 5.16,
+   "cost_ann": 0.00181,
+   "borrow_ann": 0.00209,
+   "years": 15.73
+  },
+  "linear_sv06_static_sc0": {
+   "sharpe": 0.6117,
+   "sharpe_spy": 0.5852,
+   "alpha_ann": 0.00313,
+   "t_alpha": 0.353,
+   "t_alpha_daily": 0.673,
+   "beta": 0.578,
+   "ir_resid": 0.094,
+   "cagr": 0.0751,
+   "vol": 0.113,
+   "mdd": -0.2853,
+   "mean_gross": 0.999,
+   "mean_net": 0.999,
+   "turnover_ann": 3.12,
+   "cost_ann": 0.00106,
+   "borrow_ann": 0.0,
+   "years": 15.73
+  },
+  "linear_sv06_static_sc0.5": {
+   "sharpe": 0.6172,
+   "sharpe_spy": 0.5852,
+   "alpha_ann": 0.01415,
+   "t_alpha": 0.99,
+   "t_alpha_daily": 0.833,
+   "beta": 0.426,
+   "ir_resid": 0.291,
+   "cagr": 0.0702,
+   "vol": 0.1028,
+   "mdd": -0.1991,
+   "mean_gross": 1.197,
+   "mean_net": 0.677,
+   "turnover_ann": 5.18,
+   "cost_ann": 0.00183,
+   "borrow_ann": 0.00217,
+   "years": 15.73
+  },
+  "linear_sv06_vol_managed_sc0": {
+   "sharpe": 0.63,
+   "sharpe_spy": 0.5852,
+   "alpha_ann": 0.00691,
+   "t_alpha": 0.479,
+   "t_alpha_daily": 1.036,
+   "beta": 0.473,
+   "ir_resid": 0.148,
+   "cagr": 0.0676,
+   "vol": 0.0957,
+   "mdd": -0.2188,
+   "mean_gross": 0.996,
+   "mean_net": 0.996,
+   "turnover_ann": 3.65,
+   "cost_ann": 0.00123,
+   "borrow_ann": 0.0,
+   "years": 15.73
+  },
+  "linear_sv06_vol_managed_sc0.5": {
+   "sharpe": 0.5658,
+   "sharpe_spy": 0.5852,
+   "alpha_ann": 0.01582,
+   "t_alpha": 0.817,
+   "t_alpha_daily": 0.938,
+   "beta": 0.312,
+   "ir_resid": 0.256,
+   "cagr": 0.059,
+   "vol": 0.0914,
+   "mdd": -0.1881,
+   "mean_gross": 1.173,
+   "mean_net": 0.636,
+   "turnover_ann": 5.64,
+   "cost_ann": 0.00198,
+   "borrow_ann": 0.00224,
+   "years": 15.73
+  },
+  "cov_sv03_static_sc0": {
+   "sharpe": 0.6195,
+   "sharpe_spy": 0.5852,
+   "alpha_ann": 0.00395,
+   "t_alpha": 0.534,
+   "t_alpha_daily": 0.793,
+   "beta": 0.567,
+   "ir_resid": 0.147,
+   "cagr": 0.0752,
+   "vol": 0.1113,
+   "mdd": -0.2741,
+   "mean_gross": 0.941,
+   "mean_net": 0.941,
+   "turnover_ann": 2.74,
+   "cost_ann": 0.00093,
+   "borrow_ann": 0.0,
+   "years": 15.73
+  },
+  "cov_sv03_static_sc0.5": {
+   "sharpe": 0.6548,
+   "sharpe_spy": 0.5852,
+   "alpha_ann": 0.01333,
+   "t_alpha": 1.475,
+   "t_alpha_daily": 1.233,
+   "beta": 0.48,
+   "ir_resid": 0.426,
+   "cagr": 0.0759,
+   "vol": 0.1054,
+   "mdd": -0.2312,
+   "mean_gross": 1.041,
+   "mean_net": 0.664,
+   "turnover_ann": 3.94,
+   "cost_ann": 0.00138,
+   "borrow_ann": 0.0016,
+   "years": 15.73
+  },
+  "cov_sv03_vol_managed_sc0": {
+   "sharpe": 0.6335,
+   "sharpe_spy": 0.5852,
+   "alpha_ann": 0.00642,
+   "t_alpha": 0.514,
+   "t_alpha_daily": 0.977,
+   "beta": 0.455,
+   "ir_resid": 0.167,
+   "cagr": 0.0656,
+   "vol": 0.0915,
+   "mdd": -0.2197,
+   "mean_gross": 0.893,
+   "mean_net": 0.893,
+   "turnover_ann": 2.98,
+   "cost_ann": 0.00099,
+   "borrow_ann": 0.0,
+   "years": 15.73
+  },
+  "cov_sv03_vol_managed_sc0.5": {
+   "sharpe": 0.6551,
+   "sharpe_spy": 0.5852,
+   "alpha_ann": 0.0145,
+   "t_alpha": 1.039,
+   "t_alpha_daily": 1.181,
+   "beta": 0.367,
+   "ir_resid": 0.342,
+   "cagr": 0.0646,
+   "vol": 0.0864,
+   "mdd": -0.1944,
+   "mean_gross": 0.987,
+   "mean_net": 0.609,
+   "turnover_ann": 4.12,
+   "cost_ann": 0.00143,
+   "borrow_ann": 0.00161,
+   "years": 15.73
+  },
+  "cov_sv06_static_sc0": {
+   "sharpe": 0.6139,
+   "sharpe_spy": 0.5852,
+   "alpha_ann": 0.00338,
+   "t_alpha": 0.382,
+   "t_alpha_daily": 0.702,
+   "beta": 0.578,
+   "ir_resid": 0.102,
+   "cagr": 0.0754,
+   "vol": 0.113,
+   "mdd": -0.2854,
+   "mean_gross": 0.999,
+   "mean_net": 0.999,
+   "turnover_ann": 3.13,
+   "cost_ann": 0.00107,
+   "borrow_ann": 0.0,
+   "years": 15.73
+  },
+  "cov_sv06_static_sc0.5": {
+   "sharpe": 0.6412,
+   "sharpe_spy": 0.5852,
+   "alpha_ann": 0.01508,
+   "t_alpha": 1.193,
+   "t_alpha_daily": 0.99,
+   "beta": 0.45,
+   "ir_resid": 0.341,
+   "cagr": 0.0741,
+   "vol": 0.1049,
+   "mdd": -0.2059,
+   "mean_gross": 1.175,
+   "mean_net": 0.677,
+   "turnover_ann": 5.01,
+   "cost_ann": 0.00177,
+   "borrow_ann": 0.00208,
+   "years": 15.73
+  },
+  "cov_sv06_vol_managed_sc0": {
+   "sharpe": 0.6313,
+   "sharpe_spy": 0.5852,
+   "alpha_ann": 0.00702,
+   "t_alpha": 0.488,
+   "t_alpha_daily": 1.021,
+   "beta": 0.469,
+   "ir_resid": 0.152,
+   "cagr": 0.0673,
+   "vol": 0.0949,
+   "mdd": -0.2187,
+   "mean_gross": 0.985,
+   "mean_net": 0.985,
+   "turnover_ann": 3.6,
+   "cost_ann": 0.00122,
+   "borrow_ann": 0.0,
+   "years": 15.73
+  },
+  "cov_sv06_vol_managed_sc0.5": {
+   "sharpe": 0.6237,
+   "sharpe_spy": 0.5852,
+   "alpha_ann": 0.01707,
+   "t_alpha": 0.974,
+   "t_alpha_daily": 1.101,
+   "beta": 0.338,
+   "ir_resid": 0.308,
+   "cagr": 0.0635,
+   "vol": 0.0895,
+   "mdd": -0.188,
+   "mean_gross": 1.138,
+   "mean_net": 0.631,
+   "turnover_ann": 5.37,
+   "cost_ann": 0.00189,
+   "borrow_ann": 0.00212,
+   "years": 15.73
+  },
+  "class_rb_sv03_static_sc0": {
+   "sharpe": 0.6007,
+   "sharpe_spy": 0.5852,
+   "alpha_ann": 0.00277,
+   "t_alpha": 0.442,
+   "t_alpha_daily": 0.526,
+   "beta": 0.535,
+   "ir_resid": 0.113,
+   "cagr": 0.0706,
+   "vol": 0.1069,
+   "mdd": -0.2722,
+   "mean_gross": 0.969,
+   "mean_net": 0.969,
+   "turnover_ann": 3.2,
+   "cost_ann": 0.00117,
+   "borrow_ann": 0.0,
+   "years": 15.73
+  },
+  "class_rb_sv03_static_sc0.5": {
+   "sharpe": 0.6381,
+   "sharpe_spy": 0.5852,
+   "alpha_ann": 0.01177,
+   "t_alpha": 1.344,
+   "t_alpha_daily": 1.043,
+   "beta": 0.462,
+   "ir_resid": 0.392,
+   "cagr": 0.0724,
+   "vol": 0.1025,
+   "mdd": -0.2359,
+   "mean_gross": 1.095,
+   "mean_net": 0.645,
+   "turnover_ann": 5.15,
+   "cost_ann": 0.00172,
+   "borrow_ann": 0.00177,
+   "years": 15.73
+  },
+  "class_rb_sv03_vol_managed_sc0": {
+   "sharpe": 0.6255,
+   "sharpe_spy": 0.5852,
+   "alpha_ann": 0.00554,
+   "t_alpha": 0.545,
+   "t_alpha_daily": 0.939,
+   "beta": 0.426,
+   "ir_resid": 0.165,
+   "cagr": 0.0617,
+   "vol": 0.0862,
+   "mdd": -0.1819,
+   "mean_gross": 0.932,
+   "mean_net": 0.932,
+   "turnover_ann": 3.47,
+   "cost_ann": 0.00125,
+   "borrow_ann": 0.0,
+   "years": 15.73
+  },
+  "class_rb_sv03_vol_managed_sc0.5": {
+   "sharpe": 0.6464,
+   "sharpe_spy": 0.5852,
+   "alpha_ann": 0.01324,
+   "t_alpha": 1.074,
+   "t_alpha_daily": 1.145,
+   "beta": 0.349,
+   "ir_resid": 0.341,
+   "cagr": 0.0614,
+   "vol": 0.0824,
+   "mdd": -0.1666,
+   "mean_gross": 1.043,
+   "mean_net": 0.591,
+   "turnover_ann": 5.33,
+   "cost_ann": 0.00176,
+   "borrow_ann": 0.00178,
+   "years": 15.73
+  },
+  "class_rb_sv06_static_sc0": {
+   "sharpe": 0.5988,
+   "sharpe_spy": 0.5852,
+   "alpha_ann": 0.00258,
+   "t_alpha": 0.356,
+   "t_alpha_daily": 0.497,
+   "beta": 0.536,
+   "ir_resid": 0.091,
+   "cagr": 0.0704,
+   "vol": 0.1069,
+   "mdd": -0.2792,
+   "mean_gross": 0.999,
+   "mean_net": 0.999,
+   "turnover_ann": 3.42,
+   "cost_ann": 0.00126,
+   "borrow_ann": 0.0,
+   "years": 15.73
+  },
+  "class_rb_sv06_static_sc0.5": {
+   "sharpe": 0.6223,
+   "sharpe_spy": 0.5852,
+   "alpha_ann": 0.01254,
+   "t_alpha": 1.103,
+   "t_alpha_daily": 0.811,
+   "beta": 0.431,
+   "ir_resid": 0.318,
+   "cagr": 0.0696,
+   "vol": 0.1006,
+   "mdd": -0.2107,
+   "mean_gross": 1.2,
+   "mean_net": 0.645,
+   "turnover_ann": 6.05,
+   "cost_ann": 0.00203,
+   "borrow_ann": 0.00217,
+   "years": 15.73
+  },
+  "class_rb_sv06_vol_managed_sc0": {
+   "sharpe": 0.6282,
+   "sharpe_spy": 0.5852,
+   "alpha_ann": 0.00657,
+   "t_alpha": 0.551,
+   "t_alpha_daily": 0.994,
+   "beta": 0.427,
+   "ir_resid": 0.166,
+   "cagr": 0.0628,
+   "vol": 0.0875,
+   "mdd": -0.1817,
+   "mean_gross": 0.99,
+   "mean_net": 0.99,
+   "turnover_ann": 3.92,
+   "cost_ann": 0.00143,
+   "borrow_ann": 0.0,
+   "years": 15.73
+  },
+  "class_rb_sv06_vol_managed_sc0.5": {
+   "sharpe": 0.6129,
+   "sharpe_spy": 0.5852,
+   "alpha_ann": 0.01459,
+   "t_alpha": 0.937,
+   "t_alpha_daily": 1.018,
+   "beta": 0.32,
+   "ir_resid": 0.298,
+   "cagr": 0.0593,
+   "vol": 0.0838,
+   "mdd": -0.1645,
+   "mean_gross": 1.169,
+   "mean_net": 0.601,
+   "turnover_ann": 6.43,
+   "cost_ann": 0.00214,
+   "borrow_ann": 0.00221,
+   "years": 15.73
+  }
+ }
+}
