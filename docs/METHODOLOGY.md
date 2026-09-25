@@ -53,8 +53,8 @@ parameter.
 
 ## 3. Leakage invariants
 
-Two invariants cover the defects that manufactured this project's worst false results
-([LEAKS_FOUND.md](LEAKS_FOUND.md)).
+Two invariants cover the defects that manufactured this project's worst false results. Both
+defects were fixed, and the results in this repository are measured on the corrected code.
 
 **`LEAK-1`: normalization statistics are fit per split.** Running z-scores, EMA statistics and
 scalers reset at every train / validation / test boundary. Nothing learned on test data reaches
@@ -117,8 +117,8 @@ construction.
 Confidence intervals use a **circular block bootstrap** (`block_bootstrap_sharpe_ci`), because
 overlapping and autocorrelated returns inflate a naive t-statistic. Read the interval, not the t.
 Since `crucible-v14.0` the funnel's IC t-statistic and deflated-Sharpe observation count also use a
-Newey-West effective count when forward-return labels overlap (see
-[LEAKS_FOUND](LEAKS_FOUND.md#found-in-the-pre-release-audit-crucible-v140)).
+Newey-West effective count when forward-return labels overlap; results are measured on the
+corrected code.
 
 ### Power, before anything else
 
@@ -196,8 +196,8 @@ The decision contract, in execution order, is §12 of the
   `paper-deploy`. Each stage is its own tracked run that writes a manifest, and a downstream stage names
   the upstream manifest it depends on, which must have passed.
 - **Multi-seed median, not max.** Seed choice is not a free parameter. (Until the seed was seeded at
-  environment construction, this was not true; see SEED-01 in
-  [LEAKS_FOUND.md](LEAKS_FOUND.md).)
+  environment construction, this was not true; that defect was fixed, and multi-seed results are
+  measured on the corrected code.)
 - **Budget rule.** Training steps are sized against the length of the training window, because
   replaying a short window too many times overfits.
 - **HPO objective is fixed** and reward parameters are locked during search.

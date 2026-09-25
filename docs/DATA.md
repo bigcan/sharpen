@@ -62,5 +62,5 @@ before you trust anything built on free data:
   Build cohorts from index-exit events. See [guides/data.md §5](guides/data.md).
 - **Release time is not reference time.** CFTC COT describes Tuesday and publishes Friday;
   FRED's default fetch is a release-lag model, not a vintage read. Every connector stamps a
-  separate `release_timestamp` for this reason. See [guides/data.md §4](guides/data.md) and
-  [LEAKS_FOUND.md](LEAKS_FOUND.md).
+  separate `release_timestamp` for this reason. See [guides/data.md §4](guides/data.md); results
+  are measured on the corrected code.

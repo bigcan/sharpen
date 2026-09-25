@@ -24,8 +24,9 @@ return — is the output of a **historical simulation or paper-trading run**, no
 record of realised trading profit. Simulated results are subject to look-ahead
 bias, survivorship bias, transaction-cost misestimation, overfitting, and
 selection effects. This project found and documents multiple instances of exactly
-such defects in its own prior results; see `docs/LEAKS_FOUND.md`. Some published
-numbers in the history of this project were later shown to be invalid.
+such defects in its own prior results; they were fixed, and the results reported
+here are measured on the corrected code. Some published numbers in the history of
+this project were later shown to be invalid.
 
 **Past performance, whether real or simulated, does not indicate future results.**
 

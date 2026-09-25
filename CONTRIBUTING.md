@@ -9,7 +9,7 @@ contributions are the ones that test it.
    *Challenge a result* issue with your command, environment and output. A result that fails to
    reproduce is a finding, not a nuisance.
 2. **A leak or a flaw in a verdict.** If you believe a result in
-   [NEGATIVE_RESULTS.md](NEGATIVE_RESULTS.md) or [docs/LEAKS_FOUND.md](docs/LEAKS_FOUND.md) is wrong,
+   [NEGATIVE_RESULTS.md](NEGATIVE_RESULTS.md) (measured on the corrected code) is wrong,
    say which row, what you think is wrong, and how to show it. Look-ahead, survivorship, cost and
    multiplicity errors are the usual suspects; [docs/METHODOLOGY.md](docs/METHODOLOGY.md) describes
    what was checked.

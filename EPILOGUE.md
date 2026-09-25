@@ -13,8 +13,8 @@ The part I did not expect was how often I was fooled. Three times the project pr
 looked like skill and was actually a bug: a feature that could see minutes into the future, a
 gate that read the bar it was about to trade, and a seed that never reached the environments. Each
 passed code review. The first one was the whole edge of a strategy I was already running on paper.
-They are written up in [docs/LEAKS_FOUND.md](docs/LEAKS_FOUND.md). If you take one thing from this
-repository, take those.
+All three were fixed, each is now guarded by a test, and every result in this repository is
+measured on the corrected code. If you take one thing from this repository, take those.
 
 After that, most of the work was killing ideas: 76 of them, listed in
 [NEGATIVE_RESULTS.md](NEGATIVE_RESULTS.md). Options selling turned out to be contaminated data and
