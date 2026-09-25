@@ -60,7 +60,8 @@ def run(targets: pd.DataFrame, asset_rets: pd.DataFrame, rf: pd.Series, costs: C
     ``asset_rets``: daily total returns (T, N) on the trading calendar; NaN = not tradeable that day (treated
     as 0 return; a target on a NaN-return asset on its execution day is refused).
     ``rf``: daily risk-free return aligned to the calendar. ``lag``: bars between decision and execution (>=1).
-    Returns a daily frame: ret, rf, excess, nav, longs, shorts, gross, net, traded, cost, borrow, own_cash.
+    Returns a daily frame: ret, rf, excess, nav, longs, shorts, gross, net, traded, cost, borrow;
+    ``df.attrs["frozen_events"]`` counts trades where an asset had no price and its holding was kept.
     """
     if lag < 1:
         raise ValueError("execution must be at least one bar after the decision (lag >= 1)")
@@ -96,6 +97,7 @@ def run(targets: pd.DataFrame, asset_rets: pd.DataFrame, rf: pd.Series, costs: C
     p = np.zeros(len(tickers))          # position values (signed dollars)
     own, proceeds = 1.0, 0.0
     nav_prev = 1.0
+    frozen_events = 0
     out = np.zeros((n, 11))
     for i in range(n):
         borrow = 0.0
@@ -108,10 +110,19 @@ def run(targets: pd.DataFrame, asset_rets: pd.DataFrame, rf: pd.Series, costs: C
         nav = own + proceeds + p.sum()
         traded = cost = 0.0
         if i in sched:
-            w = sched[i]
-            bad = (w != 0) & ~avail[i]
+            w = sched[i].copy()
+            bad = ~avail[i] & ((w != 0) | (p != 0))
             if bad.any():
-                raise ValueError(f"{cal[i].date()}: target on untradeable {np.array(tickers)[bad].tolist()}")
+                # No price today (market closed / data gap): that asset cannot trade; keep the drifted holding.
+                w[bad] = p[bad] / nav if nav > 0 else 0.0
+                frozen_events += 1
+                over = w.clip(min=0).sum() - 1.0
+                if over > tol:     # keeping a long may breach funding: shrink the TRADEABLE longs to fit
+                    tl = (w > 0) & ~bad
+                    s = w[tl].sum()
+                    if s <= over:
+                        raise FundingViolation(f"{cal[i].date()}: frozen longs alone exceed NAV")
+                    w[tl] *= (s - over) / s
             if w.clip(min=0).sum() > 1.0 + tol:
                 raise FundingViolation(f"{cal[i].date()}: longs {w.clip(min=0).sum():.4f} > NAV")
             new_p = w * nav
@@ -134,6 +145,7 @@ def run(targets: pd.DataFrame, asset_rets: pd.DataFrame, rf: pd.Series, costs: C
                                                "traded", "cost", "borrow"])
     df.iloc[0, df.columns.get_loc("rf")] = 0.0
     df.iloc[0, df.columns.get_loc("excess")] = 0.0
+    df.attrs["frozen_events"] = frozen_events
     return df
 
 

@@ -97,18 +97,24 @@ def ts_ic(close: pd.DataFrame, start: pd.Timestamp, end: pd.Timestamp, h: int = 
             "t_naive": rho * np.sqrt(max(n - 2, 1)) / np.sqrt(max(1 - rho ** 2, 1e-12))}
 
 
-def main() -> dict:
+def main(*, dry_run: bool = False, dry_window: tuple[str, str] = ("2008-07-01", "2024-03-28")) -> dict:
+    """``dry_run=True`` exercises the whole pipeline on the DEV proxy window (no seal, no look record, no ledger rows)
+    so a crash is found before the one real look, not during it."""
     warnings.filterwarnings("ignore", category=FutureWarning)
-    ok, why = seal.prereg_status()
-    if not ok:
-        raise seal.SealedError(f"refusing the look: {why}")
-    fp = fingerprint()
-    check_one_look(fp)
     cfg, gates = common.load_config(), yaml.safe_load(GATES.read_text(encoding="utf-8"))
     pr = yaml.safe_load((REPO / gates["prereg"]["path"]).read_text(encoding="utf-8").split("```yaml")[1].split("```")[0])
-
-    close, rf, provenance = proxy_panel.load(window="backward")
-    start, end = pd.Timestamp(pr["window"]["start"]), pd.Timestamp(pr["window"]["end"])
+    if dry_run:
+        close, rf, provenance = proxy_panel.load(window="dev")
+        start, end = pd.Timestamp(dry_window[0]), pd.Timestamp(dry_window[1])
+        fp = {}
+    else:
+        ok, why = seal.prereg_status()
+        if not ok:
+            raise seal.SealedError(f"refusing the look: {why}")
+        fp = fingerprint()
+        check_one_look(fp)
+        close, rf, provenance = proxy_panel.load(window="backward")
+        start, end = pd.Timestamp(pr["window"]["start"]), pd.Timestamp(pr["window"]["end"])
     rets = close.pct_change(fill_method=None)
     cm_base = common.cost_model(cfg, proxies=True)
     cm_free = common.cost_model(cfg, proxies=True, mult=0.0)
@@ -202,10 +208,14 @@ def main() -> dict:
                                     "alpha": metrics.alpha_vs(v["daily"], bench),
                                     "sharpe_spy": sr_spy}) for k, v in evs.items()},
     }
-    OUT.mkdir(parents=True, exist_ok=True)
-    (OUT / "one_look.json").write_text(json.dumps(res, indent=1, default=str), encoding="utf-8")
-    b.to_parquet(OUT / "h1_daily.parquet")
-    bench.to_parquet(OUT / "spy_daily.parquet")
+    out_dir = OUT.with_name("one_look_dryrun") if dry_run else OUT
+    out_dir.mkdir(parents=True, exist_ok=True)
+    (out_dir / "one_look.json").write_text(json.dumps(res, indent=1, default=str), encoding="utf-8")
+    b.to_parquet(out_dir / "h1_daily.parquet")
+    bench.to_parquet(out_dir / "spy_daily.parquet")
+    if dry_run:
+        log.info("DRY RUN (dev window %s..%s) H1 %s legs=%s", start.date(), end.date(), h1_pass, legs)
+        return res
     for k, v in evs.items():
         ledger.append(name=k, window="backward", spec=specs[k].as_dict(), metrics=res["grid"][k], kind="one_look")
     with LOOKS.open("a", encoding="utf-8") as f:
@@ -216,5 +226,8 @@ def main() -> dict:
 
 
 if __name__ == "__main__":
+    import argparse
     logging.basicConfig(level=logging.INFO, format="%(message)s")
-    main()
+    ap = argparse.ArgumentParser()
+    ap.add_argument("--dry-run", action="store_true", help="exercise the pipeline on the dev proxy window only")
+    main(dry_run=ap.parse_args().dry_run)

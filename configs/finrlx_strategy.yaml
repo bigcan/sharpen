@@ -25,10 +25,13 @@ costs:
   borrow_bps_yr: {SLV: 100.0, DBC: 100.0, USO: 100.0, DBA: 100.0, UUP: 100.0, FXE: 100.0, FXY: 100.0, FXB: 100.0, FXA: 100.0}
   cash_spread_bps_yr: 15.0          # idle cash earns T-bill minus this (a T-bill ETF's fee)
   short_rebate: 0.0                 # retail: no interest on short proceeds
-  # Proxies only (the pre-ETF clean window): each ETF's expense ratio, charged daily on the proxy return.
-  proxy_expense_bps_yr: {SPY: 9.45, QQQ: 20.0, IWM: 19.0, EFA: 35.0, EEM: 70.0, TLT: 15.0, IEF: 15.0, LQD: 14.0,
-                         GLD: 40.0, SLV: 50.0, DBC: 85.0, USO: 70.0, DBA: 85.0, UUP: 78.0, FXE: 40.0, FXY: 40.0,
-                         FXB: 40.0, FXA: 40.0}
+  # Proxies only (the pre-ETF clean window): each ETF's expense ratio, charged daily on the proxy return, MINUS any
+  # fee already inside the proxy. FX proxies (data_fx) are built net of the trusts' fees (0.40%; UUP 0.78%) -> 0 here.
+  # EEM's proxy is a Vanguard index fund's NAV, already net of its own ~0.3-0.4% fee -> residual 30 bps. Commodity
+  # proxies are loaded GROSS (proxy_panel: load_commodity(net_of_fees=False)) so the full fee is charged here once.
+  proxy_expense_bps_yr: {SPY: 9.45, QQQ: 20.0, IWM: 19.0, EFA: 35.0, EEM: 30.0, TLT: 15.0, IEF: 15.0, LQD: 14.0,
+                         GLD: 40.0, SLV: 50.0, DBC: 85.0, USO: 70.0, DBA: 85.0, UUP: 0.0, FXE: 0.0, FXY: 0.0,
+                         FXB: 0.0, FXA: 0.0}
 
 # Design grid evaluated on the DEV window only (every cell is a logged trial). Fixed across the grid:
 # core_weight 0.5, long_cap 1.0, 4 tranches spaced 5 trading days, cov_window 126, core_vol_ref 0.16.

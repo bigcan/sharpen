@@ -7,7 +7,7 @@ workstream: finrlx-strategy
 # and its sha256 matches. Filled in when the pre-registration is final.
 prereg:
   path: docs/research/finrlx_strategy_prereg_2026-09-25.md
-  sha256: null
+  sha256: b6f1128922ea5704368a84b91564eaa5607c3d887c99f1f9a1e02ee538d08448
 
 # H1 (primary): the selected book vs SPY total return (proxy), net of base costs, one bar execution lag.
 h1_beats_spy:

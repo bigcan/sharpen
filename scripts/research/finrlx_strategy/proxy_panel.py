@@ -15,14 +15,16 @@ from .paths import TICKERS
 
 log = logging.getLogger("finrlx.proxy_panel")
 FFILL_LIMIT = 5
-AREAS = {"equity": "load_equity", "rates": "load_rates", "fx": "load_fx", "commodity": "load_commodity"}
+# (loader, kwargs): commodities GROSS of fees so pnl.py charges configs/finrlx_strategy.yaml proxy_expense_bps_yr once
+AREAS = {"equity": ("load_equity", {}), "rates": ("load_rates", {}), "fx": ("load_fx", {}),
+         "commodity": ("load_commodity", {"net_of_fees": False})}
 
 
 def _area_frames(window: str) -> dict[str, tuple[pd.DataFrame, dict]]:
     out = {}
-    for area, fn in AREAS.items():
+    for area, (fn, kw) in AREAS.items():
         mod = importlib.import_module(f"{__package__}.data_{area}")
-        out[area] = (getattr(mod, fn)(window), dict(getattr(mod, "RECOMMENDED", {})))
+        out[area] = (getattr(mod, fn)(window, **kw), dict(getattr(mod, "RECOMMENDED", {})))
     return out
 
 

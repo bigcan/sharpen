@@ -67,6 +67,24 @@ def test_lag_zero_is_refused():
 
 
 # ---------------------------------------------------------------- funding
+def test_asset_without_price_keeps_its_holding():
+    """A market closed on the execution day cannot be traded: the old holding stays, the rest rebalances."""
+    r = _rets(A=[0.0, 0.0, 0.05, np.nan, 0.0, 0.0], B=[0.0] * 6)
+    tgt = pd.DataFrame({"A": [0.5, 0.0], "B": [0.0, 0.3]}, index=[CAL[0], CAL[2]])   # 2nd executes day 3 (A has no price)
+    res = pnl.run(tgt, r, _zero_rf(r.index), FREE)
+    nav3 = res["nav"].iloc[3]
+    assert res["longs"].iloc[3] == pytest.approx((0.5 * 1.05 + 0.3 * nav3) / nav3, rel=1e-9)   # A kept, B bought
+    assert res.attrs["frozen_events"] == 1
+
+
+def test_planted_trading_a_closed_market_is_caught():
+    """Planted bug: trading A at a stale price on a day it has no price. The frozen-holding test must notice."""
+    r = _rets(A=[0.0, 0.0, 0.05, np.nan, 0.0, 0.0], B=[0.0] * 6)
+    tgt = pd.DataFrame({"A": [0.5, 0.0], "B": [0.0, 0.3]}, index=[CAL[0], CAL[2]])
+    res = pnl.run(tgt, r.fillna(0.0), _zero_rf(r.index), FREE)      # the bug: NaN treated as a tradeable 0% day
+    assert res.attrs["frozen_events"] == 0 and res["longs"].iloc[3] == pytest.approx(0.3)
+
+
 def test_margin_loan_is_refused():
     r = _rets(A=[0.0] * 5, B=[0.0] * 5)
     tgt = pd.DataFrame({"A": [0.7], "B": [0.4]}, index=[CAL[0]])
