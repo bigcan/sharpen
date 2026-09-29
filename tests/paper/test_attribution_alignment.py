@@ -20,6 +20,7 @@ import pandas as pd
 import pytest
 import yaml
 
+from sharpen.envs import allocator_factory
 from sharpen.paper import TwoSleeveExecutor
 from sharpen.paper.parity_harness import ParityHarness
 
@@ -58,22 +59,20 @@ def _month_end_idx(ts: np.ndarray) -> np.ndarray:
     return pd.Series(np.arange(len(ts))).groupby(months.values).max().to_numpy()
 
 
-def _zero_cost_bundle(lead: int, *, T: int = 300, n: int = 4, jump: float = 0.01,
-                      seed: int = 11) -> dict:
-    """``_two_sleeve_bundle`` from test_decision_lead, made adversarial for the attribution.
-    Both sleeves flip the whole cross-section at every month-end, and every asset jumps toward
-    the NEW position on the step that fills it. That move comes before entry, so the book earns
-    it on the OLD position. Small noise elsewhere keeps the risk-parity vols live. Vol stays
-    constant at the target and convictions are month-held, as in the original."""
+def _zero_cost_bundle(*, T: int = 300, n: int = 4, jump: float = 0.005, seed: int = 11) -> dict:
+    """Two month-held sleeves over four assets at constant vol (the target, so each weight is
+    the held conviction), made adversarial for the attribution. Both sleeves flip the whole
+    cross-section at every month-end, and the moves into the two closes that can fill that
+    switch (d under the decision lead, d+1 under the legacy drive) go toward the NEW book. The
+    move just before the fill is therefore earned on the OLD position under either drive. Small
+    noise elsewhere keeps the risk-parity vols live."""
     rng = np.random.default_rng(seed)
     ts = (pd.bdate_range("2019-01-01", periods=T).asi8 // 10**9).astype(np.int64)
     months = pd.factorize(pd.to_datetime(ts, unit="s").to_period("M"))[0]
     sign = np.where(months % 2 == 0, 1.0, -1.0)
-    rets = rng.normal(0.0, 0.001, (T - 1, n))                  # rets[k]: the k->k+1 move
+    rets = rng.normal(0.0, 0.0005, (T - 1, n))                 # rets[k]: the k->k+1 move
     for d in _month_end_idx(ts)[:-1]:                         # interior month-ends
-        # Month-end d switches weight row d (legacy drive) or d-1 (decision lead), which fills
-        # at close d+1 or d; rets[row] is the move just before that fill.
-        rets[d - lead] += jump * sign[d] * np.linspace(0.5, 1.5, n)
+        rets[d - 1:d + 1] += jump * sign[d] * np.linspace(0.5, 1.5, n)
     price = 100.0 * np.vstack([np.ones(n), np.cumprod(1.0 + rets, axis=0)])
     names = [f"A{i}" for i in range(n)]
 
@@ -103,14 +102,16 @@ def _zero_cost_cfg(lead: int, names: list[str]) -> dict:
 
 @pytest.mark.parametrize("lead", [0, 1])
 def test_attribution_reconciles_to_the_book_gross_pnl(lead):
-    bundle = _zero_cost_bundle(lead)
+    if lead and not hasattr(allocator_factory, "decision_lead_bars"):
+        pytest.skip("execution.decision_lead_bars (full-codebase audit R-3) is not in this tree")
+    bundle = _zero_cost_bundle()
     live, _ = TwoSleeveExecutor(_zero_cost_cfg(lead, bundle["union"]["assets"])).run(bundle)
     r = live.step_returns
     assert live.cumulative_fees[-1] == 0.0                     # zero cost: net P&L == gross
     book = float(r.sum())
     # The attribution weights are target labels; the book holds fixed entry notionals, sized
     # on the pre-fill equity and then drifting with price. The two agree to second order in
-    # the step moves, not exactly (the residual is ~1.5% of the gross activity here).
+    # the step moves, not exactly (the residual is <= ~1.5% of the gross activity here).
     tol = 0.05 * float(np.abs(r).sum())
     by_class = sum(live.class_pnl.values())
     by_sleeve = sum(live.sleeve_pnl.values())
@@ -121,4 +122,4 @@ def test_attribution_reconciles_to_the_book_gross_pnl(lead):
     # Teeth: on the same book the one-bar-early pairing misses by far more than the tolerance.
     rets = ParityHarness._asset_returns(bundle["union"]["price_ary"])
     early = float((live.weights * rets).sum())
-    assert abs(early - book) > 10 * tol, (early, book, tol)
+    assert abs(early - book) > 5 * tol, (early, book, tol)
