@@ -273,9 +273,11 @@ class TwoSleeveExecutor:
         alphas: Mapping[str, np.ndarray], union_assets: list[str], union_price: np.ndarray,
     ) -> dict[str, float]:
         """Cumulative gross-return contribution of EACH sleeve to the combined book:
-        ``Σ_k α_s(k) · Σ_{a∈sleeve_s} w_s[k,a] · ret_union[k+1,a]``. Unambiguous even when
-        sleeves overlap on a bond ETF (each sleeve's own weight is attributed to it). The
-        per-CLASS drift gate is computed separately by the union replay (SHY→rates)."""
+        ``Σ_k α_s(k-1) · Σ_{a∈sleeve_s} w_s[k-1,a] · ret_union[k,a]`` (``ret_union[k]`` the
+        k→k+1 move). The combined row ``k`` fills at close k+1, so it earns ``ret_union[k+1]``
+        — the same one-bar pairing as :meth:`ParityHarness._attribution` (N11). Unambiguous
+        even when sleeves overlap on a bond ETF (each sleeve's own weight is attributed to it).
+        The per-CLASS drift gate is computed separately by the union replay (SHY→rates)."""
         price = np.asarray(union_price, dtype=np.float64)
         prev, cur = price[:-1], price[1:]
         valid = (prev > 1e-10) & (cur > 1e-10)
@@ -287,7 +289,8 @@ class TwoSleeveExecutor:
         for s, w in sleeve_weights.items():
             cols = [idx[a] for a in sleeve_assets[s]]
             a_s = np.asarray(alphas[s], dtype=np.float64)[:, None]
-            contrib = (a_s * np.asarray(w, dtype=np.float64)) * ret[:, cols]
+            w_book = a_s * np.asarray(w, dtype=np.float64)     # sleeve s's rows of the combined book
+            contrib = w_book[:-1] * ret[1:, cols]
             out[s] = float(contrib.sum())
         return out
 

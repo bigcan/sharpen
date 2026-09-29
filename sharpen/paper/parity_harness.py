@@ -309,10 +309,14 @@ class ParityHarness:
 
     def _attribution(self, W: np.ndarray, price: np.ndarray, assets: list[str],
                      asset_class: dict[str, str]) -> tuple[dict[str, float], np.ndarray | None]:
-        """Cumulative gross-return attribution per class (``Σ_k Σ_{i∈c} W[k,i]·ret[k+1,i]``)
-        and SPY daily returns for the corr-to-SPY drift gate (None if SPY absent)."""
+        """Cumulative gross-return attribution per class (``Σ_k Σ_{i∈c} W[k-1,i]·rets[k,i]``,
+        ``rets[k]`` the k→k+1 move) and SPY daily returns for the corr-to-SPY drift gate (None
+        if SPY absent). ``_replay`` fills row ``W[k]`` at close k+1, so the book's step-k return
+        is ``W[k-1]·rets[k]``: pairing ``W[k]`` with ``rets[k]`` credits each row with the move
+        before it was entered (N11; audit T2-10/T4-09/T6-13). ``rets[0]`` is earned by the flat
+        opening book and the last row's move lies past the window, so both drop out."""
         rets = self._asset_returns(price)              # (T-1, N)
-        contrib = W * rets                             # (T-1, N) gross attribution
+        contrib = W[:-1] * rets[1:]                    # (T-2, N) gross attribution
         class_pnl: dict[str, float] = {}
         for c in sorted(set(asset_class.get(a, "all") for a in assets)):
             idx = [i for i, a in enumerate(assets) if asset_class.get(a, "all") == c]
