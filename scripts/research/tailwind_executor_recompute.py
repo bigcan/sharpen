@@ -35,6 +35,13 @@ P(pass): the executor's combined series is already sized by the real config leve
 rescaling is what the research-basis render needed to reach a target vol from its 6.92%
 native series; the executor series is already at its real production sizing).
 
+FINANCING (2026-09-29, Tier-2 N2): :func:`build_executor_series` honours the config's
+``financing:`` block. The challenge config declares ``model: tbill`` (carry = -rf on every
+position plus a short-borrow fee), so the series is the EXCESS-of-T-bill return and both the
+DSR and :func:`recompute_p_pass` score it. For a prop account, whose balance earns nothing,
+rf*net is a FLOOR on the financing drag. Set ``financing: {model: none}`` to reproduce the
+unfinanced numbers. The JSON stamps the lead and the model used (``execution_stamp``).
+
 Emits ``results/tailwind_v1/executor_recompute.json``.
 """
 from __future__ import annotations
@@ -66,6 +73,7 @@ from sharpen.data.cross_asset_loader import (  # noqa: E402
     build_two_sleeve_arrays,
     load_two_sleeve_data,
 )
+from sharpen.envs.allocator_factory import execution_stamp  # noqa: E402
 from sharpen.paper import TwoSleeveExecutor  # noqa: E402
 from sharpen.prop.challenge_simulator import FirmRules, SizingPolicy  # noqa: E402
 
@@ -163,7 +171,9 @@ def recompute_p_pass(exec_net: pd.Series) -> dict:
     ``tailwind_forward_path_render.py`` uses, with NO additional vol-rescaling -- the
     executor series is already at its real production sizing (env.target_vol_asset /
     lev_cap / max_gross_exposure), unlike the research basis which needs rescaling from
-    its native 6.92% vol to reach a target."""
+    its native 6.92% vol to reach a target. Pass the FINANCED series (a config with a
+    ``financing:`` block): the unfinanced one finances the book's net long for free,
+    which no prop account does."""
     gates = _yaml.safe_load(tfr.CHALLENGE_GATES.read_text(encoding="utf-8"))
     cg = gates["challenge_pass_gate"]
     risk = gates["paper_soak"]["risk"]
@@ -244,6 +254,7 @@ def main() -> dict:
     out: dict = {
         "book": "tailwind-v1 executor path (momentum TSMOM + BAB defensive, TwoSleeveExecutor)",
         "config": str(CHALLENGE_CFG.relative_to(ROOT)).replace("\\", "/"),
+        "execution_stamp": execution_stamp(cfg),     # lead + financing (Tier-2 N4)
         "data_range": {"start": str(exec_net.index[0].date()), "end": str(exec_net.index[-1].date()),
                        "n_days": len(exec_net)},
         "executor_book": {

@@ -115,6 +115,7 @@ class ExecutionSchedulerEnv(gym.Env):
         price_ary: np.ndarray,                 # (T, U) union close
         volume_ary: np.ndarray,                # (T, U) union DOLLAR volume (F1 denominator)
         carry_ary: np.ndarray,                 # (T, U) union per-bar carry (zeros in v1)
+        borrow_ary: np.ndarray | None = None,  # (T, U) union per-bar borrow fee on shorts (financing leg)
         timestamps: np.ndarray,                # (T,) epoch-seconds int64
         assets: list[str],                     # U union asset names
         rebalance_steps: np.ndarray,           # (R,) int step-indices where a parent opens (>=1)
@@ -157,6 +158,9 @@ class ExecutionSchedulerEnv(gym.Env):
         self.price = price
         self.volume = volume
         self.carry = carry
+        self.borrow = None if borrow_ary is None else np.asarray(borrow_ary, dtype=np.float64)
+        if self.borrow is not None:
+            assert self.borrow.shape == (T, U), f"borrow_ary must be (T, U) == {(T, U)}"
         self.timestamps = ts
         self.assets = list(assets) if assets else [f"asset_{i}" for i in range(U)]
         self.n_assets = U
@@ -324,6 +328,7 @@ class ExecutionSchedulerEnv(gym.Env):
         info_book = self.book.step_bar(
             delta_weights=trade, fill=fill, prev_price=prev_price, price_now=price_now,
             carry_rates=self.carry[k + 1], pv_before=pv_before, as_of_ts=int(self.timestamps[k + 1]),
+            borrow_rates=None if self.borrow is None else self.borrow[k + 1],
         )
         self._W_held = self._W_held + trade
 

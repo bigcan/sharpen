@@ -229,6 +229,8 @@ class ParityHarness:
         price = np.asarray(arrays["price_ary"], dtype=np.float64)
         volume = np.asarray(arrays["volume_ary"], dtype=np.float64)     # DOLLAR volume (F1)
         carry = np.asarray(arrays["carry_ary"], dtype=np.float64)
+        borrow_raw = arrays.get("borrow_ary")       # financing leg: fee on short notional
+        borrow = None if borrow_raw is None else np.asarray(borrow_raw, dtype=np.float64)
         ts = np.asarray(arrays["timestamps"], dtype=np.int64)
         T, N = price.shape
         W = np.asarray(target_weights, dtype=np.float64)
@@ -265,6 +267,7 @@ class ParityHarness:
             info = book.step_bar(
                 delta_weights=delta, fill=fill, prev_price=prev_price, price_now=price_now,
                 carry_rates=carry[k + 1], pv_before=pv_before, as_of_ts=int(ts[k + 1]),
+                borrow_rates=None if borrow is None else borrow[k + 1],
             )
             weights.append(book.positions.copy())
             equity.append(info["portfolio_value"])

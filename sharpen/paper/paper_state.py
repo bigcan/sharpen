@@ -186,14 +186,20 @@ class PaperState:
             closed_frac = (abs_old[reduced] - abs_new[reduced]) / abs_old[reduced]
             self.entry_notionals[reduced] *= (1.0 - closed_frac)
 
-    def _apply_carry(self, price: np.ndarray, carry_rates: np.ndarray) -> float:
-        """env._apply_carry: per-bar carry on OPEN positions (v1 carry == 0)."""
+    def _apply_carry(self, prev_price: np.ndarray, carry_rates: np.ndarray,
+                     borrow_rates: np.ndarray | None = None) -> float:
+        """env._apply_carry: carry (a long earns it, a short pays it) plus a borrow fee on
+        SHORT notional, both charged on the notional carried INTO the bar (marked at
+        ``prev_price``). Zero unless a financing leg is wired (``sharpen.data.financing``)."""
         active = (np.abs(self.positions) >= _POS_EPS) & (np.abs(self.entry_prices) >= _PRICE_EPS)
         if not active.any():
             return 0.0
-        current_notional = self.entry_notionals[active] * (price[active] / self.entry_prices[active])
-        carry_pnl = np.sign(self.positions[active]) * current_notional * carry_rates[active]
-        return float(carry_pnl.sum())
+        notional = self.entry_notionals[active] * (prev_price[active] / self.entry_prices[active])
+        carry_pnl = float((np.sign(self.positions[active]) * notional * carry_rates[active]).sum())
+        if borrow_rates is not None:
+            short = self.positions[active] < 0.0
+            carry_pnl -= float((notional[short] * borrow_rates[active][short]).sum())
+        return carry_pnl
 
     # ------------------------------------------------------------------ #
     # The per-bar forward step (env.step accounting, ordering preserved)
@@ -208,21 +214,25 @@ class PaperState:
         carry_rates: np.ndarray,
         pv_before: float,
         as_of_ts: int | None = None,
+        borrow_rates: np.ndarray | None = None,
     ) -> dict:
         """Advance the book one bar, mirroring ``MultiAssetAllocatorEnv.step`` exactly.
 
         Caller supplies ``pv_before`` (== ``self.pv_before(prev_price)``, marked BEFORE
         carry) and the ``fill`` whose cost was computed on that same ``pv_before`` — so
         the cost notional base matches the env. Returns the per-bar info the trajectory
-        accumulates. ``prev_price`` is accepted for signature symmetry / future
-        validation; ``pv_before`` already encodes it.
+        accumulates. ``prev_price`` is the close the held positions were marked at when the
+        bar opened: carry and borrow are charged on that notional (env._apply_carry).
+        ``borrow_rates`` is the bar's fee on short notional (None = no borrow).
         """
-        del prev_price  # encoded in pv_before (kept in the signature for call-site clarity)
         delta_weights = np.asarray(delta_weights, dtype=np.float64).ravel()
         old_positions = self.positions.copy()
 
-        # 1. Carry on OLD positions at the new price (env applies before rebalance).
-        carry_pnl = self._apply_carry(price_now, np.asarray(carry_rates, dtype=np.float64).ravel())
+        # 1. Carry + borrow on OLD positions (env applies before rebalance).
+        carry_pnl = self._apply_carry(
+            np.asarray(prev_price, dtype=np.float64).ravel(),
+            np.asarray(carry_rates, dtype=np.float64).ravel(),
+            None if borrow_rates is None else np.asarray(borrow_rates, dtype=np.float64).ravel())
         self.cumulative_carry += carry_pnl
         self.margin_balance += carry_pnl
 

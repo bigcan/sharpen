@@ -766,6 +766,36 @@ def check_decision_lead(cfg: dict, r: ValidationResult) -> None:
     r.ok(f"execution.decision_lead_bars = {lead} (linear-core drive)")
 
 
+def check_financing_block(cfg: dict, r: ValidationResult) -> None:
+    """``financing:`` (TAILWIND Tier-2 N2): parse it exactly as the loader does, so a malformed
+    block FAILs here rather than at run time. A financing leg declared on a path that does not
+    carry it FAILs too: only the linear-core allocator loader wires it, and the single-sleeve
+    loader refuses it. Return-stream sleeves are combined at the return level and stay
+    unfinanced, which is a WARN."""
+    if "financing" not in cfg:
+        return
+    from sharpen.data.financing import financing_spec
+    try:
+        spec = financing_spec(cfg)
+    except ValueError as exc:
+        r.fail(f"financing: {exc}")
+        return
+    if not spec.enabled:
+        r.ok("financing.model = none (unfinanced: carry 0)")
+        return
+    if not _is_linear_core_allocator(cfg):
+        r.fail("financing: declared, but only the linear-core allocator path (execution.shadow: "
+               "linear_core_*) wires it; this config would run unfinanced")
+        return
+    streams = sorted(name for name, spec_ in (cfg.get("sleeves") or {}).items()
+                     if str((spec_ or {}).get("type", "allocator")) == "return_stream")
+    if streams:
+        r.warn(f"financing: return_stream sleeve(s) {streams} are combined at the return level "
+               f"and are NOT financed")
+    r.ok(f"financing = {spec.model} {spec.tenor} act/{spec.day_count} + "
+         f"{spec.short_borrow_bps:g} bp short borrow")
+
+
 def check_execution_cost_realism(cfg: dict, stage: str, r: ValidationResult) -> None:
     """Prop-firm configs that bear execution must model slippage. Selecting,
     grading, or deploying a policy under slippage=0 understates live cost and is
@@ -2528,6 +2558,7 @@ def validate(config_path: Path, stage: str, overlays: list[str] | None = None) -
     check_execution_cost_realism(cfg, stage, r)
     check_execution_overlay_gates(cfg, r)
     check_decision_lead(cfg, r)
+    check_financing_block(cfg, r)
     check_wandb_consolidation(cfg, stage, r)
 
     for check in STAGE_CHECKS[stage]:

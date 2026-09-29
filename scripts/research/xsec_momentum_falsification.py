@@ -184,6 +184,14 @@ def backtest(weights_rebal: pd.DataFrame, rets: pd.DataFrame) -> tuple:
     return gross, cost_daily, turnover_ann
 
 
+def held_weights(weights_rebal: pd.DataFrame, rets: pd.DataFrame) -> pd.DataFrame:
+    """The daily weights in force over each interval (t-1, t]: the SAME ffill + 1-day lag
+    :func:`backtest` applies before P&L, so ``(held_weights(w, rets) * rets).sum(axis=1)`` is
+    its gross return. The financing leg charges ``net * rf`` and short borrow on these
+    (``sharpen.data.financing.excess_returns``); ``tests/research`` pins the equality."""
+    return weights_rebal.reindex(rets.index).ffill().fillna(0.0).shift(1).fillna(0.0)
+
+
 def run_book(name: str, weights_rebal: pd.DataFrame, rets: pd.DataFrame,
              bench: pd.Series) -> dict:
     gross, cost_daily, turn = backtest(weights_rebal, rets)
@@ -192,7 +200,8 @@ def run_book(name: str, weights_rebal: pd.DataFrame, rets: pd.DataFrame,
         net = gross - cost_daily[cm]
         out[cm] = metrics(net, turn, bench)
     return {"book": name, "turnover_ann": round(turn, 1), "by_cost": out,
-            "_net_standard": (gross - cost_daily["standard_2bps"])}
+            "_net_standard": (gross - cost_daily["standard_2bps"]),
+            "_weights_rebal": weights_rebal}     # for financing (held_weights); not serialized
 
 
 def build_books(close: pd.DataFrame, rets: pd.DataFrame, bench: pd.Series) -> dict:

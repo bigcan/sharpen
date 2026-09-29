@@ -27,6 +27,7 @@ from typing import Mapping
 import numpy as np
 import pandas as pd
 
+from sharpen.data.financing import financing_spec
 from sharpen.envs.multi_asset_allocator_env import MultiAssetAllocatorEnv
 
 logger = logging.getLogger(__name__)
@@ -117,6 +118,7 @@ def make_allocator_env(
         carry_ary=arrays["carry_ary"],
         volume_ary=arrays["volume_ary"],
         timestamps=arrays["timestamps"],
+        borrow_ary=arrays.get("borrow_ary"),    # financing leg (sharpen.data.financing); None = off
         **kwargs,
     )
 
@@ -276,6 +278,17 @@ def decision_lead_bars(config: Mapping) -> int:
     if isinstance(raw, bool) or not isinstance(raw, (int, np.integer)) or int(raw) not in (0, 1):
         raise ValueError(f"execution.{_DECISION_LEAD_KEY} must be the integer 0 or 1, got {raw!r}")
     return int(raw)
+
+
+def execution_stamp(config: Mapping) -> dict:
+    """The execution choices that decide WHICH book a linear-core run measured: the decision
+    lead and the financing model. Every executor-path artifact records this (TAILWIND Tier-2
+    N4), because a number cited without it cannot be told apart from the book it did not
+    measure (lead 0 vs 1: DSR 0.930 vs 0.967; unfinanced vs financed: 0.967 vs 0.913)."""
+    spec = financing_spec(config)
+    fin = ({"model": spec.model, "tenor": spec.tenor, "day_count": spec.day_count,
+            "short_borrow_bps": spec.short_borrow_bps} if spec.enabled else {"model": "none"})
+    return {"decision_lead_bars": decision_lead_bars(config), "financing": fin}
 
 
 def _apply_decision_lead(arrays: Mapping, conv_monthly: np.ndarray) -> tuple[dict, np.ndarray]:

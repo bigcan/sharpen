@@ -128,6 +128,8 @@ def temporal_split_bundle(bundle: Mapping, combined_w, train_frac: float):
             "carry_ary": u["carry_ary"][lo:hi], "timestamps": u["timestamps"][lo:hi],
             "assets": u["assets"],
         }
+        if u.get("borrow_ary") is not None:            # financing leg (fee on short notional)
+            union["borrow_ary"] = u["borrow_ary"][lo:hi]
         return {**bundle, "union": union}
 
     return _sub(0, s), cw[: s - 1], _sub(s, T), cw[s:], s
@@ -388,6 +390,7 @@ def main() -> int:
         build_two_sleeve_arrays,
         load_two_sleeve_data,
     )
+    from sharpen.envs.allocator_factory import execution_stamp
     from sharpen.paper import TwoSleeveExecutor
 
     log.info("loading two-sleeve data (union=%d assets)...", config["universe"]["n_assets"])
@@ -494,6 +497,7 @@ def main() -> int:
     verdict = build_execution_overlay_verdict(primary, stress, fold_uplifts, gates)
     verdict["meta"] = {
         "config": str(args.config),
+        "execution_stamp": execution_stamp(config),     # lead + financing (Tier-2 N4)
         "gates": str(args.gates or config.get("ensemble", {}).get("gates_file")),
         "data_start": str(start_ts.date()),
         "data_end": str(end_ts.date()),
