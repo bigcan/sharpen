@@ -383,3 +383,50 @@ def test_pre_registered_gate_constants_frozen(gates_cfg):
     assert s["performance"]["rolling_sharpe_floor"] == 0.30
     assert s["performance"]["min_psr"] == 0.95 and s["performance"]["psr_benchmark"] == 0.0
     assert s["performance"]["mintrl_confidence"] == 0.95
+
+
+# ------------------------------------------------------------------------- sleeve attribution
+def _sleeve_check(live, sleeves, gates_cfg):
+    v = evaluate_paper_soak_gates(live, clean_parity(), gates_cfg, executor_sleeves=sleeves)
+    return v, v["groups"]["drift"]["checks"]["sleeve_attribution"]
+
+
+def test_multi_sleeve_book_needs_per_sleeve_pnl(gates_cfg):
+    """Audit T4-12b: a two-sleeve book with per-class P&L but no per-sleeve P&L passed,
+    because the check only looked at class_pnl. It must fail (a REVIEW) and name the
+    sleeves it is missing."""
+    live = make_live(_benign_returns())
+    v, chk = _sleeve_check(live, ["momentum", "rates_carry"], gates_cfg)
+    assert chk["status"] == FAIL and chk["basis"] == "sleeve"
+    assert chk["missing"] == ["momentum", "rates_carry"]
+    assert v["overall_status"] == "REVIEW"
+    live.sleeve_pnl = {"momentum": 0.4, "rates_carry": -0.1}
+    v, chk = _sleeve_check(live, ["momentum", "rates_carry"], gates_cfg)
+    assert chk["status"] == PASS and chk["missing"] == []
+    assert v["overall_status"] == PASS
+
+
+def test_sleeve_attribution_names_a_missing_or_non_finite_sleeve(gates_cfg):
+    live = make_live(_benign_returns())
+    live.sleeve_pnl = {"momentum": 0.4, "rates_carry": float("nan")}
+    _, chk = _sleeve_check(live, ["momentum", "rates_carry", "vrp"], gates_cfg)
+    assert chk["status"] == FAIL and chk["missing"] == ["rates_carry", "vrp"]
+
+
+def test_single_sleeve_book_is_attributed_per_class(gates_cfg):
+    """A single-sleeve book is attributed per asset class (the cross_asset_momentum
+    contract), whether or not the caller names its one sleeve."""
+    live = make_live(_benign_returns())
+    for sleeves in (None, [], ["momentum"]):
+        _, chk = _sleeve_check(live, sleeves, gates_cfg)
+        assert chk["status"] == PASS and chk["basis"] == "class", sleeves
+    live.class_pnl = {}
+    _, chk = _sleeve_check(live, None, gates_cfg)
+    assert chk["status"] == FAIL and chk["missing"] == ["class_pnl"]
+
+
+def test_without_executor_sleeves_the_sleeve_pnl_keys_are_checked(gates_cfg):
+    live = make_live(_benign_returns())
+    live.sleeve_pnl = {"momentum": 0.4, "vrp": float("inf")}
+    _, chk = _sleeve_check(live, None, gates_cfg)
+    assert chk["status"] == FAIL and chk["basis"] == "sleeve" and chk["missing"] == ["vrp"]

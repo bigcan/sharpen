@@ -192,10 +192,15 @@ class TwoSleeveExecutor:
             sleeve_w_fwd[s] = fwd["weights"]
             sleeve_r_fwd[s] = fwd["step_returns"]
 
-        combined_w, _ = self._combine(sleeve_w_fwd, sleeve_assets, sleeve_r_fwd, union_assets, ts_alpha)
+        combined_w, alphas = self._combine(
+            sleeve_w_fwd, sleeve_assets, sleeve_r_fwd, union_assets, ts_alpha)
         live = self.harness._replay(bundle["union"], combined_w, fill_engine=fill_engine)
         self.harness._expected_rebalance_ts = self.harness._true_month_end_ts(
             np.asarray(bundle["union"]["timestamps"], dtype=np.int64))
+        # This is the path the soak scores: attribute the FORWARD sleeve weights and alphas,
+        # so its sleeve_attribution check reads real per-sleeve P&L (audit T4-12b).
+        live.sleeve_pnl = self._sleeve_attribution(
+            sleeve_w_fwd, sleeve_assets, alphas, union_assets, bundle["union"]["price_ary"])
         return live, oracle
 
     def run_with_overlay(
