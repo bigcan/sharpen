@@ -1,4 +1,4 @@
-"""Tests for Protocol v2.3 §4.5 step 6 swap-approval handshake."""
+"""Tests for SharpOps v2.3 §4.5 step 6 swap-approval handshake."""
 
 from __future__ import annotations
 

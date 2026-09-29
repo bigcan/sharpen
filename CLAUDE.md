@@ -29,7 +29,7 @@ ruff check sharpen && mypy sharpen --ignore-missing-imports && pytest
 ```
 
 ```bash
-# Pipeline — the stage is mandatory (see Training Protocol v2)
+# Pipeline — the stage is mandatory (see SharpOps)
 python scripts/run_full_pipeline.py --config configs/<cfg>.yaml --stage <stage>
 # Flags: --agent sac --trials N --steps N --backtest_only --checkpoint PATH
 
@@ -99,9 +99,9 @@ Configs vary by pipeline. **Do NOT invent keys — read a reference config first
 | CRU-1 | Crucible's funnel `gates_hash` is frozen. A new connector or capability is a MINOR bump and must NOT change existing verdicts. |
 | CRU-2 | Crucible's agentic code (`crucible/agentic/`) may read ONLY `ledger_agent_view` (dedup keys + killed-family list) — never verdicts/DSR/holdout. This is the anti-oracle moat; do not widen the view. |
 
-## Training Protocol v2 (mandatory)
+## SharpOps (mandatory)
 
-All training work uses the staged protocol in `docs/protocol_v2.md`. Six stages: data-prep → hpo →
+All training work uses the staged protocol in `docs/sharpops.md`. Six stages: data-prep → hpo →
 l1-multiseed → walk-forward (+stress) → recent-oos (+compliance) → paper-deploy. One stage = one
 tracked run = one decision artifact.
 

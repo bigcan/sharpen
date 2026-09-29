@@ -4,7 +4,7 @@
 Pulls WandB val/test metrics + SFTPs checkpoint_final.pth for all 10 X1 seeds
 (split across gpuhub-1 [6 seeds] and gpuhub-2 [4 seeds]), verifies
 key == name_seed == ckpt_seed (S540 scramble guard), computes top-3 via
-val_argmax_pf (Protocol v2.1 / S495), and writes
+val_argmax_pf (SharpOps v2.1 / S495), and writes
 results/sg1_btc_velotrade_decay01_x1/seed_report.json (schema 1.0).
 
 Single-host collect_run.py cannot pull a split-host cohort in one pass, so this
@@ -155,7 +155,7 @@ def main():
     )
     healthy = sorted(int(k) for k in seeds if int(k) not in degenerate)
 
-    # --- top-3 via val_argmax_pf (Protocol v2.1 / S495) ---
+    # --- top-3 via val_argmax_pf (SharpOps v2.1 / S495) ---
     by_val_all = sorted(seeds.values(), key=lambda v: v["val_pf"], reverse=True)
     top3_val_all = [v["seed"] for v in by_val_all[:3]]
     by_val_healthy = sorted(
@@ -184,7 +184,7 @@ def main():
         "aggregation_rule_selector": "val_argmax_pf",
         "top3_by_val_argmax_pf": top3_val_healthy,
         "selection_notes": (
-            "val_argmax_pf over healthy seeds (Protocol v2.1/S495). val window is tiny "
+            "val_argmax_pf over healthy seeds (SharpOps v2.1/S495). val window is tiny "
             "(~16 trades/seed) and noisy -- top-3 is a CANDIDATE set; the downstream "
             "Stage 2.5-R bootstrap + Stage 3 WF (wf_median_pf + shallowest uncapped DD) "
             "are the real arbiters. Degenerate (non-trading) seeds excluded from selection."

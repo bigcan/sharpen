@@ -1,4 +1,4 @@
-"""Funding-Arb DSAC top-K ensemble evaluator (Protocol v2 Stage 2.5).
+"""Funding-Arb DSAC top-K ensemble evaluator (SharpOps Stage 2.5).
 
 Single-window ensemble eval for funding-arb DSAC L1 multiseed. Loads K trained
 DSAC agents, runs them on val + test windows under multiple aggregation rules,

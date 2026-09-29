@@ -1,4 +1,4 @@
-"""Tests for Protocol v2.2 §2 eval_distribution helper."""
+"""Tests for SharpOps v2.2 §2 eval_distribution helper."""
 
 from __future__ import annotations
 

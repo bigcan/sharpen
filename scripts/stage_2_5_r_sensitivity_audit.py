@@ -1,11 +1,11 @@
 #!/usr/bin/env python3
-"""Stage 2.5-R Sensitivity Audit — Protocol v2.6 (S553, v2.7-A C4).
+"""Stage 2.5-R Sensitivity Audit — SharpOps v2.6 (S553, v2.7-A C4).
 
 Runs the 3x3 (deadband_threshold x max_leverage) config sensitivity sweep on a
 PROMOTE'd workstream's existing verdict. Each cell re-runs the trained policy
 through the test split with cell-specific env knobs (frozen weights). The
 9-cell grid is resolved into an edge-stability verdict per
-`.agent/artifacts/protocol_v27_a_sensitivity_audit_architecture.md` ADR-4/ADR-5.
+the SharpOps v2.7-A sensitivity-audit architecture note ADR-4/ADR-5.
 
 Usage:
     python scripts/stage_2_5_r_sensitivity_audit.py \\

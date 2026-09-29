@@ -1,4 +1,4 @@
-"""Fixed-lot stress pass — Protocol v2 Stage 3 stress sub-report (audit X3 / P7-03 / P7-07).
+"""Fixed-lot stress pass — SharpOps Stage 3 stress sub-report (audit X3 / P7-03 / P7-07).
 
 Canonical (pipeline) implementation. Used by:
   - ``scripts/sg1_btc_velotrade_ensemble_eval.py`` — WF-eval ``stress`` verdict block (X3)
@@ -9,7 +9,7 @@ that script retains its own copy so its already-committed outputs stay reproduci
 This module adds the early-term guard exception, ``peak_abs_position``, and the
 multi-fold ``compute_stress_subreport`` aggregator the WF eval needs.
 
-**Why this exists (protocol_v2.md Stage 3 + the S466 SG-1-XAUUSD incident).** The engine
+**Why this exists (sharpops.md Stage 3 + the S466 SG-1-XAUUSD incident).** The engine
 runs a buffered early-termination (8% trailing) so the recorded per-fold *trailing DD can
 be truncated*, which makes the Velotrade G4 buffer near non-binding (audit P7-07: a 1.09%
 apparent DD was a 3-sim-day artifact; the fixed-lot replay revealed 4.59%). The stress pass

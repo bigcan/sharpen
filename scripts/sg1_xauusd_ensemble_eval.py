@@ -347,7 +347,7 @@ def _select_buffer_fn(gates_cfg: dict):
 
 # --- v2.3: bootstrap, action-correlation, diversity selector, swap bundle ---
 #
-# Protocol v2.3 amendment (decision_ensemble_bootstrap_diversity_s495.md):
+# SharpOps v2.3 amendment (decision_ensemble_bootstrap_diversity_s495.md):
 #   - Block-bootstrap on per-bar returns → P(ens_PF > solo_PF), P(ens_MDD < solo_MDD)
 #   - N×N action-correlation matrix on test-window solo trajectories
 #   - Diversity-aware top-K: PF − λ * max_corr_with_already_selected
@@ -549,9 +549,9 @@ def block_bootstrap_pf_mdd(
 def _resolve_bootstrap_decision(
     bs: dict, gates: dict, legacy_uplift: Optional[float] = None
 ) -> dict:
-    """Map bootstrap stats onto the Protocol v2.5 decision matrix.
+    """Map bootstrap stats onto the SharpOps v2.5 decision matrix.
 
-    Protocol v2.5 (S526) bumps bootstrap to PRIMARY for prop-firm workstreams
+    SharpOps v2.5 (S526) bumps bootstrap to PRIMARY for prop-firm workstreams
     and demotes the legacy point-estimate uplift to audit-only. The decision
     space:
 
@@ -830,7 +830,7 @@ def write_ensemble_swap_bundle(
     predecessor_version: Optional[str] = None,
     trigger: Optional[str] = None,
 ) -> dict:
-    """Pack a Protocol v2.3 atomic swap bundle (`ensemble_v{N}.tar.gz`).
+    """Pack a SharpOps v2.3 atomic swap bundle (`ensemble_v{N}.tar.gz`).
 
     Bundle layout (under tar root):
       checkpoints/seed_<id>/checkpoint_final.pth  (one per selected seed)
@@ -932,7 +932,7 @@ def write_ensemble_swap_bundle(
     return manifest
 
 
-# --- Stage 2.5 val-split rule selection (Protocol v2 amendment S495) --------
+# --- Stage 2.5 val-split rule selection (SharpOps amendment S495) --------
 #
 # Supersedes the S493 "hardcoded canonical = ens_agreement" rule. Motivation:
 # the BTC Stage 2.5 result (S495) showed that ens_agreement, while dominant on
@@ -997,7 +997,7 @@ def run_stage_2_5_val_selection(
     if uplift_promote is None:
         if "ensemble_uplift_min" not in gates:
             raise ValueError(
-                "gates.ensemble_uplift_min missing — required by Protocol v2 Stage 2.5"
+                "gates.ensemble_uplift_min missing — required by SharpOps Stage 2.5"
             )
         uplift_promote = float(gates["ensemble_uplift_min"])
     if uplift_ambiguous is None:
@@ -1162,7 +1162,7 @@ def run_stage_2_5_val_selection(
             f"diverse set in Stage 2.5-R."
         )
 
-    # --- Phase 4d: combined decision (Protocol v2.5 — bootstrap is PRIMARY) ---
+    # --- Phase 4d: combined decision (SharpOps v2.5 — bootstrap is PRIMARY) ---
     if bs_primary_basis == "legacy_uplift":
         # Pre-v2.3 config (no bootstrap gates) — fall through to point-uplift.
         decision = legacy_decision
@@ -1315,7 +1315,7 @@ def run_stage_2_5_val_selection(
     )
 
     # --- v2.2 §2 eval_distribution artifacts (seed_report.json + ensemble_report.json) ---
-    # Per Protocol v2.2 §2: Stage 2 per-seed action distributions + Stage 2.5
+    # Per SharpOps v2.2 §2: Stage 2 per-seed action distributions + Stage 2.5
     # ensemble action distribution (with composition_rule). Consumed by §8.2
     # live action-drift check as the regime-baseline. Regime bucketing
     # (by_vol_quartile + regime_cutpoints) is populated from a 20-bar rolling

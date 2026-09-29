@@ -1,4 +1,4 @@
-"""Tests for Protocol v2.2 §8.3 kill_file JSON + lockout state machine."""
+"""Tests for SharpOps v2.2 §8.3 kill_file JSON + lockout state machine."""
 
 from __future__ import annotations
 

@@ -809,7 +809,7 @@ def main():
     config = load_config(args.config)
 
     # Resolve HPO params: CLI > config(new v2 keys) > config(legacy keys) > defaults.
-    # Protocol v2 §4 stage 1 names the keys `trials` and `steps_per_trial` (which
+    # SharpOps §4 stage 1 names the keys `trials` and `steps_per_trial` (which
     # distributed_hpo_worker.py also reads). Older funding-arb configs used
     # `n_trials` and `hpo_timesteps` — accept both so mixed configs keep working.
     hpo_cfg = config.get("hpo", {})

@@ -193,7 +193,7 @@ def main() -> int:
     p = argparse.ArgumentParser(description=__doc__,
                                 formatter_class=argparse.RawDescriptionHelpFormatter)
     p.add_argument("--config", required=True, type=Path,
-                   help="Multiseed YAML config (per Protocol v2 Stage 2)")
+                   help="Multiseed YAML config (per SharpOps Stage 2)")
     p.add_argument("--instance", default=None,
                    help="Single-slot fallback. Target instance in "
                         "instances.json (e.g. gpuhub-2). Ignored if --slots set.")

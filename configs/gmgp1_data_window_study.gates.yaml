@@ -97,7 +97,7 @@ hypotheses:
     description: >-
       Mann-Whitney U two-sided test on the seed-level test-PF distributions
       between A_base and A_long, evaluated per budget. Loose alpha (0.10)
-      matches Protocol v2 Stage-2 ambiguity-band convention at small N.
+      matches SharpOps Stage-2 ambiguity-band convention at small N.
     statistic: "mann_whitney_u"
     alternative: "two-sided"
     p_max: 0.10
@@ -136,7 +136,7 @@ significance:
   test: "mann_whitney_u"
   alternative: "two-sided"
   p_max: 0.10
-  rationale: "loose alpha matches Protocol v2 Stage-2 ambiguity-band convention at small N"
+  rationale: "loose alpha matches SharpOps Stage-2 ambiguity-band convention at small N"
 
 # ---------------------------------------------------------------------------
 # Anomaly flags (exclude from G1-G6 stats but report)
@@ -153,7 +153,7 @@ anomalies:
     blowup_check_step: 500000
 
   entropy_collapse:
-    description: "Protocol v2 health gate. Auto-flag any seed whose entropy crashes."
+    description: "SharpOps health gate. Auto-flag any seed whose entropy crashes."
     entropy_floor: -10.0
 
   fee_tier_confound:

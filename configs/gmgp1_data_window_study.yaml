@@ -116,7 +116,7 @@ training:
 hpo:
   enabled: false                     # HPs locked from 6xluh826 T29
 
-# Validator-required gates (Protocol v2 §4 stage 2 + universal).
+# Validator-required gates (SharpOps §4 stage 2 + universal).
 # G1-G6 hypothesis gates are in configs/gmgp1_data_window_study.gates.yaml,
 # read by scripts/analyze_data_window_study.py post-run.
 gates:

@@ -355,7 +355,7 @@ services:
   # as a core CFD pair AND it's the same instrument the graduation venue
   # (The5ers HG + FTMO MT5 EURUSD CFD) uses — so paper PnL extrapolates.
   # Bundle: ensemble_v1 (seeds [2025, 3141, 9999], ens_pf_weighted) per
-  # Protocol v2.5 bootstrap PROMOTE (P(PF)=1.0000 / vs_best_solo=0.9994).
+  # SharpOps v2.5 bootstrap PROMOTE (P(PF)=1.0000 / vs_best_solo=0.9994).
   # Creds: SG1_EURUSD_CTRADER_* in docker/live/.env (cTID <ACCT_1> distinct
   # from gmgp1-xauusd <ACCT_7> + sg1-xauusd <ACCT_8>). OAuth tokens shared
   # across all three (single cTrader user grant covers all accounts);

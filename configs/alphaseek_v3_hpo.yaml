@@ -3,7 +3,7 @@
 # Frame: fee-internalized LOB scalping. M0-M4 simulator + executor +
 # state_dim=12 + throughput gate are upstream of this config (committed in
 # bf0146f6). M6 will replace the monolithic alphaseek_hpo_runner.py with a
-# protocol-v2-conformant launcher; this YAML is the first config it consumes.
+# SharpOps-conformant launcher; this YAML is the first config it consumes.
 #
 # Validator: scripts/validate_config.py --config configs/alphaseek_v3_hpo.yaml --stage hpo
 #   PRE-STAGE-0 NOTE: data manifest does not yet exist; validator will FAIL
@@ -149,7 +149,7 @@ gates:
   throughput_min_fills_per_episode: 10
   throughput_n_warmup_steps: 20000
 
-  # Protocol v2.2 §8.2 / §8.3 declarations (advisory at HPO; load-bearing
+  # SharpOps v2.2 §8.2 / §8.3 declarations (advisory at HPO; load-bearing
   # at paper-deploy). Values from alphaseek_v3.gates.yaml.
   drift:
     window_bars: 1800

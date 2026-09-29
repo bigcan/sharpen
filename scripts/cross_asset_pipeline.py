@@ -1,18 +1,18 @@
-"""Cross-asset momentum allocator pipeline — Protocol-v2 staged runner.
+"""Cross-asset momentum allocator pipeline — SharpOps staged runner.
 
 Phase 4 of the cross-sectional pivot (S553-cont-34). Orchestrates the RL allocator
 built in Phases 1-3 over the validated linear TSMOM core:
 
     data-prep (cross_asset_loader)  →  per-window SAC HPO (objective=Sharpe, ADR-4)
       →  full train  →  RL net-Sharpe eval  →  FROZEN linear-core net-Sharpe eval
-      →  RL-beats-linear gate  →  Protocol-v2 stage manifest (status PASS/FAIL)
+      →  RL-beats-linear gate  →  SharpOps stage manifest (status PASS/FAIL)
 
 The decisive gate (``configs/cross_asset_momentum.gates.yaml``): the RL allocator
 must beat the frozen monthly linear core OOS by ``rl_beats_linear.min_uplift_vs_baseline``
 net Sharpe, evaluated through the SAME env/convention/costs (see
 ``allocator_factory.evaluate_linear_core``) — else we **ship the linear rule**.
 
-Stages (Protocol v2):
+Stages (SharpOps):
     --stage hpo   window 0 only: HPO + train + eval + gate (Stage-1 decision artifact)
     --stage wf    all walk-forward windows (Stage-3 RESEARCH-tier verdict, NOT a deploy gate)
 
@@ -21,7 +21,7 @@ TIER (cont-58 P6-04): this RL allocator is RESEARCH-TIER. Per the cont-53 ship-l
 the FROZEN LINEAR core (``configs/live_cross_asset_paper.yaml`` + the paper executor + the
 ``paper_soak`` gates), which runs no SAC. This pipeline runs SINGLE-SEED HPO/train per window
 (no ``seed=``, no l1-multiseed), so its WF manifest answers the rl_beats_linear *research*
-question only — it does NOT gate capital, so Protocol-v2 Principle-6 (multiseed median) does not
+question only — it does NOT gate capital, so SharpOps Principle-6 (multiseed median) does not
 bind it. Building the seeded multiseed (the X1 alternative) is the path NOT taken under
 ship-linear. The manifest is stamped ``tier: research`` / ``deploy_gating: false`` to make this
 unmistakable to any downstream reader.
@@ -532,7 +532,7 @@ def _write_manifest(out_dir: Path, stage: str, config: dict, gate: dict,
     # P6-04 (cont-58): the RL allocator is RESEARCH-TIER, not capital-bound. Per the cont-53
     # ship-linear verdict the capital path is the FROZEN LINEAR core (live_cross_asset_paper.yaml
     # + the paper executor + paper_soak gates), which uses no SAC. Stamp the tier onto the verdict
-    # so a reader can never mistake this single-seed WF for a Protocol-v2 deploy gate. Default
+    # so a reader can never mistake this single-seed WF for a SharpOps deploy gate. Default
     # research/non-gating is the SAFE default (a research verdict cannot promote capital).
     strat = config.get("strategy", {})
     tier = str(strat.get("tier", "research"))
@@ -541,7 +541,7 @@ def _write_manifest(out_dir: Path, stage: str, config: dict, gate: dict,
         "RESEARCH-TIER (cont-58 P6-04): this single-seed WF answers the rl_beats_linear "
         "RESEARCH question; it is NOT a capital deploy gate. The capital-bound strategy is the "
         "FROZEN LINEAR core (live_cross_asset_paper.yaml), which runs no SAC/multiseed. "
-        "Protocol-v2 Principle-6 (multiseed median) is the un-taken X1 alternative, so a single "
+        "SharpOps Principle-6 (multiseed median) is the un-taken X1 alternative, so a single "
         "non-deterministic run per window is acceptable research evidence and gates nothing."
         if tier == "research" else None
     )

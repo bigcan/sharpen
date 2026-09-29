@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""GMGP1-Gold steady-state Stage 2.5-R ensemble-confirm (Protocol v2.5).
+"""GMGP1-Gold steady-state Stage 2.5-R ensemble-confirm (SharpOps v2.5).
 
 Gold variant of the val-split ensemble-confirm eval. Delegates to
 `sg1.run_stage_2_5_val_selection()` — this file supplies the GMGP1-Gold-specific
@@ -7,7 +7,7 @@ seed/checkpoint map, seed PFs (from Stage 2 N=10 verdict), and a research-tier
 buffer function (no prop-firm DD cap; gmgp1-gold paper container is internal-
 validation IB MGC, not on FTMO/Velotrade).
 
-Protocol v2.5 (per `decision_protocol_v25_bootstrap_primary.md`):
+SharpOps v2.5 (per the bootstrap-primary decision note):
   Phase 0: diversity-aware top-K selection (audit-only when pool_size == K)
   Phase 1: run all 4 ensemble rules + N solos on val window
   Phase 2: argmax(val_PF) across ensembles → chosen_rule
@@ -144,7 +144,7 @@ def main() -> None:
         trigger="L1_N10_PASS_S536_cont",
     )
 
-    print("\n========== GMGP1 GOLD ENSEMBLE-CONFIRM (Protocol v2.5) ==========")
+    print("\n========== GMGP1 GOLD ENSEMBLE-CONFIRM (SharpOps v2.5) ==========")
     print(json.dumps(verdict, indent=2, default=str))
 
 

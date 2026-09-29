@@ -1,6 +1,6 @@
 # v2.2 Live-Monitoring Baselines
 
-Committed baselines for Protocol v2.2 §8.2 live action-drift monitoring.
+Committed baselines for SharpOps v2.2 §8.2 live action-drift monitoring.
 
 Each subdirectory contains:
 - `seed_report.json` — Stage 2 per-seed `eval_distribution` blocks

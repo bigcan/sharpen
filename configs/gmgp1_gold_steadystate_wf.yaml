@@ -6,7 +6,7 @@
 #     P(PF)=1.000, test PF 3.05 (+20.4% uplift). See
 #     `results/gmgp1_gold_ensemble/ensemble_report.json` and
 #     `project_gmgp1_gold_steadystate_a2_results.md`.
-#   - Per Protocol v2.3 §4.5: WF re-confirmation MANDATORY after Stage 2.5-R,
+#   - Per SharpOps v2.3 §4.5: WF re-confirmation MANDATORY after Stage 2.5-R,
 #     "temporal robustness on new data is not transitive."
 #
 # Inheritance:
@@ -134,7 +134,7 @@ gates:
   # Stage 4 (downstream — recent-OOS, retained for validator continuity)
   oos_pf_floor: 1.1
 
-  # Protocol v2.2 §8.2 live action-distribution drift thresholds (validator runs unconditionally).
+  # SharpOps v2.2 §8.2 live action-distribution drift thresholds (validator runs unconditionally).
   drift:
     window_bars: 400
     min_bars_before_check: 200
@@ -147,7 +147,7 @@ gates:
     regime_conditioning: true
     vol_estimator_bars: 20
 
-  # Protocol v2.2 §8.3 tiered safe-mode (S491 lesson).
+  # SharpOps v2.2 §8.3 tiered safe-mode (S491 lesson).
   safe_mode:
     crit_triggers_flatten: true
     crit_repeat_window_hours: 24

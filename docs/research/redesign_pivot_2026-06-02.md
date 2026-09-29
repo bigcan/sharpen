@@ -39,7 +39,7 @@ Investigation concluded the **entire SG-1 and GMGP-1 V7 multiscale pipeline is l
 
 **Fixing the leak does NOT, by itself, yield an edge — but the answer is not "redesign everything."**
 
-- **Keep the stack.** The leak was one bad line in one feature file, not a systemic failure. Protocol v2 staged pipeline, the RL machinery (SAC, 4→131 SPS), the cost-realistic harness, the gates, and especially the **Tier-2 deep audit + tripwire tests** are what *caught* the bug. They are the project's single biggest asset.
+- **Keep the stack.** The leak was one bad line in one feature file, not a systemic failure. SharpOps staged pipeline, the RL machinery (SAC, 4→131 SPS), the cost-realistic harness, the gates, and especially the **Tier-2 deep audit + tripwire tests** are what *caught* the bug. They are the project's single biggest asset.
 - **Rebuild the signal.** The V7 obs is purely price/volume-derived (multiscale OHLCV + EMA-Z + ATR). Once causal, that is a near-efficient single-instrument directional-timing signal with ~no demonstrated edge on BTC and a strong prior of the same on Gold/FX.
 
 **Conclusion: redesign the signal, not the stack. "Patch + re-HPO and hope" is the false-hope path** — de-leaking destroyed information, so re-HPO is a *falsification* step, not a recovery step.
@@ -68,7 +68,7 @@ All 16 finrl-desktop containers stay `restart=no`. sg1-btc already shelved. gmgp
 
 ## 7. Phase 2 — Keep vs. rebuild
 
-**KEEP (do not touch):** Protocol v2 + `validate_config` + manifest contract; **Tier-2 deep audit + tripwire tests + LEAK-2 / CAUS-01..05** (promote to the *first* gate); SAC + GPU stack; Stage 2.5 bootstrap / Stage 3 WF / Stage 3.5 obs-noise / Stage 5-C characterization; the wired cost+slippage harness.
+**KEEP (do not touch):** SharpOps + `validate_config` + manifest contract; **Tier-2 deep audit + tripwire tests + LEAK-2 / CAUS-01..05** (promote to the *first* gate); SAC + GPU stack; Stage 2.5 bootstrap / Stage 3 WF / Stage 3.5 obs-noise / Stage 5-C characterization; the wired cost+slippage harness.
 
 **REBUILD — the signal. New gate ordering + research menu:**
 - **Falsify-before-optimize:** every hypothesis clears a cheap *causal + frictionless-vs-cost A/B* on borrowed HPs **before** any HPO. The frictionless↔cost-corrected gap becomes a standard WF report line — the artifact detector every past false edge would have failed.

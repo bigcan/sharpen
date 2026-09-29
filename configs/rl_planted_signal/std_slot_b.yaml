@@ -8,7 +8,7 @@
 #   STRUCTURAL         <= 1/5 pass -> input scale was not the blocker; RL-for-discovery stays closed.
 #   PARTIAL            2-3/5 -> scale matters but learning is seed-dependent; more seeds / smaller net before any real-data spend.
 #   Secondary: Z15 SAC/oracle fraction vs 13% raw (P15_s1).
-# Diagnostic on SYNTHETIC data, not a protocol-v2 strategy run: no manifest, no gates, no capital.
+# Diagnostic on SYNTHETIC data, not a SharpOps strategy run: no manifest, no gates, no capital.
 # Launch: python scripts/deploy_bare_metal.py --script scripts/research/rl_planted_signal/launch_fleet.py
 #   --config configs/rl_planted_signal/std_slot_b.yaml --instance gpuhub-1 --gpu 1 --no_kill
 out_root: results/rl_planted_signal/std_slot_b

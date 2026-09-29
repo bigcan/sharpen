@@ -1,5 +1,5 @@
 #!/usr/bin/env python
-"""Build Protocol v2 data manifest for an OHLCV parquet.
+"""Build SharpOps data manifest for an OHLCV parquet.
 
 Writes `<stem>.manifest.json` alongside the parquet with fields required by
 `scripts/validate_config.py`:

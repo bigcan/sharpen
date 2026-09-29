@@ -5,7 +5,7 @@
 # (configs/gmgp1_xauusd_ensemble.gates.yaml, S493 OANDA L1 Path B); the only
 # differences are `seeds:` (now [789, 2025, 1024] from L1-extended val-argmax)
 # and `provenance:`. Gate thresholds are identical — same workstream + same
-# asset class + same Protocol v2.5 policy.
+# asset class + same SharpOps v2.5 policy.
 #
 # Read by scripts/gmgp1_xauusd_ensemble_eval_oanda.py --wf_config.
 # Decision rule: ALL five gates (G1..G5) must PASS -> approve ensemble for
@@ -56,23 +56,23 @@ gates:
     uplift_ratio_min: 1.10
     metric: median                            # across-folds aggregation
 
-  # === Protocol v2.5 PRIMARY (S526): block-bootstrap probability gate. ===
+  # === SharpOps v2.5 PRIMARY (S526): block-bootstrap probability gate. ===
   # Mirrors the GMGP1-XAUUSD predecessor gates file so Stage 2.5-R callers,
   # live-engine drift_agreement monitors, and run_stage_2_5_val_selection see
   # identical thresholds across all GMGP1-XAUUSD variants (extended +
-  # predecessor). See decision_protocol_v25_bootstrap_primary.md.
+  # predecessor). See the SharpOps v2.5 bootstrap-primary decision note.
   ensemble_bootstrap_p_pf_promote: 0.90       # P(ens_PF > solo_PF) >= 0.90 for PROMOTE
   ensemble_bootstrap_p_mdd_promote: 0.90      # P(ens_MDD better) >= 0.90 for PROMOTE on DD channel
   ensemble_bootstrap_p_pf_ambiguous: 0.75     # v2.5 ambiguous floor on P(PF)
   ensemble_bootstrap_resamples: 10000          # B in stationary block bootstrap
   ensemble_bootstrap_block_len: null           # null -> auto = sqrt(n_bars), capped at 0.1*n
 
-  # === Protocol v2.5 SECONDARY (audit/sanity only). ===
+  # === SharpOps v2.5 SECONDARY (audit/sanity only). ===
   ensemble_uplift_min: 1.10                    # legacy point-estimate (audit-only)
   ensemble_ambiguous_min: 1.05                 # legacy ambiguous floor (audit-only)
 
-  # === Protocol v2.6 Stage 2.5-R Sensitivity Audit (S553, Phase α calibration) ===
-  # See .agent/artifacts/protocol_v27_a_sensitivity_audit_architecture.md for design.
+  # === SharpOps v2.6 Stage 2.5-R Sensitivity Audit (S553, Phase α calibration) ===
+  # See the SharpOps v2.7-A sensitivity-audit architecture note for design.
   # Phase α (S553+): keys present but sensitivity_audit_required=false → calibration phase.
   # Phase β (post-backfill): operator bumps protocol_version to '2.6' AND flips required=true.
   edge_stability_pf_ratio_floor: 0.70             # PRIMARY: pf_inner_min / pf_center >= floor
@@ -106,7 +106,7 @@ gates:
       PF across folds must be at or below cv_max.
     cv_pf_max: 0.35
 
-  # Protocol v2.2 §8.2 live action-distribution drift thresholds.
+  # SharpOps v2.2 §8.2 live action-distribution drift thresholds.
   drift:
     window_bars: 1000
     min_bars_before_check: 500
@@ -119,13 +119,13 @@ gates:
     regime_conditioning: true
     vol_estimator_bars: 20
 
-  # Protocol v2.2 §8.3 tiered safe-mode.
+  # SharpOps v2.2 §8.3 tiered safe-mode.
   safe_mode:
     crit_triggers_flatten: true
     crit_repeat_window_hours: 24
     crit_repeat_count_before_lockout: 2
 
-  # Protocol v2.3 §4.5 Stage 2.5-R retrain triggers.
+  # SharpOps v2.3 §4.5 Stage 2.5-R retrain triggers.
   retrain:
     ensemble_recheck_days: 90
     live_pf_ratio: 0.8
@@ -136,10 +136,10 @@ gates:
     action_kl_warn_window_bars: 5000
     cost_drift_ratio: 1.20
     cost_drift_window_trades: 100
-    # Protocol v2.5.1 timeframe-tier max_age_days: 15-min -> 90d.
+    # SharpOps v2.5.1 timeframe-tier max_age_days: 15-min -> 90d.
     max_age_days: 90
 
-  # Protocol v2.3 §8.2 agreement-decay live monitor (no-op for ens_pf_weighted).
+  # SharpOps v2.3 §8.2 agreement-decay live monitor (no-op for ens_pf_weighted).
   drift_agreement:
     enabled_for_rules: ["ens_agreement", "ens_majority"]
     flat_delta_warn: 0.20
@@ -163,7 +163,7 @@ decision:
 provenance:
   drafted_on: '2026-05-26'
   drafted_by_session: S550-cont-8
-  upstream_memory: feedback_anchor_cells_via_protocol_v25_multiplicity.md
+  upstream_memory: "the SharpOps v2.5.1 multiplicity note"
   l1_extended_result: >-
     L1 N=10 CLEAN PASS: median test PF 2.6601, mean 2.6697, CV 5.38%,
     val PF median 2.6461 (val-test gap -0.014), Sharpe_d median 4.67
@@ -178,7 +178,7 @@ provenance:
   wf_budget_rationale: >-
     total_timesteps = 1.1M per fold. Anchored to L1 cell's 30.5x multiplicity
     (1.5M / ~49K bars). 18mo WF folds yield ~36K bars; 1.1M / 36K = 30.5x,
-    holds multiplicity steady from L1 to WF per Protocol v2.5.1.
+    holds multiplicity steady from L1 to WF per SharpOps v2.5.1.
   upstream_l1_config: configs/gmgp1_xauusd_l1_multiseed_extended.yaml
   upstream_wandb_runs:
     seed_789:  4b04cwv1

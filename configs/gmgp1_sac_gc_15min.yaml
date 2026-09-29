@@ -18,7 +18,7 @@
 #
 # Audit history: S519 ticket -> S536 HPO PASS (wandb tfbaitfp) -> S538-cont-2
 # Stage 3 WF closed -> 2026-05-09 ensemble v1 LIVE.
-# Refs: docs/protocol_v2.md S3.5.4, decision_steady_state_fees_pattern.md,
+# Refs: docs/sharpops.md S3.5.4, decision_steady_state_fees_pattern.md,
 #       project_gmgp1_gc_steady_state_fee_audit.md.
 # ---------------------------------------------------------------------------
 

@@ -68,7 +68,7 @@ significance:
   test: "mann_whitney_u"
   alternative: "two_sided"
   p_max: 0.10
-  rationale: "loose alpha matches Protocol v2 Stage-2 ambiguity-band convention at small N"
+  rationale: "loose alpha matches SharpOps Stage-2 ambiguity-band convention at small N"
 
 # ---------------------------------------------------------------------------
 # Anomaly flags (exclude from H1-H4 stats but report)
@@ -84,7 +84,7 @@ anomalies:
     blowup_check_step: 500000
 
   entropy_collapse:
-    description: "Protocol v2 health gate. Auto-flag any seed whose entropy crashes."
+    description: "SharpOps health gate. Auto-flag any seed whose entropy crashes."
     entropy_floor: -10.0
 
 # ---------------------------------------------------------------------------

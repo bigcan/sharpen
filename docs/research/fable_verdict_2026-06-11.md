@@ -109,7 +109,7 @@ plus one added gate below.
    else ship the linear core and stop. RL never discovers direction from raw
    prices again.
 4. **The audit stack** (Tier-2 deep lifecycle audit, tripwire tests, LEAK-2,
-   staged protocol v2, the falsify-before-optimize gate ordering) — this is the
+   staged SharpOps, the falsify-before-optimize gate ordering) — this is the
    project's single most valuable asset. It caught the X2 leak; my independent
    re-verification confirms everything it certified post-pivot.
 

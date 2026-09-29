@@ -11,7 +11,7 @@ Usage:
         --workstream <name> \\
         --config configs/<l1_multiseed_yaml>
 
-Architecture: ``.agent/artifacts/protocol_v27_a_sensitivity_audit_architecture.md``
+Architecture: the SharpOps v2.7-A sensitivity-audit architecture note
 """
 from __future__ import annotations
 

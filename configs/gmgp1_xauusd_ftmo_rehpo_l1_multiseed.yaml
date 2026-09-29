@@ -4,7 +4,7 @@
 #   Best trial #10 — PF 2.6210 (promoted_by_worker gpuhub-1-gpu1-r1, 2026-04-22 03:24 UTC)
 #   Params cf. results/best_params_gmgp1_xauusd_ftmo_rehpo_20260421.yaml
 #
-# Protocol v2 §4 Stage 2 (S488): prop-firm workstreams require N>=10 seeds with
+# SharpOps §4 Stage 2 (S488): prop-firm workstreams require N>=10 seeds with
 # pre-committed escalation range `l1_pf_cv_ambiguous: [0.22, 0.38]`.
 #   - PASS  gate: median test PF >= 1.2, all seeds profitable, CV(PF) outside [0.22, 0.38]
 #   - AMBIG gate: CV inside [0.22, 0.38] -> auto-extend to N=20
@@ -100,7 +100,7 @@ training:
 hpo:
   enabled: false
 
-gates:                               # Protocol v2 §4 Stage 2 (S488 escalation)
+gates:                               # SharpOps §4 Stage 2 (S488 escalation)
   hpo_pf_floor: 1.2
   hpo_min_trials_completed: 30
   entropy_floor: 0.01

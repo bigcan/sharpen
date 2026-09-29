@@ -3,7 +3,7 @@
 # Upstream: Stage 2 L1 multiseed PASS @ N=10 (median PF 2.706, CV 7.73%)
 #   Top-3 seeds promoted: 42 (PF 2.940), 789 (PF 2.841), 456 (PF 2.812)
 #
-# Gate (Protocol v2 §4 Stage 3, pre-committed S488):
+# Gate (SharpOps §4 Stage 3, pre-committed S488):
 #   - gates.wf_pf_floor per window (per-seed)
 #   - aggregate ftmo_trailing_dd_buffer_pp >= 0.5
 #   - >=2/3 seeds must pass gate (1/3 = survivor bias -> re-HPO, NOT paper)
@@ -121,7 +121,7 @@ training:
 hpo:
   enabled: false
 
-gates:                              # Protocol v2 §4 Stage 3
+gates:                              # SharpOps §4 Stage 3
   hpo_pf_floor: 1.2
   hpo_min_trials_completed: 30
   entropy_floor: 0.01

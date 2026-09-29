@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Stage 3.5 Observation-Noise Robustness — Protocol v2.7-B (S553-cont-25).
+"""Stage 3.5 Observation-Noise Robustness — SharpOps v2.7-B (S553-cont-25).
 
 Standalone, canonical entrypoint (IC-5/ADR-7; there is no
 ``run_full_pipeline.py --stage`` dispatcher). Re-rolls a PROMOTE'd workstream's

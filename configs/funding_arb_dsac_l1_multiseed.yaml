@@ -1,4 +1,4 @@
-# Funding-Arb DSAC — L1 Multi-Seed Stability (Protocol v2 Stage 2)
+# Funding-Arb DSAC — L1 Multi-Seed Stability (SharpOps Stage 2)
 #
 # HP PROVENANCE:
 #   Re-HPO study `funding_arb_dsac_rehpo_20260426` (S499c, 2026-04-26 → 04-27)
@@ -16,7 +16,7 @@
 # tagged prop-firm — the goal of L1 multiseed is the same (rule out lucky-seed
 # illusion). Ambiguous escalation: CV(PF) in [0.22, 0.38] → auto-extend to N=20.
 #
-# STAGE 2.5 (ensemble-confirm) hook (Protocol v2 §4 S493 + S495 val-selection):
+# STAGE 2.5 (ensemble-confirm) hook (SharpOps §4 S493 + S495 val-selection):
 #   After L1 completes, top-3 seeds (S495 diversity-aware: top-1 by PF, then
 #   top-2/3 maximize PF − λ·max_action_corr) feed the ensemble eval. Aggregation
 #   rule chosen by val-argmax-PF (S495 rule, not hardcoded ens_agreement).
@@ -104,7 +104,7 @@ walk_forward:
   step_bars: 720
   embargo_bars: 0
 
-# Protocol v2 §4 (S488 + v2.2 + v2.3 amendments).
+# SharpOps §4 (S488 + v2.2 + v2.3 amendments).
 gates:
   # --- Stage 1 inheritance (from HPO upstream — already met) ---
   hpo_pf_floor: 1.1
@@ -118,7 +118,7 @@ gates:
                                             # ample headroom; tight gate filters one-off seeds.
   l1_pf_cv_max: 0.30
   l1_pf_cv_ambiguous: [0.22, 0.38]          # S488 pre-committed escalation range
-  # --- Stage 2.5 (ensemble) — Protocol v2.5: bootstrap is PRIMARY (S526) ---
+  # --- Stage 2.5 (ensemble) — SharpOps v2.5: bootstrap is PRIMARY (S526) ---
   ensemble_uplift_min: 1.10                 # legacy point-estimate (audit-only in v2.5)
   ensemble_ambiguous_min: 1.05              # legacy ambiguous floor (audit-only in v2.5)
   ensemble_rule_selection: val_argmax_pf    # S495: pick aggregation rule on val split
@@ -159,7 +159,7 @@ gates:
     crit_triggers_flatten: true             # v2.2 §8.3: CRIT writes kill_file → force-close
     crit_repeat_count_before_lockout: 2
     crit_repeat_window_hours: 24
-  # --- Retrain cadence (Protocol v2 §9) ---
+  # --- Retrain cadence (SharpOps §9) ---
   retrain:
     live_pf_ratio: 0.8
     live_pf_window_days: 10

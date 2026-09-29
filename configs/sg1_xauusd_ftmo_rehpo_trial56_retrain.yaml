@@ -8,7 +8,7 @@
 #   value = 2.8533191011206833
 #   produced_by = worker_gpuhub-1-gpu0-r1 (vn67pwtl) at 2026-04-20 08:22:29 UTC
 #
-# Protocol v2: stage = retrain (one-off), upstream = sg1_xauusd_ftmo_rehpo_20260419
+# SharpOps: stage = retrain (one-off), upstream = sg1_xauusd_ftmo_rehpo_20260419
 
 data:
   file_path: "data/cme/gc_2025_lob1_1min_stitched.parquet"
@@ -106,7 +106,7 @@ training:
 hpo:
   enabled: false                        # single-seed retrain, not a sweep
 
-gates:                                  # Protocol v2 §4 (inherited from sg1_xauusd_ftmo_hpo.yaml)
+gates:                                  # SharpOps §4 (inherited from sg1_xauusd_ftmo_hpo.yaml)
   hpo_pf_floor: 1.2
   hpo_min_trials_completed: 30
   entropy_floor: 0.01

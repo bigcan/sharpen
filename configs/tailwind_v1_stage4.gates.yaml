@@ -22,7 +22,7 @@ stage4_recent_oos:
   # ---------------------------------------------------------------------------------
   # WINDOW — cutoff-anchored, NOT the protocol's rolling `today - recent_oos_days`
   # ---------------------------------------------------------------------------------
-  # DEVIATION FROM PROTOCOL v2 Stage 4, deliberate and reported. The protocol's rolling
+  # DEVIATION FROM SharpOps Stage 4, deliberate and reported. The protocol's rolling
   # 60-day window is built for RL strategies, where "out of sample" means "after this
   # checkpoint's train cutoff" and bars arrive by the thousand at 15-min resolution.
   # TAILWIND is a FROZEN LINEAR rule on a DAILY clock with MONTHLY rebalancing:
@@ -35,10 +35,10 @@ stage4_recent_oos:
   research_cutoff: "2026-06-01"      # = xsec_momentum_falsification.END, the frozen
                                      # research sample end. Data after this date was not
                                      # seen by any parameter choice in the book.
-  protocol_rolling_days: 60          # protocol v2 Stage-4 default; reported, not gating
+  protocol_rolling_days: 60          # SharpOps Stage-4 default; reported, not gating
 
   # ---------------------------------------------------------------------------------
-  # VERDICT BUCKETS — protocol v2 Stage 4, unchanged
+  # VERDICT BUCKETS — SharpOps Stage 4, unchanged
   # ---------------------------------------------------------------------------------
   # PF >= hold_ratio  x baseline PF -> HOLD
   # PF >= watch_ratio x baseline PF -> WATCH
@@ -85,9 +85,9 @@ stage4_recent_oos:
   cost_model_conservative: harsh_10bps
 
   # ---------------------------------------------------------------------------------
-  # COMPLIANCE SUB-REPORT — protocol v2 Stage 4
+  # COMPLIANCE SUB-REPORT — SharpOps Stage 4
   # ---------------------------------------------------------------------------------
-  # FTMO caps only. Velotrade has no daily-loss compliance filter (protocol v2 §Stage 4:
+  # FTMO caps only. Velotrade has no daily-loss compliance filter (SharpOps §Stage 4:
   # "skipped for workstreams without prop-firm caps such as Velotrade").
   compliance:
     ftmo_min_active_days: 4          # min days with non-zero turnover in the window

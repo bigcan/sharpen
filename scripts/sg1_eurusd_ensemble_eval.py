@@ -2,8 +2,8 @@
 """SG-1 EURUSD The5ers Hyper Growth — Stage 2.5-R ensemble-confirm.
 
 Delegates to `sg1_xauusd_ensemble_eval.run_stage_2_5_val_selection()` —
-the canonical Stage 2.5-R block-bootstrap evaluator (Protocol v2.5,
-S526 decision_protocol_v25_bootstrap_primary).
+the canonical Stage 2.5-R block-bootstrap evaluator (SharpOps v2.5,
+S526, the SharpOps v2.5 bootstrap-primary decision note).
 
 Seeds: top-3 by L1 test PF (verdict
 `results/sg1_eurusd_l1_verdict.json`, S549-cont 2026-05-23):

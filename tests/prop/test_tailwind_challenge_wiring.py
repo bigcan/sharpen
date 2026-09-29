@@ -1,4 +1,4 @@
-"""Tests for the TAILWIND challenge config's Protocol-v2 paper-deploy wiring.
+"""Tests for the TAILWIND challenge config's SharpOps paper-deploy wiring.
 
 Covers the six `--stage paper-deploy` FAILs closed on 2026-08-17 (risk.static_peak,
 safety.kill_file, safety.flatten_on_kill_file, drift.enabled, the 8 v2.2 gates.drift keys and

@@ -386,7 +386,7 @@ def baseline_signal(name, scores, column, hold_days, construction, calendar, rul
 |---|---|---|
 | Threshold provenance | PASS | Every threshold is in `configs/atl_jev.gates.yaml` `phase1` (p2/p3/p4 bars, release cutoff) or the frozen funnel file. Phase 2 adds none. |
 | Gate consumer | PASS (by test) | Each `phase1` key has a named consumer (§ Interface contracts) and a test that changes the key and asserts the behavior changes. |
-| Protocol v2 staging | N/A | No training. Evaluation is staged as legs p1 → p4, one manifest each. |
+| SharpOps staging | N/A | No training. Evaluation is staged as legs p1 → p4, one manifest each. |
 | Manifest contract | PASS | p4 consumes p1–p3 only when `status == "PASS"`. Every manifest records the git commit, `gates_sha` and questionnaire hash. |
 | Pre-flight validation | N/A | No run config. Loaders refuse unknown or missing keys (fail closed). |
 | HPO search space | N/A | Nothing is tuned. The design is pre-registered. |

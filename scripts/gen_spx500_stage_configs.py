@@ -6,7 +6,7 @@ byte-identical apart from `env.long_only`. Twelve configs maintained by hand wou
 and a drifted knob would silently turn the comparison into a test of something else.
 
 BUDGET CHANGES FROM STAGE 1, both deliberate:
-  * total_timesteps 400K -> 1_200_000. Multiplicity (protocol v2 s3.5.1) is
+  * total_timesteps 400K -> 1_200_000. Multiplicity (SharpOps s3.5.1) is
     total_timesteps / bars_in_train_window; the 24-month window holds ~47.1K 15-min bars, so
     400K was ~8.5x -- explicitly sanctioned for HPO but UNDER-TRAINED for L1. 1.2M gives
     ~25.5x, mid the validated 15-40x productive zone. Do not carry the HPO budget forward.
@@ -94,7 +94,7 @@ def main() -> int:
         write(cfg, ROOT / f"configs/gmgp1_spx500_{tag}_l1_multiseed.yaml",
               prov + f"# Stage 2 L1 multiseed. total_timesteps={args.l1_steps:,} => ~"
                      f"{args.l1_steps/47100:.1f}x multiplicity on the ~47.1K-bar train window\n"
-                     f"# (protocol v2 productive zone 15-40x). Seeds supplied via --seed.\n\n")
+                     f"# (SharpOps productive zone 15-40x). Seeds supplied via --seed.\n\n")
 
         # ---- Stage 3: walk-forward folds -------------------------------------------
         for i, (trs, tre, tes, tee) in enumerate(WF_WINDOWS, 1):

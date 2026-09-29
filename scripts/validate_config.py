@@ -1,6 +1,6 @@
-"""Protocol v2 config validator.
+"""SharpOps config validator.
 
-Enforces the gates defined in `docs/protocol_v2.md`. Exits non-zero on any
+Enforces the gates defined in `docs/sharpops.md`. Exits non-zero on any
 violation so it can be wired into pre-commit, CI, and `run_full_pipeline.py`
 launch hooks.
 
@@ -34,7 +34,7 @@ if str(_ROOT) not in sys.path:
 
 logger = logging.getLogger("validate_config")
 
-PROTOCOL_DOC = "docs/protocol_v2.md"
+PROTOCOL_DOC = "docs/sharpops.md"
 VALID_STAGES = ("data-prep", "hpo", "l1-multiseed", "ensemble-confirm", "wf", "oos", "paper-deploy")
 
 MANIFEST_SCHEMA_PATH = Path(__file__).resolve().parent.parent / "docs" / "schemas" / "manifest.schema.json"
@@ -105,7 +105,7 @@ _MANIFEST_SCHEMA_CACHE: dict[str, Any] | None = None
 
 
 def _load_manifest_schema() -> dict[str, Any] | None:
-    """Load and cache the Stage 2 / 2.5 report JSON schema (Protocol v2 §2)."""
+    """Load and cache the Stage 2 / 2.5 report JSON schema (SharpOps §2)."""
     global _MANIFEST_SCHEMA_CACHE
     if _MANIFEST_SCHEMA_CACHE is not None:
         return _MANIFEST_SCHEMA_CACHE
@@ -421,7 +421,7 @@ def check_gates_block(cfg: dict, r: ValidationResult) -> None:
     if inline is not None and not isinstance(inline, dict):
         r.fail(
             f"`gates:` must be a mapping, got {type(inline).__name__}. "
-            f"Per-workstream gates required by Protocol v2 §4. See {PROTOCOL_DOC}."
+            f"Per-workstream gates required by SharpOps §4. See {PROTOCOL_DOC}."
         )
         return
 
@@ -435,7 +435,7 @@ def check_gates_block(cfg: dict, r: ValidationResult) -> None:
             else ""
         )
         r.fail(
-            "Missing `gates:` block. Per-workstream gates required by Protocol v2 §4."
+            "Missing `gates:` block. Per-workstream gates required by SharpOps §4."
             f"{detail} See {PROTOCOL_DOC}."
         )
         return
@@ -450,7 +450,7 @@ def check_gates_block(cfg: dict, r: ValidationResult) -> None:
 
 
 def check_data_manifest(cfg: dict, stage: str, r: ValidationResult) -> None:
-    """Stage 0 rejection rules from §3 of protocol_v2.md."""
+    """Stage 0 rejection rules from §3 of sharpops.md."""
     data = cfg.get("data", {})
 
     # ccxt-at-runtime pipelines (funding-arb, sync-1h crypto) don't ship a
@@ -598,7 +598,7 @@ def check_hpo(cfg: dict, r: ValidationResult) -> None:
     # HPO budget must be declared (no unbounded HPO)
     for key in ("trials", "steps_per_trial"):
         if key not in hpo:
-            r.fail(f"hpo.{key} missing — HPO budget must be declared (Protocol v2 §4)")
+            r.fail(f"hpo.{key} missing — HPO budget must be declared (SharpOps §4)")
 
     # Training-health hard-fail thresholds expected in gates
     gates = cfg.get("gates", {})
@@ -610,14 +610,14 @@ def check_hpo(cfg: dict, r: ValidationResult) -> None:
             "stage 1 will fall back to project defaults"
         )
 
-    # Training-budget multiplicity (Protocol v2.5.1 §3.5) on the per-trial budget.
+    # Training-budget multiplicity (SharpOps v2.5.1 §3.5) on the per-trial budget.
     _check_multiplicity(cfg, hpo.get("steps_per_trial"), "HPO per-trial", r)
 
 
 def _is_prop_firm(cfg: dict) -> bool:
-    """Workstream is paper-or-live-capital per Protocol v2.2 §8 scope rules.
+    """Workstream is paper-or-live-capital per SharpOps v2.2 §8 scope rules.
 
-    Tag set mirrors the one declared in decision_protocol_v22_rlops_drift_safemode.md:
+    Tag set mirrors the one declared in the SharpOps v2.2 drift/safe-mode decision note:
     any of `prop-firm`, `FTMO`, `Velotrade` (case-insensitive match on
     wandb.tags).
     """
@@ -657,7 +657,7 @@ def _train_window_days(cfg: dict) -> float | None:
 
 
 def _training_budget_multiplicity(cfg: dict, total_steps) -> tuple[float, float, str] | None:
-    """``steps / bars_in_train_window`` for 24/7 crypto (Protocol v2.5.1 §3.5,
+    """``steps / bars_in_train_window`` for 24/7 crypto (SharpOps v2.5.1 §3.5,
     decision_training_budget_multiplicity_rule). Returns ``(mult, bars, basis)``
     or ``None`` when the trading calendar can't be inferred reliably (session-bound
     FX/futures) — we skip rather than emit a wrong multiplicity."""
@@ -851,7 +851,7 @@ def check_execution_overlay_gates(cfg: dict, r: ValidationResult) -> None:
         )
 
 
-# Protocol v2.2 §8.2 / §8.3 gate keys. Every one of these must be present in
+# SharpOps v2.2 §8.2 / §8.3 gate keys. Every one of these must be present in
 # a prop-firm / live-capital workstream's gate YAML — missing keys reject.
 # Advisory workstreams (research tier) are exempt (warn only).
 _V22_DRIFT_GATE_KEYS = (
@@ -877,7 +877,7 @@ _V26_VETO_REQUIRED_SUBKEYS = ("enabled", "scale", "max_veto_frac")
 
 
 def check_drift_safemode_gates(cfg: dict, r: ValidationResult) -> None:
-    """Protocol v2.2 §8 / §8.3 drift + safe_mode gate-key presence.
+    """SharpOps v2.2 §8 / §8.3 drift + safe_mode gate-key presence.
 
     Blocking for prop-firm / live-capital; advisory otherwise. Keys live
     under the `gates:` block in the workstream YAML (co-located with the
@@ -886,7 +886,7 @@ def check_drift_safemode_gates(cfg: dict, r: ValidationResult) -> None:
     declaration is, so that an operator intentionally declares their
     thresholds rather than silently inheriting.
 
-    See `decision_protocol_v22_rlops_drift_safemode.md`.
+    See the SharpOps v2.2 drift/safe-mode decision note.
     """
     prop_firm = _is_prop_firm(cfg)
     gates = cfg.get("gates", {}) or {}
@@ -900,7 +900,7 @@ def check_drift_safemode_gates(cfg: dict, r: ValidationResult) -> None:
         msg = (
             f"gates.drift missing v2.2 key(s): {missing_drift} — "
             f"§8.2 action-drift thresholds must be declared per workstream "
-            f"(see decision_protocol_v22_rlops_drift_safemode.md)"
+            f"(see the SharpOps v2.2 drift/safe-mode decision note)"
         )
         r.fail(msg) if prop_firm else r.warn(msg)
     else:
@@ -991,11 +991,11 @@ def check_l1_multiseed(cfg: dict, r: ValidationResult) -> None:
     gates = cfg.get("gates", {})
     seeds = gates.get("l1_seeds", 5)
     if seeds < 3:
-        r.fail(f"gates.l1_seeds={seeds} — must be >=3 (Protocol v2 §4 stage 2)")
+        r.fail(f"gates.l1_seeds={seeds} — must be >=3 (SharpOps §4 stage 2)")
     if "l1_pf_cv_max" not in gates:
         r.warn("gates.l1_pf_cv_max not set — defaulting to 0.30")
     # S488: prop-firm / live-capital workstreams must declare the ambiguous
-    # range pre-launch (Protocol v2 §4 stage 2, pre-committed escalation rule).
+    # range pre-launch (SharpOps §4 stage 2, pre-committed escalation rule).
     tags = cfg.get("wandb", {}).get("tags", []) or []
     prop_firm = ("prop-firm" in tags) or ("FTMO" in tags) or ("velotrade" in tags)
     if prop_firm and seeds >= 10:
@@ -1003,15 +1003,15 @@ def check_l1_multiseed(cfg: dict, r: ValidationResult) -> None:
         if amb is None:
             r.warn("prop-firm workstream with l1_seeds>=10 should declare "
                    "gates.l1_pf_cv_ambiguous (default [0.22, 0.38]) for "
-                   "pre-committed escalation (Protocol v2 §4 stage 2)")
+                   "pre-committed escalation (SharpOps §4 stage 2)")
         elif not (isinstance(amb, list) and len(amb) == 2 and amb[0] < amb[1]):
             r.fail(f"gates.l1_pf_cv_ambiguous={amb} invalid — must be "
                    "[low, high] with low<high")
     if prop_firm and seeds < 10:
-        r.warn(f"prop-firm workstream with l1_seeds={seeds} — Protocol v2 §4 "
+        r.warn(f"prop-firm workstream with l1_seeds={seeds} — SharpOps §4 "
                "stage 2 (S488) recommends N>=10 for CV-estimator reliability")
 
-    # Training-budget multiplicity (Protocol v2.5.1 §3.5) on the per-seed budget.
+    # Training-budget multiplicity (SharpOps v2.5.1 §3.5) on the per-seed budget.
     _check_multiplicity(cfg, (cfg.get("training", {}) or {}).get("total_timesteps"),
                         "L1 per-seed", r)
 
@@ -1046,13 +1046,13 @@ def _load_ensemble_gates_overlay(cfg: dict) -> dict:
 
 
 def check_ensemble_confirm(cfg: dict, r: ValidationResult) -> None:
-    """Stage 2.5 gates (Protocol v2.5 §4, S526 bootstrap-primary refinement).
+    """Stage 2.5 gates (SharpOps v2.5 §4, S526 bootstrap-primary refinement).
 
     Prop-firm / live-capital workstreams MUST pass Stage 2.5 before Stage 3.
     Non-prop-firm workstreams may opt in via `wandb.tags` or gates block, but
     the stage is advisory for them (warn, do not fail).
 
-    Protocol v2.5 (S526): block-bootstrap thresholds are PRIMARY for prop-firm
+    SharpOps v2.5 (S526): block-bootstrap thresholds are PRIMARY for prop-firm
     workstreams. The legacy `ensemble_uplift_min` point gate is demoted to an
     audit-only metric (still encouraged for diff against historical decisions
     but no longer fails validation when missing).
@@ -1102,7 +1102,7 @@ def check_ensemble_confirm(cfg: dict, r: ValidationResult) -> None:
     p_pf_promote = gates.get("ensemble_bootstrap_p_pf_promote")
     if p_pf_promote is None:
         msg = (
-            "gates.ensemble_bootstrap_p_pf_promote not set — Protocol v2.5 "
+            "gates.ensemble_bootstrap_p_pf_promote not set — SharpOps v2.5 "
             "Stage 2.5 PRIMARY gate. " + bootstrap_keys_hint
         )
         r.fail(msg) if prop_firm else r.warn(msg)
@@ -1110,7 +1110,7 @@ def check_ensemble_confirm(cfg: dict, r: ValidationResult) -> None:
     p_mdd_promote = gates.get("ensemble_bootstrap_p_mdd_promote")
     if p_mdd_promote is None:
         msg = (
-            "gates.ensemble_bootstrap_p_mdd_promote not set — Protocol v2.5 "
+            "gates.ensemble_bootstrap_p_mdd_promote not set — SharpOps v2.5 "
             "Stage 2.5 PRIMARY gate. " + bootstrap_keys_hint
         )
         r.fail(msg) if prop_firm else r.warn(msg)
@@ -1159,7 +1159,7 @@ def check_ensemble_confirm(cfg: dict, r: ValidationResult) -> None:
         if prop_firm:
             r.warn(
                 "gates.ensemble_uplift_min not set — demoted to audit/sanity "
-                "in Protocol v2.5 (bootstrap is primary), but recommended for "
+                "in SharpOps v2.5 (bootstrap is primary), but recommended for "
                 "diff against historical v2.1/v2.3 decisions. Default 1.10."
             )
     else:
@@ -1219,7 +1219,7 @@ def _protocol_at_least(declared: str, target: str) -> bool:
 
 
 def check_sensitivity_audit(cfg: dict, r: ValidationResult) -> None:
-    """Protocol v2.6 Stage 2.5-R Sensitivity Audit gate validation (S553).
+    """SharpOps v2.6 Stage 2.5-R Sensitivity Audit gate validation (S553).
 
     Validates that the L1 multiseed config declares the gate keys required for
     the post-PROMOTE sensitivity audit (`scripts/stage_2_5_r_sensitivity_audit.py`,
@@ -1236,7 +1236,7 @@ def check_sensitivity_audit(cfg: dict, r: ValidationResult) -> None:
     threshold calibration. Validator FAILs prop-firm configs missing the keys
     at that point.
 
-    See `.agent/artifacts/protocol_v27_a_sensitivity_audit_architecture.md`
+    See the SharpOps v2.7-A sensitivity-audit architecture note
     (ADR-3, ADR-5) and `mc_robustness_methods_research.md` (Method #5).
     """
     # Phase α back-compat: enforce on v2.6 opt-in and every later protocol
@@ -1367,7 +1367,7 @@ def check_sensitivity_audit(cfg: dict, r: ValidationResult) -> None:
             "(true/false)"
         )
 
-    # N2 (ADR-N5, Protocol v2.7-A): PF-XCHECK report-only mode + divergence
+    # N2 (ADR-N5, SharpOps v2.7-A): PF-XCHECK report-only mode + divergence
     # threshold are gates-driven. report_only=true surfaces the (H+L)/2-vs-close
     # PF divergence without halting (Phase-α calibration); flip false to enforce
     # only after locking the threshold on the retrained policy's observed
@@ -1420,7 +1420,7 @@ def check_sensitivity_audit(cfg: dict, r: ValidationResult) -> None:
 
 
 def _check_stress_gate_keys(gates: dict, r: ValidationResult) -> None:
-    """Validate the X3 fixed-lot stress gate keys when present (Protocol v2 Stage 3;
+    """Validate the X3 fixed-lot stress gate keys when present (SharpOps Stage 3;
     audit P7-03/P7-07). Safe code defaults exist (0.5pp / 1.0x) so absence is not an
     error — this only sanity-checks declared values."""
     ddb = gates.get("stress_dd_buffer_pp")
@@ -1446,7 +1446,7 @@ def _check_stress_gate_keys(gates: dict, r: ValidationResult) -> None:
 def check_wf(cfg: dict, r: ValidationResult) -> None:
     gates = cfg.get("gates", {})
     if gates.get("wf_windows", 4) < 4:
-        r.fail("gates.wf_windows < 4 (Protocol v2 §4 stage 3)")
+        r.fail("gates.wf_windows < 4 (SharpOps §4 stage 3)")
     # X3 stress gate keys live in the standalone <ws>_ensemble.gates.yaml overlay
     # (same source the WF eval reads), with inline gates taking precedence.
     overlay = _load_ensemble_gates_overlay(cfg) or {}
@@ -1756,7 +1756,7 @@ def check_turnover_limit_explicit(cfg: dict, r: ValidationResult) -> None:
 
 
 def check_report_schema(cfg: dict, r: ValidationResult) -> None:
-    """Protocol v2 §2 manifest schema enforcement on Stage 2 / 2.5 reports.
+    """SharpOps §2 manifest schema enforcement on Stage 2 / 2.5 reports.
 
     Looks up reports referenced by the config (drift.baseline_path,
     agent.ensemble.bundle_path) and validates each against
@@ -1883,7 +1883,7 @@ def check_v23_agreement_decay_gates(cfg: dict, r: ValidationResult) -> None:
       * live agent uses a consensus aggregation rule (``ens_agreement`` /
         ``ens_majority``).
     The agreement-decay tracker is the silent-death detector for these
-    rules (see Protocol v2 §4.5 trigger #4); shipping without the
+    rules (see SharpOps §4.5 trigger #4); shipping without the
     threshold declarations means a misconfigured live deploy could go
     undetected for thousands of bars.
     """
@@ -1900,7 +1900,7 @@ def check_v23_agreement_decay_gates(cfg: dict, r: ValidationResult) -> None:
     if missing:
         r.fail(
             f"gates.drift missing v2.3 agreement-decay key(s): {missing} — "
-            f"required for ensemble rule {rule!r} (Protocol v2 §8.2 ext / "
+            f"required for ensemble rule {rule!r} (SharpOps §8.2 ext / "
             f"§4.5 Stage 2.5-R trigger #4). Defaults: warn=0.20, crit=0.40, "
             f"window_bars=2000."
         )
@@ -1946,10 +1946,10 @@ def _num(d: dict, key: str):
 
 
 def check_retrain_gate(cfg: dict, r: ValidationResult) -> None:
-    """Protocol v2 §4.5 retrain-trigger schema (paper-deploy stage, X6).
+    """SharpOps §4.5 retrain-trigger schema (paper-deploy stage, X6).
 
     Two complementary, intentionally-distinct blocks (NOT duplicative — see
-    docs/protocol_v2.md §4.5):
+    docs/sharpops.md §4.5):
       * ``retrain_policy:`` drives the offline cron OOS-PF / staleness /
         live-DD / feature-drift-KS gate (scripts/check_retrain_triggers.py).
       * ``gates.retrain.cost_drift_*`` drives the LIVE CostDriftTracker
@@ -1967,7 +1967,7 @@ def check_retrain_gate(cfg: dict, r: ValidationResult) -> None:
     if not retrain_gates:
         if prop_firm:
             r.warn(
-                "gates.retrain absent — Protocol v2 §4.5 cost-drift trigger #6 "
+                "gates.retrain absent — SharpOps §4.5 cost-drift trigger #6 "
                 "(CostDriftTracker) is DISABLED for this live config. Declare "
                 "gates.retrain.cost_drift_ratio (>1.0) + cost_drift_window_trades "
                 "(int>=1), mirroring the canonical <ws>_ensemble.gates.yaml "
@@ -2063,7 +2063,7 @@ def check_retrain_gate(cfg: dict, r: ValidationResult) -> None:
 
 
 def check_obs_noise_gate(cfg: dict, r: ValidationResult) -> None:
-    """Protocol v2.7-B Stage 3.5 observation-noise gate validation (S553-cont-25).
+    """SharpOps v2.7-B Stage 3.5 observation-noise gate validation (S553-cont-25).
 
     Validates that the config (via its ensemble gates overlay) declares the keys
     required for Stage 3.5 price-path randomization
@@ -2081,7 +2081,7 @@ def check_obs_noise_gate(cfg: dict, r: ValidationResult) -> None:
     ``obs_noise_mdd_buffer_pp_*`` against the de-leaked candidates' empirical
     spread. Validator then FAILs prop-firm configs missing the keys.
 
-    See ``.agent/artifacts/protocol_v27_b_obs_noise_stage_3_5_architecture.md``
+    See the SharpOps v2.7-B observation-noise (Stage 3.5) architecture note
     (IC-3/IC-4).
     """
     protocol_version = str(cfg.get("protocol_version", "2.6"))
@@ -2581,7 +2581,7 @@ def main() -> int:
     overlay_tag = f"  overlays={','.join(args.overlay)}" if args.overlay else ""
     logger.info("\nstatus=%s  config=%s  stage=%s%s", status, args.config.name, args.stage, overlay_tag)
     if status == "FAIL":
-        logger.error("Protocol v2 violations. See %s.", PROTOCOL_DOC)
+        logger.error("SharpOps violations. See %s.", PROTOCOL_DOC)
         return 1
     return 0
 

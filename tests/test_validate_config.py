@@ -513,7 +513,7 @@ def test_swap_handshake_passes_with_explicit_state_file():
 
 
 # ---------------------------------------------------------------------------
-# check_retrain_gate (X6 — Protocol v2 §4.5 retrain automation)
+# check_retrain_gate (X6 — SharpOps §4.5 retrain automation)
 # ---------------------------------------------------------------------------
 
 def _retrain_cfg(*, prop_firm=True, with_policy=True, with_gates=True, **policy_over):

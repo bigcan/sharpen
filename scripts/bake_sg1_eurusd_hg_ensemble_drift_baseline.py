@@ -4,7 +4,7 @@ SG-1 EURUSD Hyper Growth 8-fold WF ensemble trajectories.
 Pre-deploy build of the live drift baseline for sg1-eurusd, supporting the
 ensemble_v1 (ens_pf_weighted, seeds [2025, 3141, 9999]) Bybit demo SOAK
 deploy (S550). Stage 3 WF G3 legacy point-estimate FAILed at 1.081 but
-Protocol v2.5 bootstrap PROMOTEd (P(PF)=1.0000 / P(vs_best_solo)=0.9994).
+SharpOps v2.5 bootstrap PROMOTEd (P(PF)=1.0000 / P(vs_best_solo)=0.9994).
 
 Inputs (already collected to local repo from gpuhub-1+2 WF):
     results/sg1_eurusd_hg_ensemble_wf/fold_{00..07}/ens_pf_weighted_trajectory.parquet
@@ -109,7 +109,7 @@ def main() -> int:
         composition_rule=RULE,
     )
 
-    # Protocol v2.4 amendment (S495 OQ#5, 2026-04-24): per-fold hit-rate of
+    # SharpOps v2.4 amendment (S495 OQ#5, 2026-04-24): per-fold hit-rate of
     # the HG 8% profit target. Each fold's ~1-month OOS window counts as one
     # challenge attempt. Reported at ensemble level (aggregated PV) and per
     # seed (each constituent's solo PV). Validator
@@ -185,7 +185,7 @@ def main() -> int:
         "decision": "PROMOTE",
         "decision_source": "v2.5_bootstrap__manual (P(PF)=1.0000, P(vs_best_solo)=0.9994; legacy G3 1.081 override)",
         "ensemble_eval_distribution": dist,
-        # Protocol v2.4 amendment (S495 OQ#5): deploy-readiness signal.
+        # SharpOps v2.4 amendment (S495 OQ#5): deploy-readiness signal.
         # Gate: ensemble step1 hit_rate >= 0.5 to paper-deploy.
         "ensemble_challenge_target_hit_rate": ensemble_hit_rate,
         "challenge_target_hit_rate_by_seed": seed_hit_rates,
@@ -208,7 +208,7 @@ def main() -> int:
                 "Ensemble v1 (seeds [2025, 3141, 9999], aggregation ens_pf_weighted) "
                 "baseline captures the ensemble's action distribution across all 8 "
                 "Hyper Growth WF OOS test windows for regime breadth. Stage 3 WF "
-                "G3 point-estimate FAILed (1.081 < 1.10) but Protocol v2.5 "
+                "G3 point-estimate FAILed (1.081 < 1.10) but SharpOps v2.5 "
                 "block-bootstrap PROMOTEd. Live drift monitor compares Bybit demo "
                 "trading-time action histogram against this baseline."
             ),

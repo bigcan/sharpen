@@ -2,7 +2,7 @@
 """GMGP1-BTC Velotrade Stage 4 (recent-OOS) + Stage 2 stress-sidecar evaluator.
 
 Solo-seed evaluator that reuses the ensemble_eval `run_rule` + `compute_gate_metrics`
-helpers to produce a protocol-v2-compatible trajectory + metrics for a single
+helpers to produce a SharpOps-compatible trajectory + metrics for a single
 checkpoint over a single test window, optionally with env-param overrides
 (stress sidecar).
 

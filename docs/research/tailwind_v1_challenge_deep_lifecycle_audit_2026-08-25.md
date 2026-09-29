@@ -29,7 +29,7 @@ Capital gate, restated:
 | 1 | Forward-path render | ⚠ CLEAR by exactly zero margin on the needless-termination leg (1/20 disjoint windows) |
 | 2 | Sizing reconciliation | ✅ measured, mechanism now traced to file:line (this pass, §3) |
 | 3 | Tier-2 audit | ❌ **BLOCK, confirmed twice now** |
-| 4 | Protocol-v2 wiring | ✅ config-valid, but the controls it validates have no runtime consumer (§4) |
+| 4 | SharpOps wiring | ✅ config-valid, but the controls it validates have no runtime consumer (§4) |
 | 5 | Operator go-ahead | ⏳ open |
 
 ---

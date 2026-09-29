@@ -11,7 +11,7 @@
 #   * env.fee_schedule block REMOVED                       (banned by validate_config
 #                                                           check_no_fee_curriculum;
 #                                                           per decision_steady_state_fees_pattern)
-#   * hpo block: schema bumped to Protocol v2 (`enabled`, `objective`, `trials`)
+#   * hpo block: schema bumped to SharpOps (`enabled`, `objective`, `trials`)
 #   * gates block ADDED                                    (HPO + L1 + WF + drift/safe_mode)
 #   * wandb tags refreshed                                 (steady-state, re-hpo, s524)
 #
@@ -101,13 +101,13 @@ training:
 
 hpo:
   enabled: true
-  objective: "profit_factor"      # BUG-01 / Protocol v2 §4 stage 1
-  trials: 50                      # broad: 10 random + 40 TPE (Protocol v2 naming)
+  objective: "profit_factor"      # BUG-01 / SharpOps §4 stage 1
+  trials: 50                      # broad: 10 random + 40 TPE (SharpOps naming)
   steps_per_trial: 500000         # SAC needs long exploration past deadband + learning_starts
   narrow_mode: false              # full parameter space — v5 anchor invalid at 6.8bps
   enqueue_baseline: false
 
-gates:                            # Protocol v2 §4 — per-workstream numeric gates
+gates:                            # SharpOps §4 — per-workstream numeric gates
   # HPO stage
   hpo_pf_floor: 1.2
   hpo_min_trials_completed: 30
@@ -124,7 +124,7 @@ gates:                            # Protocol v2 §4 — per-workstream numeric g
   # Recent-OOS stage
   oos_pf_floor: 1.1
 
-  # Protocol v2.2 §8.2 live action-distribution drift thresholds. Validator
+  # SharpOps v2.2 §8.2 live action-distribution drift thresholds. Validator
   # (scripts/validate_config.py:check_drift_safemode_gates) runs unconditionally;
   # declaring the full block here is required even though gmgp1-gold is currently
   # internal-validation only (not yet a prop-firm container). Future MGC retrain
@@ -141,7 +141,7 @@ gates:                            # Protocol v2 §4 — per-workstream numeric g
     regime_conditioning: true
     vol_estimator_bars: 20
 
-  # Protocol v2.2 §8.3 tiered safe-mode (S491 bleed-window lesson).
+  # SharpOps v2.2 §8.3 tiered safe-mode (S491 bleed-window lesson).
   safe_mode:
     crit_triggers_flatten: true
     crit_repeat_window_hours: 24

@@ -1,9 +1,9 @@
-"""Stage 2.5-R Sensitivity Audit — Protocol v2.6 (S553).
+"""Stage 2.5-R Sensitivity Audit — SharpOps v2.6 (S553).
 
 Cell rollout + grid construction + edge-stability resolver for the
 post-PROMOTE config sensitivity sweep on V7 SAC ContinuousSwing policies.
 
-Architecture: ``.agent/artifacts/protocol_v27_a_sensitivity_audit_architecture.md``
+Architecture: the SharpOps v2.7-A sensitivity-audit architecture note
 Researcher:   ``.agent/artifacts/mc_robustness_methods_research.md``
 Validator:    ``scripts/validate_config.check_sensitivity_audit`` (C1, S553)
 
@@ -56,7 +56,7 @@ PF_XCHECK_DIVERGENCE_HALT = 0.30
 """PF-XCHECK invariant per CLAUDE.md: >30% divergence halts the cell."""
 
 PF_XCHECK_REPORT_ONLY = True
-"""ADR-N5 (Protocol v2.7-A N2): Phase-α calibration — compute and surface the
+"""ADR-N5 (SharpOps v2.7-A N2): Phase-α calibration — compute and surface the
 mid-vs-close PF divergence but never HALT. Flip to False (N2-enforce) only after
 the report-only distribution across known-good policies locks the threshold."""
 
@@ -476,7 +476,7 @@ def run_cell(
     ``rule_fn`` must conform to the ``run_rule`` signature: callable
     ``(per_seed_actions: Dict[int, np.ndarray], deadband: float) -> np.ndarray``.
 
-    N2 (Protocol v2.7-A, gates-driven): ``pf_xcheck_report_only`` and
+    N2 (SharpOps v2.7-A, gates-driven): ``pf_xcheck_report_only`` and
     ``pf_xcheck_divergence_halt`` are resolved by the orchestrator from
     ``gates.pf_xcheck_report_only`` / ``gates.pf_xcheck_divergence_halt`` (ADR-N5).
     They default to the module constants so direct callers and unit tests keep
@@ -592,7 +592,7 @@ def build_sensitivity_audit_block(
     """Compose the v2.6 ``sensitivity_audit`` verdict block.
 
     The block conforms to IC-2 in
-    ``.agent/artifacts/protocol_v27_a_sensitivity_audit_architecture.md``.
+    the SharpOps v2.7-A sensitivity-audit architecture note.
     """
     pf_inner_min_cell = None
     if edge_stability.pf_inner_min_cell is not None:

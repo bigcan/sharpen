@@ -1,8 +1,8 @@
-"""Validator tests for `check_obs_noise_gate` (Protocol v2.7-B, S553-cont-25).
+"""Validator tests for `check_obs_noise_gate` (SharpOps v2.7-B, S553-cont-25).
 
 Mirrors the Phase α / Phase β operator-decision behavior of
 `check_sensitivity_audit`, locked in
-`.agent/artifacts/protocol_v27_b_obs_noise_stage_3_5_architecture.md` (IC-4, ADR-9):
+the SharpOps v2.7-B observation-noise (Stage 3.5) architecture note (IC-4, ADR-9):
 
   Phase α (protocol_version unset or < "2.7"):
     - legacy config → no-op (exempt), regardless of prop-firm tag / missing keys

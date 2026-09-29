@@ -1,4 +1,4 @@
-"""Protocol v2 §4.5 trigger #6 — live cost-drift tracker.
+"""SharpOps §4.5 trigger #6 — live cost-drift tracker.
 
 Realized execution cost (taker/maker fee + slippage) measured against the
 cost assumption the policy was *trained / configured* under. When realized
@@ -250,7 +250,7 @@ class CostDriftTracker:
                     f"FIRED: cost_ratio={cost_ratio:.3f} "
                     f"(> {self.cost_drift_ratio}) — realized one-way cost "
                     f"{mean_realized:.6f} vs config {self.config_cost_frac:.6f} "
-                    f"over {n} trades; Protocol v2 §4.5 Stage 2.5-R retrain "
+                    f"over {n} trades; SharpOps §4.5 Stage 2.5-R retrain "
                     f"trigger #6 (cost_drift). Informational — not a halt."
                 ),
                 n_trades=n,

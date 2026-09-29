@@ -46,7 +46,7 @@ provenance:
   architecture_ref: .agent/artifacts/execution_overlay_architecture.md
   consumed_by: [validate_config, execution_overlay_runner]
   hpo_stage_skip: >-
-    Protocol v2's `hpo` stage is deliberately SKIPPED for this workstream (2026-08-25,
+    SharpOps's `hpo` stage is deliberately SKIPPED for this workstream (2026-08-25,
     execution_overlay_prelaunch_review.md finding 2) — execution_overlay_runner.py trains one
     fixed-hyperparameter policy directly at `--stage wf`, never running check_hpo's gate.
     Justification: the tunable surface is small and interpretable (horizon_bars, urgency

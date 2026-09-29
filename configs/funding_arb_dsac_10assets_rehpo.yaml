@@ -7,11 +7,11 @@
 #
 # Audit pass (2026-04-19):
 #   [x] BUG-01 fix: `hpo.objective: profit_factor`
-#   [x] Protocol v2 HPO keys: `hpo.trials` + `hpo.steps_per_trial` (runner
+#   [x] SharpOps HPO keys: `hpo.trials` + `hpo.steps_per_trial` (runner
 #       accepts legacy `n_trials`/`hpo_timesteps` for back-compat).
 #   [x] `validate_config.py --stage hpo` extended to accept 2-leg cost model
 #       (spot + perp) and ccxt-at-runtime data; this config now PASSes.
-#   [x] `gates:` populated with protocol-v2-aligned values (18 keys covering
+#   [x] `gates:` populated with SharpOps-aligned values (18 keys covering
 #       stages 1-4 + retrain cadence). Units corrected from original draft
 #       (entropy signed, q_div / action_sat in project-standard scale).
 #   [x] OPT-09/10 plumb-through: `_make_dsac_agent` in
@@ -109,7 +109,7 @@ hpo:
   enabled: true
   # BUG-01 FIX: profit_factor, not total_return (wl7ir7ia violation).
   objective: "profit_factor"
-  # Protocol v2 §4 key names (funding_arb_hpo_runner.py accepts both the new
+  # SharpOps §4 key names (funding_arb_hpo_runner.py accepts both the new
   # names below and the legacy `n_trials`/`hpo_timesteps` for back-compat.
   # distributed_hpo_worker.py only reads `steps_per_trial`.)
   trials: 50
@@ -122,12 +122,12 @@ walk_forward:
   step_bars: 720
   embargo_bars: 0
 
-gates:                              # Protocol v2 §4 — audit-cleared S485 (2026-04-19)
+gates:                              # SharpOps §4 — audit-cleared S485 (2026-04-19)
   # --- Stage 1 (HPO) ---
   hpo_pf_floor: 1.1                 # delta-neutral: lower than GMGP1's 1.5. CVaR
                                     # targets the tail, not peak PF.
   hpo_min_trials_completed: 30      # 60% of 50-trial budget to establish signal.
-  # Training-health hard-fails (protocol v2 §4 stage 1 defaults):
+  # Training-health hard-fails (SharpOps §4 stage 1 defaults):
   entropy_floor: -3.0               # SAC actor entropy (log-prob); collapse below
                                     # this = policy saturated. Negative = correct sign.
   q_div_max: 10.0                   # Q-target max|div| ratio across update cycle.
@@ -154,7 +154,7 @@ gates:                              # Protocol v2 §4 — audit-cleared S485 (20
   oos_hold_ratio: 0.8               # OOS PF ≥ 0.8 × WF median → HOLD.
   oos_watch_ratio: 0.6               # OOS PF ≥ 0.6 × WF median → WATCH.
   # Compliance sub-report: skip — crypto perps, no FTMO/Velotrade cap.
-  # --- Retrain cadence (protocol v2 §9) ---
+  # --- Retrain cadence (SharpOps §9) ---
   retrain:
     live_pf_ratio: 0.8
     live_pf_window_days: 10         # hourly strategy + ~24 trades/day — 10-day

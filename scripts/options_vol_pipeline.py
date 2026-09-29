@@ -1,4 +1,4 @@
-"""Options-VRP harvester pipeline — Protocol-v2 staged runner (Phase 5).
+"""Options-VRP harvester pipeline — SharpOps staged runner (Phase 5).
 
 Phase 5 of the market-making redesign (S553-cont-37). Orchestrates the RL
 ``OptionsVolHarvestEnv`` (Phase 3) over the validated Phase-1 linear short-straddle
@@ -7,7 +7,7 @@ core (``results/options_vrp/verdict.json``, BTC per-asset net Sharpe **1.10**):
     data-prep (deribit_options_loader → options_array_builder)
       →  per-window SAC HPO (objective = val net Sharpe, ADR-5)
       →  full train  →  RL net-Sharpe eval  →  FROZEN linear-core (neutral action) eval
-      →  rl_beats_linear + cost-gap + tail gates  →  Protocol-v2 stage manifest
+      →  rl_beats_linear + cost-gap + tail gates  →  SharpOps stage manifest
 
 The decisive gate (``configs/options_vol_harvest.gates.yaml``): the RL must beat the
 frozen linear short-vol core OOS by ``rl_beats_linear.min_uplift_vs_baseline`` net
@@ -20,7 +20,7 @@ Annualization is **365** (crypto 24/7 daily bars) — the same ANN the Phase-1
 falsification and ``options_pricing`` use, so the RL net Sharpe is on the identical
 scale as the documented 1.10 core.
 
-Stages (Protocol v2):
+Stages (SharpOps):
     --stage hpo   window 0 only: HPO + train + eval + gate (Stage-1 decision artifact)
     --stage wf    all walk-forward windows (Stage-3 deploy-gating verdict)
 
@@ -594,7 +594,7 @@ def _write_manifest(out_dir: Path, stage: str, config: dict, gate: dict,
         status = "FAIL"
         reason = reason or "all_windows_failed"
 
-    # min_windows is a Protocol-v2 WF-validity gate; the hpo stage is a single-window
+    # min_windows is a SharpOps WF-validity gate; the hpo stage is a single-window
     # decision artifact by design, so it is exempt.
     min_windows = int(config.get("walk_forward", {}).get("min_windows", 0))
     min_windows_met = (stage != "wf") or (len(ok) >= min_windows)
@@ -647,7 +647,7 @@ def _write_manifest(out_dir: Path, stage: str, config: dict, gate: dict,
 
 # --------------------------------------------------------------------------- #
 def main():
-    ap = argparse.ArgumentParser(description="Options-VRP harvester pipeline (Protocol v2)")
+    ap = argparse.ArgumentParser(description="Options-VRP harvester pipeline (SharpOps)")
     ap.add_argument("--config", default="configs/options_vol_harvest.yaml")
     ap.add_argument("--stage", choices=["hpo", "wf"], default="hpo")
     ap.add_argument("--out_dir", default=None)

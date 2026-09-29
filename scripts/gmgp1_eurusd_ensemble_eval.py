@@ -2,8 +2,8 @@
 """GMGP1-EURUSD The5ers Hyper Growth — Stage 2.5-R ensemble-confirm.
 
 Delegates to `sg1_xauusd_ensemble_eval.run_stage_2_5_val_selection()` —
-the canonical Stage 2.5-R block-bootstrap evaluator (Protocol v2.5,
-S526 decision_protocol_v25_bootstrap_primary).
+the canonical Stage 2.5-R block-bootstrap evaluator (SharpOps v2.5,
+S526, the SharpOps v2.5 bootstrap-primary decision note).
 
 Seeds: top-3 by L1 val_argmax_pf rule (S495) from
 `results/gmgp1_eurusd_l1_seed_report.json`, S551-cont-9 2026-05-29:
@@ -93,7 +93,7 @@ def main() -> None:
         bundle_version="v1",
     )
 
-    print("\n========== GMGP1-EURUSD ENSEMBLE-CONFIRM (Protocol v2.5) ==========")
+    print("\n========== GMGP1-EURUSD ENSEMBLE-CONFIRM (SharpOps v2.5) ==========")
     print(json.dumps(verdict, indent=2, default=str))
 
 

@@ -200,7 +200,7 @@ safety:
   flatten_on_kill_file: true           # v2.2 §8.3 CRIT graceful flatten
   emergency_flatten_on_error: true     # Flatten all positions on unrecoverable error
 
-# --- Protocol v2.2 §8.2 Live Action-Drift ---
+# --- SharpOps v2.2 §8.2 Live Action-Drift ---
 # Baseline = A2 ensemble reference distribution (single-window L1 PROMOTE,
 # 2025-11-01..2025-12-31), copied to baselines/gmgp1_gold_ensemble/ from
 # results/gmgp1_gold_ensemble/ensemble_report.json. Same 3 seeds [456, 1024,
@@ -218,7 +218,7 @@ drift:
   min_bars_before_check: 200
   vol_estimator_bars: 20
 
-# --- Protocol v2 Gates (live copy — mirrors gmgp1_gold_steadystate_ensemble.gates.yaml §drift/§safe_mode) ---
+# --- SharpOps Gates (live copy — mirrors gmgp1_gold_steadystate_ensemble.gates.yaml §drift/§safe_mode) ---
 # The live engine reads drift/safe_mode thresholds from `drift:` block above
 # (T1 _init_drift_tracker fallback order); this duplicate block exists to
 # satisfy validate_config.py's paper-deploy stage check, which requires

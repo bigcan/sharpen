@@ -1,4 +1,4 @@
-"""Funding-Arb DSAC walk-forward launcher (Protocol v2 Stage 3).
+"""Funding-Arb DSAC walk-forward launcher (SharpOps Stage 3).
 
 Fans out K parallel `funding_arb_dsac_train_seed.py` invocations, one per
 walk-forward window, all with the SAME seed (Stage 2.5 winner) and the SAME

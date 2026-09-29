@@ -1,7 +1,7 @@
 # FE Observation-Channel Pre-Registrations — FFD price channel + per-timeframe `norm_span`
 
 > **Status:** SPEC (pre-registered 2026-07-12, Session S553-cont-125) — gates locked BEFORE any result is computed. **No run launched.**
-> **Parent:** `docs/research/feature_engineering_deep_audit_gmgp1_sg1_2026-07-08.md` — RESEARCH backlog items (FE-09 FFD channel, FE-05 `norm_span`). Both are **obs-distribution changes** ⇒ they cannot reuse the current checkpoints ⇒ a full Protocol-v2 lifecycle (`docs/protocol_v2.md`) if they graduate.
+> **Parent:** `docs/research/feature_engineering_deep_audit_gmgp1_sg1_2026-07-08.md` — RESEARCH backlog items (FE-09 FFD channel, FE-05 `norm_span`). Both are **obs-distribution changes** ⇒ they cannot reuse the current checkpoints ⇒ a full SharpOps lifecycle (`docs/sharpops.md`) if they graduate.
 > **Prior:** FE-09 concluded the existing 8-feature set already spans the memory/stationarity trade-off (`log_return` at d=1, `close_z` at d=0 level), so a fractional-`d` channel *interpolates between two endpoints already in the obs* — expected marginal. These pre-registrations exist to make that prediction **falsifiable and cheaply testable** before any training spend.
 > **Design philosophy:** falsify-before-optimize + beat-linear gate (Fable verdict 2026-06-11). A Stage-0 CPU incremental-information probe must clear a locked MDE before any GPU is provisioned. FE-09's prior is that Stage 0 fails; a pre-registered pass would be the evidence that overturns it.
 
@@ -89,7 +89,7 @@ A fractionally-differenced log-price channel at `d ∈ {0.3, 0.4, 0.5}` (`_fract
 | **S0-B — not a cost mirage** | For any S0-A passer: augmented/alternate **net PF ≥ baseline net PF** (channel must not add turnover without edge) AND frictionless PF ≥ 1.20 on that cell. |
 | **S0-C — redundancy cleared (Part A only)** | TW-5 passes (FFD channel not collinear with `log_return`/`close_z`). |
 
-- **GO → Stage 1 (GPU):** ≥1 primary cell passes S0-A + S0-B (+ S0-C for FFD). *Only then* is a single confirmatory Protocol-v2 chain (data-prep → hpo → l1-multiseed N=10 → WF 8-fold+stress → recent-oos) launched on that one cell, A/B vs the current 8-feature/120-span incumbent checkpoint. Training-side numeric gates move to a `configs/<cell>.gates.yaml` (never hardcoded — CLAUDE.md). RL A/B still only behind the beat-linear gate. Expectation bounded by the probe's ΔPF.
+- **GO → Stage 1 (GPU):** ≥1 primary cell passes S0-A + S0-B (+ S0-C for FFD). *Only then* is a single confirmatory SharpOps chain (data-prep → hpo → l1-multiseed N=10 → WF 8-fold+stress → recent-oos) launched on that one cell, A/B vs the current 8-feature/120-span incumbent checkpoint. Training-side numeric gates move to a `configs/<cell>.gates.yaml` (never hardcoded — CLAUDE.md). RL A/B still only behind the beat-linear gate. Expectation bounded by the probe's ΔPF.
 - **NO-GO (FE-09 confirmed):** no primary cell clears S0-A. → The FFD channel / alternate `norm_span` adds no linearly-or-GBM-extractable forward-return information beyond the incumbent obs at 3m/15m on the live cells. Backlog item CLOSED as "measured redundant," not merely "untested." **Zero GPU spent.**
 - **WEAK / AMBIGUOUS:** a single marginal FDR survivor (ΔIC 0.010–0.015) failing S0-B, or a `norm_span` that improves z-block IC but not full-obs PF → document the exact cell + the single cheapest disambiguating follow-up; no GPU until resolved.
 
@@ -102,7 +102,7 @@ A fractionally-differenced log-price channel at `d ∈ {0.3, 0.4, 0.5}` (`_fract
 `results/fe_obs_channel/`: `data_qc.json`, `ffd_ic_table.csv`, `norm_span_ic_table.csv`, `incremental_delta.csv` (ΔIC + bootstrap CI per cell), `tripwires.json`, `verdict.json` (computed programmatically from the frozen gates), `summary.md`.
 Scripts (to author at run time, forking the R1 probe): `scripts/research/fe_obs_channel_probe.py`.
 
-**Budget:** Stage 0 ≈ 1 day wall-clock, $0 GPU. Stage 1 (only on a GO) = one Protocol-v2 chain per passing cell (~N=10 multiseed + 8-fold WF on gpuhub-2). Per the operator: **no training budget is committed by this document** — it is the pre-registration that a GO would unlock.
+**Budget:** Stage 0 ≈ 1 day wall-clock, $0 GPU. Stage 1 (only on a GO) = one SharpOps chain per passing cell (~N=10 multiseed + 8-fold WF on gpuhub-2). Per the operator: **no training budget is committed by this document** — it is the pre-registration that a GO would unlock.
 
 ---
 
@@ -123,7 +123,7 @@ Median primary ΔIC = −0.0018 (negative). **FE-09 confirmed:** the incumbent o
 
 **Secondary robustness (gc_15m): one non-triggering survivor, flagged as artifact.** `gc_15m|FFD d0.4|gbm` (ΔIC 0.0128, q 0.058) meets the raw numeric but per §0 cannot move the verdict — it is GBM-only (ridge +0.0097 < MDE), non-specific (the larger +0.0149 is a `norm_span` change on the same cell/model), and sits on an anomalous base IC (0.076 vs xauusd 0.006–0.016) that flags the 2025-only proxy itself.
 
-**Outcome:** both backlog items CLOSE as **measured redundant** (not "untested"). No Protocol-v2 GPU chain unlocked; zero training budget spent. GC's anomalous base IC is a separate data-window/QC question, not evidence for either channel.
+**Outcome:** both backlog items CLOSE as **measured redundant** (not "untested"). No SharpOps GPU chain unlocked; zero training budget spent. GC's anomalous base IC is a separate data-window/QC question, not evidence for either channel.
 
 **Scope reconciliation (disclosed).** §0 assigned role labels to *config anchors* before checking data windows. At execution the local data forced a re-mapping: the GC file (`gc_2025_lob1_1min_stitched.parquet`) is **2025-only** → it cannot populate the frozen 2025-06→2026-06 folds (only 4 of 6) → demoted to secondary/robustness. The window-complete gold series is **XAUUSD OANDA** (`xauusd_m1_m.parquet`, 2024-01→2026-05), run at **both** 15m and 3m — these became the primary verdict family. The verdict is **robust to the labeling**: under §0's original labels (XAUUSD-15m primary, SG-1-3m secondary) the primary XAUUSD-15m cell still has 0/… S0-A passers (max ΔIC +0.0032); under the execution labeling (both XAUUSD cells primary) still 0. Every window-complete gold cell is NO-GO regardless of which one is called "primary."
 

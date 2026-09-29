@@ -1,4 +1,4 @@
-"""Decision-matrix tests for `_resolve_bootstrap_decision` (Protocol v2.5).
+"""Decision-matrix tests for `_resolve_bootstrap_decision` (SharpOps v2.5).
 
 Pins the resolver's mapping from (P(ens_PF > solo_PF), P(ens_MDD > solo_MDD))
 onto the v2.5 PROMOTE / PROMOTE_DD_ONLY / AMBIGUOUS_BOOT / SOLO_BEST_FALLBACK
@@ -54,7 +54,7 @@ def _gates(
 
 
 # ---------------------------------------------------------------------------
-# 4x4 decision-matrix grid: P_PF tier x P_MDD tier (Protocol v2.5 target).
+# 4x4 decision-matrix grid: P_PF tier x P_MDD tier (SharpOps v2.5 target).
 # Tiers chosen to land cleanly inside / outside the 0.75 ambiguous floor and
 # the 0.90 promote threshold.
 # ---------------------------------------------------------------------------

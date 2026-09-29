@@ -126,7 +126,7 @@ const DEFAULT_PILLARS = [
     look: 'finrl_pro_ds/envs/dsr.py, finrl_pro_ds/envs/continuous_swing_env.py, signal_gated_wrapper.py, risk_shaping_wrapper.py, ~/.claude/skills/math/FORMULAS.md (MATH-R01/R04)' },
   { key: 'P5', title: 'Training & HPO',
     focus: 'BUG-01 (objective=PF, reward locked). Training-health kill gates (entropy/q-div/action-sat) — DECLARED vs WIRED? Training-budget multiplicity [15,40] check actually in validate_config? Per-trial seeding/reproducibility, val-window single-point risk, reward<->PF Spearman computed?',
-    look: 'finrl_pro_ds/training/objective.py, sac_trainer.py, scripts/run_full_pipeline.py, evaluate.py, distributed_hpo_worker.py, scripts/validate_config.py, docs/protocol_v2.md' },
+    look: 'finrl_pro_ds/training/objective.py, sac_trainer.py, scripts/run_full_pipeline.py, evaluate.py, distributed_hpo_worker.py, scripts/validate_config.py, docs/sharpops.md' },
   { key: 'P6', title: 'Validation — L1 multiseed (Stage 2)',
     focus: 'Gate code workstream-agnostic (or XAUUSD-hardcoded)? Seed convergence — does CV measure robustness or seed-degeneracy (inter-seed action corr)? val_argmax top-3 vs test top-3 decoupling. Full-N eval baseline + challenge_target_hit_rate present?',
     look: 'scripts/auto_queue_wf_after_l1.py, scripts/launch_l1_multiseed.py, results/<workstream>*/seed_report.json, *.gates.yaml' },
@@ -144,7 +144,7 @@ const DEFAULT_PILLARS = [
     look: 'finrl_pro_ds/crypto/live/live_engine.py, scripts/check_retrain_triggers.py, agent_loader.py, ensemble_bundle.py, configs/live_<workstream>*.yaml' },
   { key: 'P11', title: 'External SOTA benchmark',
     focus: 'Compare the pipeline to financial-ML best practice: deflated-Sharpe / PBO / CSCV (Bailey & Lopez de Prado), purged/embargoed CPCV, risk-sensitive reward (CVaR/Calmar/distributional), domain randomization / obs-noise / exec-failure stress, regime-conditioning. Name the single highest-value MISSING overfitting control. Query the NotebookLM KB (4aef5475-7fec-4d1f-96a7-efb3cafbb371) before web.',
-    look: 'docs/protocol_v2.md, results verdicts, literature via Researcher/NotebookLM' },
+    look: 'docs/sharpops.md, results verdicts, literature via Researcher/NotebookLM' },
 ]
 
 const parsed = parseArgs(args, DEFAULT_PILLARS)
@@ -170,7 +170,7 @@ const CONTEXT = context && `WORKSTREAM CONTEXT (supplied by the caller; where it
 // pillars get a scoped reading rule and stage-neutral roadmap buckets instead.
 const READING = custom
   ? 'Apply the CLAUDE.md invariants this workstream\'s code actually exercises (LEAK-2 temporal causality always; DATA-CLEAN wherever OHLCV is consumed). Do not audit RL-pipeline code (envs, reward, HPO, multiseed, ensembles, live engine) unless the pillar focus or the context puts it in scope.'
-  : 'Also read CLAUDE.md (invariants incl. LEAK-1/LEAK-2/SHORT-ACCT/BUG-01/DATA-CLEAN/PF-XCHECK) and docs/protocol_v2.md for the stage contract.'
+  : 'Also read CLAUDE.md (invariants incl. LEAK-1/LEAK-2/SHORT-ACCT/BUG-01/DATA-CLEAN/PF-XCHECK) and docs/sharpops.md for the stage contract.'
 const BUCKETS = custom
   ? 'NOW (code/test/doc/config, no new run) / NEXT (needs a re-run or new data) / RESEARCH (open question)'
   : 'NOW (config/test/doc, no retrain) / NEXT (needs a stage re-run) / RESEARCH (open question)'

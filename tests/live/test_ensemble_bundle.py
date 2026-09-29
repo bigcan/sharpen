@@ -1,4 +1,4 @@
-"""Tests for the Protocol v2.3 atomic ensemble swap-bundle reader.
+"""Tests for the SharpOps v2.3 atomic ensemble swap-bundle reader.
 
 Covers extraction + SHA256 verification, MISSING-normalizer policy, and
 the failure modes that the live engine relies on for all-or-nothing swap.

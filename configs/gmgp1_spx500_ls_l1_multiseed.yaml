@@ -5,7 +5,7 @@
 # arm the argmax-RETURN trial was 8 (PF=1.1070, return=+0.00994).
 # Selecting on the declared objective does NOT select the most profitable model.
 # Stage 2 L1 multiseed. total_timesteps=1,200,000 => ~25.5x multiplicity on the ~47.1K-bar train window
-# (protocol v2 productive zone 15-40x). Seeds supplied via --seed.
+# (SharpOps productive zone 15-40x). Seeds supplied via --seed.
 
 data:
   file_path: data/processed/spx500_1min.parquet

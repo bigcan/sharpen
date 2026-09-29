@@ -83,7 +83,7 @@ Empirical 2-sleeve book = **momentum + rates-carry**, static risk-parity, common
 
 ---
 
-## 4. Protocol-v2 / RL training results
+## 4. SharpOps / RL training results
 **None — and correctly so.** The cheap-falsification gate (§2b) stopped before any RL env/GPU run, per the mandatory "falsify cheap before you build RL" discipline. Building an RL allocator would have violated the project's own kill criterion ("RL fails to beat the linear core OOS → not justified"). The linear baseline *is* the recommended artifact; there is no RL number to report because RL was never justified to train.
 
 ## 5. Tier-2 deep-lifecycle audit

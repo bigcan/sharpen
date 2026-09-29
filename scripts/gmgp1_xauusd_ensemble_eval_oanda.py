@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""GMGP1-XAUUSD L1-OANDA ensemble-confirm (Stage 2.5, Path B, Protocol v2 S495).
+"""GMGP1-XAUUSD L1-OANDA ensemble-confirm (Stage 2.5, Path B, SharpOps S495).
 
 OANDA variant — delegates to `sg1.run_stage_2_5_val_selection()`. See that
 function's docstring and `decision_ensemble_val_selection_s495.md` for the
@@ -86,7 +86,7 @@ def main() -> None:
         bundle_version="v1",
     )
 
-    print("\n========== GMGP1 OANDA ENSEMBLE-CONFIRM (Protocol v2.3) ==========")
+    print("\n========== GMGP1 OANDA ENSEMBLE-CONFIRM (SharpOps v2.3) ==========")
     print(json.dumps(verdict, indent=2, default=str))
 
 

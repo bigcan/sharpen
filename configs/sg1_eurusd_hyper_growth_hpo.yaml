@@ -132,7 +132,7 @@ hpo:
   trials: 50
   steps_per_trial: 500000
 
-gates:                                 # Protocol v2 §4 — per-workstream numeric gates
+gates:                                 # SharpOps §4 — per-workstream numeric gates
   # HPO stage
   hpo_pf_floor: 1.2
   hpo_min_trials_completed: 30

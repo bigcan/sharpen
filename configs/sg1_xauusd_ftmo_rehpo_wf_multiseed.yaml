@@ -155,7 +155,7 @@ ensemble:
   # Pointer to pre-committed gate YAML:
   gates_file: "configs/sg1_xauusd_ensemble.gates.yaml"
 
-gates:                                # Protocol v2 §4 Stage 3 (training-level)
+gates:                                # SharpOps §4 Stage 3 (training-level)
   hpo_pf_floor: 1.2
   hpo_min_trials_completed: 30
   entropy_floor: 0.01

@@ -864,16 +864,16 @@ def main():
     parser.add_argument("--seed", type=int, default=None,
                         help="Global random seed for reproducibility (torch, numpy, random, env)")
     parser.add_argument("--stage", type=str, default=None,
-                        help="Protocol v2 stage (data-prep|hpo|l1-multiseed|ensemble-confirm|"
+                        help="SharpOps stage (data-prep|hpo|l1-multiseed|ensemble-confirm|"
                              "wf|oos|paper-deploy). When set, the config is validated via "
                              "scripts/validate_config.py before any training; a FAIL aborts.")
     parser.add_argument("--skip_validate", action="store_true",
-                        help="Skip the protocol-v2 config-validation gate (NOT for CI/scheduled jobs).")
+                        help="Skip the SharpOps config-validation gate (NOT for CI/scheduled jobs).")
     args = parser.parse_args()
 
     base_config = load_config(args.config)
 
-    # audit F10: run the protocol-v2 config validator before any training so the
+    # audit F10: run the SharpOps config validator before any training so the
     # fee-curriculum ban, XPARAM, hindsight, drift/safe-mode and health-key gates
     # actually enforce. Previously run_full_pipeline never invoked validate_config,
     # so a config could silently reproduce e.g. the frictionless-HPO artifact.
@@ -891,11 +891,11 @@ def main():
                 args.stage, _vc.returncode,
             )
             sys.exit(_vc.returncode)
-        logger.info("Protocol v2 config validation PASSED for stage '%s'.", args.stage)
+        logger.info("SharpOps config validation PASSED for stage '%s'.", args.stage)
     elif not args.stage:
         logger.warning(
-            "No --stage given: Protocol v2 config validation SKIPPED. CI/scheduled "
-            "jobs MUST name the stage (see CLAUDE.md Training Protocol v2).",
+            "No --stage given: SharpOps config validation SKIPPED. CI/scheduled "
+            "jobs MUST name the stage (see CLAUDE.md SharpOps).",
         )
 
     # Auto-detect agent type from config if --agent was not explicitly provided.

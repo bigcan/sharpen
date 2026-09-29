@@ -1,4 +1,4 @@
-"""Protocol v2.2 §2 `eval_distribution` helper.
+"""SharpOps v2.2 §2 `eval_distribution` helper.
 
 Produces the action-distribution block logged in `seed_report.json` (Stage 2)
 and `ensemble_report.json` (Stage 2.5). The bucketed `by_vol_quartile` form
@@ -146,7 +146,7 @@ def compute_eval_distribution(
     asset_keys: Optional[Sequence[str]] = None,
     composition_rule: Optional[str] = None,
 ) -> dict:
-    """Compute the Protocol v2.2 §2 `eval_distribution` block.
+    """Compute the SharpOps v2.2 §2 `eval_distribution` block.
 
     Scalar action case (`actions.ndim == 1` or shape (N,1)): returns the
     scalar schema with optional `by_vol_quartile`. Multi-dim (shape (N, K))

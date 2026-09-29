@@ -193,7 +193,7 @@ Two measured traps:
 
 ## Step 5 — Walk-forward and out-of-sample
 
-For RL, this is Protocol v2 stages 3 and 4:
+For RL, this is SharpOps stages 3 and 4:
 
 ```bash
 python scripts/validate_config.py --config configs/<cfg>.yaml --stage wf

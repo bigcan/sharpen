@@ -70,7 +70,7 @@ it for the 10% target the forward-path render cleared.
 
 **Advanced, not closed.** The mechanism is now understood and measured, the direction and linearity
 are established, and the false "max_gross is the real lever" hypothesis is eliminated. Remaining:
-the same table on the real bundle. Items (3) Tier-2 audit, (4) six protocol-v2 wiring gaps, and (5)
+the same table on the real bundle. Items (3) Tier-2 audit, (4) six SharpOps wiring gaps, and (5)
 operator go-ahead are untouched.
 
 **A challenge attempt remains BLOCKED.**
@@ -151,5 +151,5 @@ talked me out of it. Two of three answers here were wrong, and only the real bun
 ## Status
 
 **Capital-gate item (2): CLOSED.** The mapping is measured on the production bundle. Items (3)
-Tier-2 audit, (4) six protocol-v2 wiring gaps, (5) operator go-ahead remain open. **A challenge
+Tier-2 audit, (4) six SharpOps wiring gaps, (5) operator go-ahead remain open. **A challenge
 attempt remains BLOCKED.**

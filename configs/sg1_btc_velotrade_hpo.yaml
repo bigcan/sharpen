@@ -107,10 +107,10 @@ training:
 hpo:
   enabled: true
   objective: "profit_factor"           # BUG-01: HPO objective must be profit_factor
-  trials: 50                           # Protocol v2 naming (was n_trials)
+  trials: 50                           # SharpOps naming (was n_trials)
   steps_per_trial: 500000
 
-gates:                                 # Protocol v2 §4 — per-workstream numeric gates
+gates:                                 # SharpOps §4 — per-workstream numeric gates
   # HPO stage
   hpo_pf_floor: 1.5                    # BTC higher vol ceiling; demand more than XAUUSD
   hpo_min_trials_completed: 30

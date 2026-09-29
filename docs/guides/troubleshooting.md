@@ -50,7 +50,7 @@ This is the most dangerous class of failure here, because exit code 0 hides it.
 |---|---|
 | `invalid choice: 'walk-forward'` | The CLI names are `wf` and `oos`, not the prose names |
 | `invalid choice: 'recent-oos'` | Same — use `oos` |
-| `--hp-run` / `--seeds` / `--windows` / `--stage all` unrecognized | Those flags in `docs/protocol_v2.md` §5 describe a planned refactor and **do not exist**. Use the dedicated launchers in [RL pipeline](rl-pipeline.md) |
+| `--hp-run` / `--seeds` / `--windows` / `--stage all` unrecognized | Those flags in `docs/sharpops.md` §5 describe a planned refactor and **do not exist**. Use the dedicated launchers in [RL pipeline](rl-pipeline.md) |
 | Validator FAILs on `risk.static_peak` at `paper-deploy` | The base live config is incomplete by design; the overlay owns that key. Add `--overlay <firm>/<phase>` |
 | `KeyError` on a gate threshold | Correct behaviour — gates must not default. Add the key to the gates YAML |
 | A config key you added does nothing | Unrecognized keys are ignored silently. Copy a reference config; do not invent keys |

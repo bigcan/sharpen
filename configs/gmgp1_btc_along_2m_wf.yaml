@@ -5,7 +5,7 @@
 #   - Stage 3 WF re-confirmation triggered by Stage 2.5-R PROMOTE
 #     (`results/gmgp1_btc_ensemble/verdict.json` — ens_pf_weighted PROMOTE,
 #     bootstrap P(PF)=0.9996, P(MDD)=0.9578).
-#   - Per Protocol v2.3 §4.5: WF re-confirmation MANDATORY after Stage 2.5-R,
+#   - Per SharpOps v2.3 §4.5: WF re-confirmation MANDATORY after Stage 2.5-R,
 #     "temporal robustness on new data is not transitive."
 #
 # Inheritance:

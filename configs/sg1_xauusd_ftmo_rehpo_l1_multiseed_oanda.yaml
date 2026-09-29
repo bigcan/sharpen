@@ -10,7 +10,7 @@
 #   - 453,743 bars, 2025-01-01 to 2026-04-15
 #   - Passed clean_ohlcv, manifest built
 #
-# Gate (Protocol v2 §4 Stage 2, S488 escalation rule): SAME as GC run
+# Gate (SharpOps §4 Stage 2, S488 escalation rule): SAME as GC run
 #   - median test PF >= 1.2, all seeds profitable, CV(PF) outside [0.22, 0.38]
 #   - CV inside [0.22, 0.38] = AMBIGUOUS -> auto-extend to N=20
 
@@ -109,7 +109,7 @@ training:
 hpo:
   enabled: false
 
-gates:                               # Protocol v2 §4 Stage 2 (S488 escalation)
+gates:                               # SharpOps §4 Stage 2 (S488 escalation)
   hpo_pf_floor: 1.2
   hpo_min_trials_completed: 30
   entropy_floor: 0.01

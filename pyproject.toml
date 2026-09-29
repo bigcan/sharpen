@@ -43,7 +43,7 @@ dependencies = [
     "kaggle>=1.5.16",
     "protobuf==3.20.1",
     "rich>=14.0.0",
-    # HPO is a core Protocol-v2 stage and sharpen/hpo/ imports optuna at MODULE level.
+    # HPO is a core SharpOps stage and sharpen/hpo/ imports optuna at MODULE level.
     # Undeclared until CI caught it 2026-09-03: `pip install -e .` produced a package
     # whose `--stage hpo` could not import.
     "optuna>=3.0"

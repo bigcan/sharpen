@@ -2,7 +2,7 @@
 # Protocol-anchored cell: A_long × 1.5M (S550-cont-6, 2026-05-25).
 #
 # CELL SELECTION RATIONALE — no per-strategy volume sweep needed
-#   Protocol v2.5.1 multiplicity rule (decision_training_budget_multiplicity_rule.md)
+#   SharpOps v2.5.1 multiplicity rule (decision_training_budget_multiplicity_rule.md)
 #   locked the band [15x, 40x] with HARD-REJECT >50x. GMGP1-XAUUSD at 24mo ×
 #   15-min has ~49K training bars (736,933 m1 / 15). The 1.5M cell yields
 #   30.5x multiplicity, anchored by two converging validators:
@@ -27,7 +27,7 @@
 #
 #   This config therefore skips the Phase 1 volume sweep that B1 ran (15 runs,
 #   ~3 days) — the protocol IS the evidence base, distilled. See
-#   feedback_anchor_cells_via_protocol_v25_multiplicity.md for the rule.
+#   the SharpOps v2.5.1 multiplicity note for the rule.
 #
 # CONTEXT
 #   Replaces the live gmgp1-xauusd checkpoint (solo WF_seed42_fold_07 from
@@ -40,7 +40,7 @@
 #   - val/test:     2025-09 / 2025-11 -> 2026-02-28 / 2026-04-15
 #   - total_timesteps: 500K -> 1.5M (protocol-anchored)
 #   - workstream: gmgp1_xauusd_extended (results dir disjoint)
-#   - bootstrap PRIMARY gates added (Protocol v2.5)
+#   - bootstrap PRIMARY gates added (SharpOps v2.5)
 #   - drift + safe_mode blocks added (live-capital prereq)
 #   Everything else (HPs, fee model, env, network) IDENTICAL — Trial 10
 #   matches live deploy.
@@ -67,7 +67,7 @@
 #
 # DOWNSTREAM CHAIN (operator-driven)
 #   1. L1 N=10 results -> seed_report.json
-#   2. Stage 2.5-R val_argmax_pf top-3 selection + bootstrap PRIMARY (Protocol v2.5)
+#   2. Stage 2.5-R val_argmax_pf top-3 selection + bootstrap PRIMARY (SharpOps v2.5)
 #   3. Stage 3 WF (4-8 folds x top-3 seeds) on extended-window data
 #   4. Bake ensemble bundle (gmgp1_xauusd_extended/ensemble_v1.tar.gz)
 #   5. Live container swap (gmgp1-xauusd) — drift baseline recal first per S535 lesson
@@ -151,7 +151,7 @@ agents:
     checkpoint_interval: 250000
 
 training:
-  total_timesteps: 1500000           # Protocol v2.5.1 multiplicity-anchored (30x @ ~49K bars)
+  total_timesteps: 1500000           # SharpOps v2.5.1 multiplicity-anchored (30x @ ~49K bars)
   log_interval: 1000
   use_amp: true
   amp_dtype: "bfloat16"
@@ -163,7 +163,7 @@ hpo:
 
 workstream: gmgp1_xauusd_extended
 
-gates:                               # Protocol v2 §4 Stage 2 (S488 N=10 + bootstrap)
+gates:                               # SharpOps §4 Stage 2 (S488 N=10 + bootstrap)
   hpo_pf_floor: 1.2
   hpo_min_trials_completed: 30
   entropy_floor: 0.01
@@ -173,7 +173,7 @@ gates:                               # Protocol v2 §4 Stage 2 (S488 N=10 + boot
   l1_pf_cv_max: 0.30
   l1_pf_floor: 1.2
   l1_pf_cv_ambiguous: [0.22, 0.38]
-  # Protocol v2.5: bootstrap PRIMARY for live-capital workstreams.
+  # SharpOps v2.5: bootstrap PRIMARY for live-capital workstreams.
   ensemble_uplift_min: 1.10          # legacy point-estimate (audit-only in v2.5)
   ensemble_ambiguous_min: 1.05       # legacy ambiguous floor (audit-only)
   ensemble_bootstrap_p_pf_promote: 0.90
@@ -204,7 +204,7 @@ gates:                               # Protocol v2 §4 Stage 2 (S488 N=10 + boot
 
 wandb:
   project: "FinRL-Pro-DS"
-  consolidate: true                   # Protocol v2 §4 default; launcher --separate_runs overrides at runtime
+  consolidate: true                   # SharpOps §4 default; launcher --separate_runs overrides at runtime
   tags: ["gmgp1-xauusd", "Gold", "SAC", "15min", "CFD", "FTMO", "prop-firm",
          "extended-window", "oanda-spot", "rehpo-trial10", "steady-state",
          "l1-multiseed", "protocol-anchored-cell",

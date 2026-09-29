@@ -2,7 +2,7 @@
 #
 # Drafted S549-cont 2026-05-23 after Stage 2.5-R PROMOTE
 # (results/sg1_eurusd_hg_ensemble/ensemble_v1.tar.gz, chosen_rule=ens_pf_weighted,
-# P(PF)=0.9991 / P(MDD)=0.9713). Per Protocol v2.5 §4.5: WF re-confirmation
+# P(PF)=0.9991 / P(MDD)=0.9713). Per SharpOps v2.5 §4.5: WF re-confirmation
 # MANDATORY after Stage 2.5-R PROMOTE.
 #
 # Upstream:
@@ -140,7 +140,7 @@ agents:
     checkpoint_interval: 250000
 
 training:
-  total_timesteps: 500000              # Protocol v2 Stage 3 budget (matches L1)
+  total_timesteps: 500000              # SharpOps Stage 3 budget (matches L1)
   log_interval: 1000
   use_amp: true
   amp_dtype: "bfloat16"
@@ -166,7 +166,7 @@ ensemble:
     9999: 1.7248
   gates_file: "configs/sg1_eurusd_hyper_growth_ensemble.gates.yaml"
 
-gates:                                 # Protocol v2 §4 Stage 3 (training-level)
+gates:                                 # SharpOps §4 Stage 3 (training-level)
   hpo_pf_floor: 1.2
   hpo_min_trials_completed: 30
   entropy_floor: 0.01

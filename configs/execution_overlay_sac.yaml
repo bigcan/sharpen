@@ -10,7 +10,7 @@
 #
 # Consumed by scripts/execution_overlay_runner.py:  load → sim_oracle target → build env →
 # SACTrainer.train → evaluate_execution_overlay → execution_beats_baseline gate. NOT a fused
-# pipeline (protocol_v2 staging): training and the deploy-gate eval are separate artifacts.
+# pipeline (SharpOps staging): training and the deploy-gate eval are separate artifacts.
 #
 # CAPITAL GATE: this config TRAINS + GRADES the overlay. Promoting it to paper-CAPITAL (or
 # reading the runner verdict as a deploy decision) still requires a Tier-2 deep-lifecycle audit

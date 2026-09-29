@@ -145,7 +145,7 @@ score decays with half-life H, and the frozen gates' neutralization (sector and 
 | **5 Forward lockbox** (≥ 63 trading days; earliest ≈ mid-Jan 2027) | Live EDGAR polling → Jev → cache. `AgentRunner` on ATL paper (long-only DJIA-30), plus the long-short verdict book traded directly on Alpaca paper. Lockbox enrollment. | Lockbox entry and verdict | K5: forward marginal Sharpe < 0.30 ⇒ REJECTED. |
 | **6 Tier-2 audit** | `deep_strategy_audit` (finder + skeptic per pillar) | Audit report | Operator decision |
 
-No model is trained, so Protocol v2's training stages do not apply. Each phase still writes one decision artifact.
+No model is trained, so SharpOps's training stages do not apply. Each phase still writes one decision artifact.
 All thresholds live in `configs/atl_jev.gates.yaml`, never in code.
 
 ## 5. Build list

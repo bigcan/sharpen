@@ -124,13 +124,13 @@ training:
 
 hpo:
   enabled: true
-  objective: "profit_factor"          # BUG-01 / Protocol v2 §4 stage 1
-  trials: 50                          # broad: 10 random + 40 TPE (Protocol v2 naming, was n_trials)
+  objective: "profit_factor"          # BUG-01 / SharpOps §4 stage 1
+  trials: 50                          # broad: 10 random + 40 TPE (SharpOps naming, was n_trials)
   steps_per_trial: 500000
   narrow_mode: false                  # full parameter space — T34 anchor invalid at 5 bps
   enqueue_baseline: false
 
-gates:                                # Protocol v2 §4 — per-workstream numeric gates
+gates:                                # SharpOps §4 — per-workstream numeric gates
   # HPO stage
   hpo_pf_floor: 1.2
   hpo_min_trials_completed: 30        # broad search — more trials before promotion
@@ -138,7 +138,7 @@ gates:                                # Protocol v2 §4 — per-workstream numer
   q_div_max: 100.0
   action_sat_max: 0.9
   # L1 multi-seed stage
-  l1_seeds: 3                         # Protocol v2 minimum
+  l1_seeds: 3                         # SharpOps minimum
   l1_pf_cv_max: 0.30
   l1_pf_floor: 1.5
   # Walk-forward stage
@@ -149,7 +149,7 @@ gates:                                # Protocol v2 §4 — per-workstream numer
   # Recent-OOS stage
   oos_pf_floor: 1.1
 
-  # Protocol v2.2 §8.2 live action-distribution drift thresholds. Validator
+  # SharpOps v2.2 §8.2 live action-distribution drift thresholds. Validator
   # (scripts/validate_config.py:check_drift_safemode_gates) enforces presence
   # of all 8 keys for prop-firm/live-capital workstreams; this config is
   # tagged 'velotrade'+'propfirm' so the gate is BLOCKING. Values mirror
@@ -169,7 +169,7 @@ gates:                                # Protocol v2 §4 — per-workstream numer
     regime_conditioning: true
     vol_estimator_bars: 20
 
-  # Protocol v2.2 §8.3 tiered safe-mode. CRIT must graceful-flatten via
+  # SharpOps v2.2 §8.3 tiered safe-mode. CRIT must graceful-flatten via
   # kill_file (S491 bleed-window lesson), not "halt while holding".
   safe_mode:
     crit_triggers_flatten: true

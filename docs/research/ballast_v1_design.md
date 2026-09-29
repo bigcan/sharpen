@@ -305,7 +305,7 @@ does not help, it ships off.
 
 ## 6. Training / evaluation protocol
 
-Protocol v2, six stages, one stage = one WandB run = one decision artifact.
+SharpOps, six stages, one stage = one WandB run = one decision artifact.
 `python scripts/validate_config.py --config configs/ballast_v1.yaml --stage <stage>` must exit 0
 before any launch. The validator will need a `ballast` env-type branch (the same env-type-gated
 extension pattern used for `multi_asset_allocator`).
@@ -368,7 +368,7 @@ project.
 | **P1** | `FundamentalProvider` (`edgar` + `sharadar` backends), availability masks, as-of join | PIT negative test: no feature at `t` uses a filing with `filed + 1d > t` (LEAK-2) | no |
 | **P2** | Six sleeves in `sharpen/signals/library/ballast.py` + frozen linear core backtest | T0 causality tripwire green; core beats SPY Sharpe on **validation** (if the linear core cannot, RL will not either — cheap early kill) | no |
 | **P3** | `Sp500CoreAllocatorEnv` + portfolio construction layer + config + `validate_config` branch | **keystone baseline-parity ±0.05**; negative tests for LEAK-1/LEAK-2; long-only invariant test | no |
-| **P4** | SAC/TQC integration, HPO, walk-forward | Protocol-v2 manifests PASS at each stage | yes |
+| **P4** | SAC/TQC integration, HPO, walk-forward | SharpOps manifests PASS at each stage | yes |
 | **P5** | Ensemble build, pruning, disagreement gate + ablation | validation IR beats single best member | yes |
 | **P6** | **Single-shot OOS 2015-2025**, benchmark comparison, G1-G7, Tier-2 audit | verdict | no |
 

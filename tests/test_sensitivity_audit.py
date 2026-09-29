@@ -5,7 +5,7 @@ verdict block serializer + writer. The impure ``run_cell`` is exercised
 by the C4 smoke test and operator backfill — only its invariant-assertion
 preflight is tested here.
 
-Architecture: ``.agent/artifacts/protocol_v27_a_sensitivity_audit_architecture.md``
+Architecture: the SharpOps v2.7-A sensitivity-audit architecture note
 """
 from __future__ import annotations
 

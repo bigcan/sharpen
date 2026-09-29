@@ -82,7 +82,7 @@ agents:
     checkpoint_interval: 250000
 
 training:
-  total_timesteps: 500000            # Protocol v2 Stage 2 budget (matches GMGP1-BTC L1)
+  total_timesteps: 500000            # SharpOps Stage 2 budget (matches GMGP1-BTC L1)
   log_interval: 1000
   use_amp: true
   amp_dtype: "bfloat16"
@@ -94,7 +94,7 @@ training:
 hpo:
   enabled: false                     # Stage 2 has no HPO
 
-gates:                               # Protocol v2 Stage 2 (S488 escalation, S526 v2.5 bootstrap-primary)
+gates:                               # SharpOps Stage 2 (S488 escalation, S526 v2.5 bootstrap-primary)
   hpo_pf_floor: 1.2
   hpo_min_trials_completed: 30
   entropy_floor: 0.01
@@ -108,7 +108,7 @@ gates:                               # Protocol v2 Stage 2 (S488 escalation, S52
   wf_pf_floor: 1.1
   oos_pf_floor: 1.1
 
-  # Protocol v2.2 §8.2 live action-distribution drift thresholds (validator runs unconditionally).
+  # SharpOps v2.2 §8.2 live action-distribution drift thresholds (validator runs unconditionally).
   drift:
     window_bars: 400
     min_bars_before_check: 200
@@ -121,7 +121,7 @@ gates:                               # Protocol v2 Stage 2 (S488 escalation, S52
     regime_conditioning: true
     vol_estimator_bars: 20
 
-  # Protocol v2.2 §8.3 tiered safe-mode (S491 lesson).
+  # SharpOps v2.2 §8.3 tiered safe-mode (S491 lesson).
   safe_mode:
     crit_triggers_flatten: true
     crit_repeat_window_hours: 24
