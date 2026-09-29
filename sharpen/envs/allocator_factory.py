@@ -449,12 +449,14 @@ def linear_core_weights(
     executor's target weights are byte-identical to the RL-beats-linear gate baseline
     (for a config without the decision lead, which the gate baseline refuses)
     and rung-1 paper-sim parity is ≈0 by construction (on the accounting axis — see
-    :func:`linear_core_trajectory`). ``w[-1]`` is the weight to hold going forward from the
-    most recent bar (the live order-generation target) — and it is the SAFE forward target:
-    the env drive's last decision (index ``T-2``) reads ``conv_monthly[T-2]``, the last
-    CONFIRMED interior month-end, NOT the in-progress final bar (cf. the
-    :func:`monthly_rebal_conviction` truncation caveat, P2-01). Step-4 MUST source the live
-    target from here, never from ``monthly_rebal_conviction(window)[-1]``.
+    :func:`linear_core_trajectory`).
+
+    ``w[-1]`` of a window that ends at the latest bar is NOT a live target. Its month-end flags
+    come from the window, whose last row is never a confirmed month-end, so under
+    ``execution.decision_lead_bars: 1`` a month-end rebalance read this way fills one or two
+    closes late (TAILWIND Tier-2 T2-01). The forward runner (``sharpen.paper.forward_runner``)
+    is the live target. It appends the next two exchange-calendar sessions to prices truncated
+    at the as-of bar, recomputes the signals, and reads ``w[-2]``.
     """
     _, weights, _ = _linear_core_drive(arrays, config, overrides)
     return weights

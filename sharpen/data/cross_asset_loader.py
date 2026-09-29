@@ -268,6 +268,30 @@ def _clip_window(wide: dict, start: str, end: str | None) -> dict:
     return out
 
 
+def read_cached_ohlcv(cache_dir: str | Path, assets: Sequence[str]) -> tuple[dict[str, pd.DataFrame], dict]:
+    """The cleaned OHLCV panel a cache already holds, READ-ONLY: never fetches, never writes.
+
+    :func:`fetch_and_clean` refetches and overwrites its cache in place whenever the cache does
+    not cover the request (assets, window, scan version), which is how a certifying cache gets
+    replaced by a check that only meant to read it (audit T1-03 / T6-08; it happened again on
+    2026-09-29). Replays and tests read through this instead. Raises if the cache is missing or
+    lacks an asset. Returns ``(wide, manifest)`` in :func:`fetch_and_clean`'s cache-hit shape."""
+    cache_dir = Path(cache_dir)
+    clean_path = cache_dir / "ohlcv_daily.parquet"
+    manifest_path = cache_dir / "ohlcv_daily.manifest.json"
+    if not (clean_path.exists() and manifest_path.exists()):
+        raise FileNotFoundError(f"no cleaned OHLCV cache at {cache_dir}")
+    manifest = json.loads(manifest_path.read_text())
+    missing = sorted(set(assets) - set(manifest.get("assets", [])))
+    if missing:
+        raise ValueError(f"cache {cache_dir} lacks {missing}; read-only, so nothing is fetched")
+    long = pd.read_parquet(clean_path)
+    long["date"] = pd.to_datetime(long["date"])
+    wide = {c: long.pivot(index="date", columns="ticker", values=c)
+            .reindex(columns=list(assets)).sort_index() for c in _OHLCV}
+    return wide, manifest
+
+
 def fetch_and_clean(
     assets: Sequence[str],
     start: str,
@@ -790,6 +814,12 @@ def _sleeve_specs(config: Mapping) -> list[tuple[str, str, dict]]:
     return specs
 
 
+def _needs_curve(config: Mapping) -> bool:
+    """The Treasury curve is loaded only if a rates_carry sleeve or the financing leg reads it."""
+    return ("rates_carry" in {sig for _, sig, _ in _sleeve_specs(config)}
+            or fin.financing_spec(config).enabled)
+
+
 def load_two_sleeve_data(config: Mapping, *, force_refetch: bool = False,
                          require_fresh: bool = False) -> dict:
     """Fetch+clean the UNION OHLCV once and prepare EVERY allocator sleeve's inputs.
@@ -806,12 +836,68 @@ def load_two_sleeve_data(config: Mapping, *, force_refetch: bool = False,
     (``mom_signals``/``mom_assets``/``rates_assets``/``curve``/``curve_manifest``) are populated
     for the classic two-sleeve config; external callers read only ``close``/``union_assets``/
     ``manifest``/``curve_manifest``.
+
+    The signal stage is :func:`prepare_two_sleeve_payload`, which the forward runner also calls
+    on prices truncated at its as-of session (TAILWIND Tier-2 X2).
     """
+    _check_sleeve_universe(config)
+    data_cfg = config.get("data", {})
+    wide, manifest = fetch_and_clean(
+        list(config["universe"]["assets"]),
+        start=data_cfg.get("start_date", "2006-01-01"),
+        end=data_cfg.get("end_date"),
+        cache_dir=Path(data_cfg.get("cache_dir", DEFAULT_CACHE_DIR)),
+        force_refetch=force_refetch,
+        require_fresh=require_fresh,
+    )
+    curve = curve_manifest = None
+    if _needs_curve(config):
+        curve, curve_manifest = tcl.load_treasury_curve_with_manifest(
+            cache_dir=data_cfg.get("cache_dir"),
+            force_refetch=force_refetch, require_fresh=require_fresh)
+    return prepare_two_sleeve_payload(
+        config, wide["close"], wide["volume"], manifest=manifest, curve=curve,
+        curve_manifest=curve_manifest, curve_sidecar_dir=data_cfg.get("cache_dir"))
+
+
+def _check_sleeve_universe(config: Mapping) -> None:
+    union_assets = list(config["universe"]["assets"])
+    for name, sig, spec in _sleeve_specs(config):
+        s_assets = list(spec.get("assets", union_assets if sig != "rates_carry"
+                                  else rc.rates_universe()))
+        missing = [a for a in s_assets if a not in union_assets]
+        if missing:
+            raise ValueError(
+                f"sleeve {name!r} assets {missing} not in universe.assets (union must cover every sleeve)")
+
+
+def prepare_two_sleeve_payload(
+    config: Mapping,
+    close: pd.DataFrame,
+    volume: pd.DataFrame,
+    *,
+    manifest: Mapping,
+    curve: Mapping[str, "pd.Series"] | None = None,
+    curve_manifest: dict | None = None,
+    curve_sidecar_dir: str | Path | None = None,
+    assert_causal: bool = True,
+) -> dict:
+    """The signal stage of :func:`load_two_sleeve_data`, on GIVEN close/volume frames.
+
+    Computes every allocator sleeve's signals, runs its LEAK-2 tripwire (unless
+    ``assert_causal=False``; a bulk replay runs it once, not per cutoff) and resolves the
+    financing rates. ``curve`` is required when a rates_carry sleeve or the financing leg reads
+    it. ``curve_manifest`` is annotated in place with a curve/ETF calendar desync, and the
+    annotated sidecar is rewritten under ``curve_sidecar_dir`` when that is given.
+
+    The forward runner (``sharpen.paper.forward_runner``) calls this on prices truncated at
+    its as-of session and extended with the next calendar sessions, so every signal is
+    recomputed from data it could have seen that day."""
+    _check_sleeve_universe(config)
     specs = _sleeve_specs(config)
     signals_present = {sig for _, sig, _ in specs}
     fspec = fin.financing_spec(config)
     uni = config["universe"]
-    data_cfg = config.get("data", {})
     feat_cfg = config.get("features", {})
 
     union_assets = list(uni["assets"])
@@ -823,27 +909,9 @@ def load_two_sleeve_data(config: Mapping, *, force_refetch: bool = False,
     target_vol = float(config.get("env", {}).get("target_vol_asset", cas.DEFAULT_TARGET_VOL_ASSET))
     lev_cap = float(config.get("env", {}).get("lev_cap", cas.DEFAULT_LEV_CAP))
 
-    for name, sig, spec in specs:
-        s_assets = list(spec.get("assets", union_assets if sig != "rates_carry"
-                                  else rc.rates_universe()))
-        missing = [a for a in s_assets if a not in union_assets]
-        if missing:
-            raise ValueError(
-                f"sleeve {name!r} assets {missing} not in universe.assets (union must cover every sleeve)")
-
-    wide, manifest = fetch_and_clean(
-        union_assets,
-        start=data_cfg.get("start_date", "2006-01-01"),
-        end=data_cfg.get("end_date"),
-        cache_dir=Path(data_cfg.get("cache_dir", DEFAULT_CACHE_DIR)),
-        force_refetch=force_refetch,
-        require_fresh=require_fresh,
-    )
-    close = wide["close"]
-
     payload: dict = {
         "close": close,
-        "volume": wide["volume"],
+        "volume": volume,
         "union_assets": union_assets,
         "asset_class": asset_class,
         "lookbacks": lookbacks,
@@ -862,10 +930,11 @@ def load_two_sleeve_data(config: Mapping, *, force_refetch: bool = False,
         s_assets = list(spec["assets"])
         s_close = close[s_assets]
         s_class = {a: asset_class.get(a, "all") for a in s_assets}
-        cas.assert_causal(
-            s_close, lookbacks=lookbacks, skip=skip, vol_window=vol_window,
-            target_vol_asset=target_vol, lev_cap=lev_cap, asset_class=s_class,
-        )
+        if assert_causal:
+            cas.assert_causal(
+                s_close, lookbacks=lookbacks, skip=skip, vol_window=vol_window,
+                target_vol_asset=target_vol, lev_cap=lev_cap, asset_class=s_class,
+            )
         signals = cas.compute(
             s_close, lookbacks=lookbacks, skip=skip, vol_window=vol_window,
             target_vol_asset=target_vol, lev_cap=lev_cap, asset_class=s_class,
@@ -874,20 +943,21 @@ def load_two_sleeve_data(config: Mapping, *, force_refetch: bool = False,
         payload.setdefault("mom_signals", signals)     # back-compat alias (first tsmom sleeve)
         payload.setdefault("mom_assets", s_assets)
 
-    # --- the Treasury curve, loaded ONCE if a rates_carry sleeve or the financing leg needs
-    #     it; rates_carry sleeves get their causality tripwire per tenor map ---
+    # --- the Treasury curve (loaded by the caller) if a rates_carry sleeve or the financing leg
+    #     needs it; rates_carry sleeves get their causality tripwire per tenor map ---
     if "rates_carry" in signals_present or fspec.enabled:
-        curve, curve_manifest = tcl.load_treasury_curve_with_manifest(
-            cache_dir=data_cfg.get("cache_dir"),
-            force_refetch=force_refetch, require_fresh=require_fresh)
+        if curve is None or curve_manifest is None:
+            raise ValueError("a rates_carry sleeve or the financing leg needs the Treasury curve "
+                             "and its manifest")
         for name, sig, spec in specs:
             if sig != "rates_carry":
                 continue
-            rc.assert_causal(
-                curve, close.index,
-                tenor_map=dict(spec.get("tenor_map", rc.DEFAULT_RATES_TENOR)),
-                financing_tenor=str(spec.get("financing_tenor", rc.DEFAULT_FINANCING_TENOR)),
-                tanh_scale=float(spec.get("tanh_scale", rc.DEFAULT_TANH_SCALE)))
+            if assert_causal:
+                rc.assert_causal(
+                    curve, close.index,
+                    tenor_map=dict(spec.get("tenor_map", rc.DEFAULT_RATES_TENOR)),
+                    financing_tenor=str(spec.get("financing_tenor", rc.DEFAULT_FINANCING_TENOR)),
+                    tanh_scale=float(spec.get("tanh_scale", rc.DEFAULT_TANH_SCALE)))
             payload.setdefault("rates_assets",
                                list(spec.get("assets", rc.rates_universe())))
 
@@ -907,9 +977,8 @@ def load_two_sleeve_data(config: Mapping, *, force_refetch: bool = False,
                             curve_manifest.get("date_max"), desync_days, etf_date_max.date())
                 # The desync is cross-dataset (only known here), so the curve loader's sidecar was
                 # written without it — keep it consistent so a sidecar reader can't see a stale PASS.
-                cdir = data_cfg.get("cache_dir")
-                if cdir:
-                    (Path(cdir) / "treasury_curve.manifest.json").write_text(
+                if curve_sidecar_dir:
+                    (Path(curve_sidecar_dir) / "treasury_curve.manifest.json").write_text(
                         json.dumps(curve_manifest, indent=2))
         payload["curve"] = curve
         payload["curve_manifest"] = curve_manifest
@@ -925,10 +994,11 @@ def load_two_sleeve_data(config: Mapping, *, force_refetch: bool = False,
             continue
         s_assets = list(spec.get("assets", union_assets))
         s_class = {a: asset_class.get(a, "all") for a in s_assets}
-        dfs.assert_causal(
-            close[s_assets], s_class,
-            beta_window=int(spec.get("beta_window", dfs.DEFAULT_BETA_WINDOW)),
-            min_periods=int(spec.get("min_periods", dfs.DEFAULT_BETA_MIN_PERIODS)))
+        if assert_causal:
+            dfs.assert_causal(
+                close[s_assets], s_class,
+                beta_window=int(spec.get("beta_window", dfs.DEFAULT_BETA_WINDOW)),
+                min_periods=int(spec.get("min_periods", dfs.DEFAULT_BETA_MIN_PERIODS)))
 
     return payload
 
