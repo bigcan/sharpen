@@ -15,11 +15,13 @@ Design (see ``.agent/artifacts/multi_asset_allocator_architecture.md``):
     byte-matching ``xsec_momentum_falsification.vol_scaled_weights``. ``vol_ary`` is a
     dedicated CAUSAL realized-vol input (uses returns ``<= t-1``); decoupling it from
     ``tech_ary`` ordering keeps live-parity robust.
-  - **Accounting copied verbatim** from ``CryptoPerpEnv``: fixed entry-notional PnL
+  - **Accounting copied** from ``CryptoPerpEnv``: fixed entry-notional PnL
     (SHORT-ACCT — shorts never accrue notional_debt), vectorized realize/cost paths,
     proportional gross-exposure cap. Funding generalizes to a per-bar ``carry`` accrual
     (v1 shipped carry = 0; ADR-6). An opt-in financing leg sets carry = -rf plus a borrow
-    fee on shorts (``sharpen.data.financing``, TAILWIND Tier-2 N2).
+    fee on shorts (``sharpen.data.financing``, TAILWIND Tier-2 N2). One deliberate change:
+    an add books the share-weighted VWAP as its entry price, where ``CryptoPerpEnv`` still
+    uses the notional-weighted mean (TAILWIND Tier-2 T4-10).
   - **Reward = DSR(portfolio step return) - turnover_penalty * sum|Δw|** (reuses the
     shared Moody-Saffell ``DSRCalculator``); ``reward_type`` falls back to a Sortino or
     simple return signal.
@@ -418,7 +420,7 @@ class MultiAssetAllocatorEnv(gym.Env):
         return result
 
     # -----------------------------------------------------------------------
-    # PnL calculations (copied verbatim from CryptoPerpEnv — SHORT-ACCT safe)
+    # PnL calculations (from CryptoPerpEnv — SHORT-ACCT safe; adds book a share-weighted VWAP)
     # -----------------------------------------------------------------------
     def _calc_unrealized_pnl(self, current_price: np.ndarray) -> np.ndarray:
         """Per-asset unrealized PnL on fixed entry notionals:
@@ -484,10 +486,13 @@ class MultiAssetAllocatorEnv(gym.Env):
             added_notional = np.abs(delta_weights[increased]) * portfolio_value
             old_notional = self.entry_notionals[increased]
             new_notional = old_notional + added_notional
-            self.entry_prices[increased] = (
-                self.entry_prices[increased] * old_notional
-                + current_price[increased] * added_notional
-            ) / (new_notional + 1e-10)
+            # Share-weighted VWAP: the price at which the combined shares cost new_notional,
+            # so new_notional / entry_price stays the share count every P&L term assumes. The
+            # notional-weighted arithmetic mean over-states it whenever the fill prices differ
+            # (arithmetic >= harmonic mean): longs were under-, shorts over-credited (T4-10).
+            shares = (old_notional / (self.entry_prices[increased] + 1e-10)
+                      + added_notional / (current_price[increased] + 1e-10))
+            self.entry_prices[increased] = new_notional / (shares + 1e-10)
             self.entry_notionals[increased] = new_notional
 
         reduced = ~closed & ~from_flat & ~flipped & ~increased & (abs_new < abs_old)

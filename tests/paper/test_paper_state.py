@@ -225,3 +225,21 @@ def test_resume_continuity(tmp_path, cfg):
     assert abs(book.margin_balance - cont.margin_balance) < 1e-6
     assert abs(book.cumulative_fees - cont.cumulative_fees) < 1e-6
     assert abs(info_r["portfolio_value"] - info_c["portfolio_value"]) < 1e-6
+
+
+def test_add_at_a_higher_price_books_the_share_weighted_vwap():
+    """Audit T4-10 hand case on the book: buy $100 at $1, add $100 at $2, mark at $2. That is
+    150 shares at a $1.333 VWAP and equity 1,100; the notional-weighted mean gave 1,066.67."""
+    price = np.array([[1.0], [1.0], [2.0], [2.0]])
+    book = PaperState(n_assets=1, initial_capital=1_000.0)
+    eng = SimFillEngine(taker_fee_pct=0.0, slippage_base_bps=0.0, slippage_impact_bps=0.0)
+    for k, w in enumerate([0.1, 0.2, 0.2]):          # buy, add, hold
+        delta = generate_orders(np.array([w]), book.positions)
+        pv_before = book.pv_before(price[k])
+        fill = eng.fill(delta_weights=delta, ref_prices=price[k + 1], pv_before=pv_before,
+                        dollar_volume=np.array([1e15]))
+        info = book.step_bar(delta_weights=delta, fill=fill, prev_price=price[k],
+                             price_now=price[k + 1], carry_rates=np.zeros(1),
+                             pv_before=pv_before)
+    assert abs(book.entry_prices[0] - 200.0 / 150.0) < 1e-9
+    assert abs(info["portfolio_value"] - 1_100.0) < 1e-6

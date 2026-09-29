@@ -175,10 +175,10 @@ class PaperState:
             added_notional = np.abs(delta_weights[increased]) * pv_before
             old_notional = self.entry_notionals[increased]
             new_notional = old_notional + added_notional
-            self.entry_prices[increased] = (
-                self.entry_prices[increased] * old_notional
-                + price[increased] * added_notional
-            ) / (new_notional + _PRICE_EPS)
+            # Share-weighted VWAP, as env._update_entry_prices (audit T4-10).
+            shares = (old_notional / (self.entry_prices[increased] + _PRICE_EPS)
+                      + added_notional / (price[increased] + _PRICE_EPS))
+            self.entry_prices[increased] = new_notional / (shares + _PRICE_EPS)
             self.entry_notionals[increased] = new_notional
 
         reduced = ~closed & ~from_flat & ~flipped & ~increased & (abs_new < abs_old)
