@@ -94,7 +94,7 @@ checks (`scripts/research/audit_tailwind_book.py` is a worked example).
 **6. Train an RL strategy on top.**
 > *"Train a SAC overlay that has to beat the linear book out of sample."*
 
-The agent writes a config from a reference YAML and runs Protocol v2, one stage and one tracked run
+The agent writes a config from a reference YAML and runs SharpOps, one stage and one tracked run
 at a time. Each stage writes a manifest the next stage checks:
 
 ```bash
@@ -161,7 +161,7 @@ A backtest shows what a strategy did. These tools test whether it would do it ag
 
 | Tool | What it answers |
 |---|---|
-| **Walk-forward + recent OOS** (Protocol v2 `wf`, `oos` stages) | Does the edge hold across rolling folds and on the newest unseen data, with bootstrap confidence intervals? |
+| **Walk-forward + recent OOS** (SharpOps `wf`, `oos` stages) | Does the edge hold across rolling folds and on the newest unseen data, with bootstrap confidence intervals? |
 | **Realistic costs** (`sharpen/signals/costs.py`) | Standard and harsh per-market cost models, and the cost level at which the edge disappears |
 | **Circular-shift timing null** (`scripts/research/hma_cross_falsification.py`) | Keeps exposure, trade count and holding periods, shifts the timing. Does the rule know *when* to trade? |
 | **Edge-sign flip + matched exposure** (`scripts/research/risk_overlay_lab.py`) | Is a risk overlay adding skill, or just de-levering? |
@@ -195,10 +195,10 @@ update-to-data ratio, and Tensor-Core-aligned networks. **Distributed Optuna HPO
 fleets (`scripts/distributed_hpo_coordinator.py`, `distributed_hpo_worker.py`), with
 bare-metal and Vast.ai deploy scripts.
 
-**Protocol v2** stages every RL project as
+**SharpOps** stages every RL project as
 `data-prep → hpo → l1-multiseed → ensemble-confirm → wf → oos → paper-deploy`. Each stage is one
 tracked WandB run that produces one decision artifact, and `validate_config.py` rejects fused
-pipelines and leaky configs before a GPU spins up. See [docs/protocol_v2.md](docs/protocol_v2.md).
+pipelines and leaky configs before a GPU spins up. See [docs/sharpops.md](docs/sharpops.md).
 
 ### Execution and operations — `sharpen/paper/`, `sharpen/live/`, `docker/live/`
 - **Six broker adapters**: Bybit perpetuals, ccxt exchanges, DXtrade, Interactive Brokers futures,
@@ -284,7 +284,7 @@ The hub is [docs/README.md](docs/README.md).
 | [Building a strategy](docs/guides/building-a-strategy.md) | Idea → build → validate → portfolio → paper, with the gate at each step |
 | [Signal research](docs/guides/signal-research.md) | Writing a signal; the validation funnel; the DSL |
 | [Crucible](docs/guides/crucible.md) | Automated alpha mining |
-| [RL pipeline](docs/guides/rl-pipeline.md) | Protocol v2 in practice |
+| [RL pipeline](docs/guides/rl-pipeline.md) | SharpOps in practice |
 | [Configuration](docs/guides/configuration.md) | Config and gate schemas |
 | [Live trading](docs/guides/live-trading.md) | Brokers, Docker, observability, kill switch |
 | [Data](docs/guides/data.md) · [sources and licensing](docs/DATA.md) | **Read before using real prices.** A fresh clone contains no market data |

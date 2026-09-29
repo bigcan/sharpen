@@ -1,4 +1,4 @@
-"""Tests for Protocol v2.2 §8.2 ActionDriftTracker."""
+"""Tests for SharpOps v2.2 §8.2 ActionDriftTracker."""
 
 from __future__ import annotations
 

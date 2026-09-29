@@ -2,7 +2,7 @@
 
 Covers the reconstruction guard (early-term → raise) and the multi-fold
 `compute_stress_subreport` gate logic (PASS / FAIL-dd / FAIL-leverage /
-INCOMPLETE / SKIPPED). Protocol v2 Stage 3 stress sub-report; audit X3/P7-03/P7-07.
+INCOMPLETE / SKIPPED). SharpOps Stage 3 stress sub-report; audit X3/P7-03/P7-07.
 """
 from __future__ import annotations
 

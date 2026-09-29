@@ -37,7 +37,7 @@ data:
   file_path: "data/processed/spx500_1min.parquet"
   ticker: "SPX500"
   handler_type: "multiscale"
-  # 24-month train window (protocol v2 §3.5.2 calendar-anchored minimum is 22mo).
+  # 24-month train window (SharpOps §3.5.2 calendar-anchored minimum is 22mo).
   # 2025-01 onward is deliberately untouched here — it is the walk-forward + recent-OOS
   # reserve, so HPO never sees it. 2019-2021 is held for optional earlier WF folds.
   train_start_date: "2022-01-03"
@@ -76,7 +76,7 @@ env:
   random_start: true
   max_drawdown_pct: 0.30
   scales: [15, 60, 240]
-  # REQUIRED, not optional: the index closes over the weekend (~48h+ hole), and protocol v2
+  # REQUIRED, not optional: the index closes over the weekend (~48h+ hole), and SharpOps
   # §3 rejects a manifest whose max_gap_bars exceeds 1 day unless gap_detection is set.
   # Zeroes returns above 3x ATR, removing untradeable weekend jumps the agent cannot act
   # inside. Identical in both variants, so it cannot bias the A/B.
@@ -127,7 +127,7 @@ training:
 
 hpo:
   enabled: true
-  objective: "profit_factor"      # BUG-01 / protocol v2 §4 stage 1
+  objective: "profit_factor"      # BUG-01 / SharpOps §4 stage 1
   trials: 30
   # Multiplicity (§3.5.1) = steps_per_trial / bars_in_train_window. SPX500 at ~23h/day
   # yields FAR more bars than an RTH equity: the 24mo train window holds ~48K 15-min bars,

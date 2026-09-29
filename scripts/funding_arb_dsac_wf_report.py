@@ -1,5 +1,5 @@
 """Funding-Arb DSAC walk-forward aggregator + leverage-grid stress sub-report
-(Protocol v2 Stage 3).
+(SharpOps Stage 3).
 
 Reads per-window manifests + checkpoints produced by `launch_funding_arb_wf.py`,
 computes the WF gate verdicts (G1..G4 per Velotrade gates yaml), and runs a

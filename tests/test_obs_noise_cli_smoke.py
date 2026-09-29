@@ -7,7 +7,7 @@ the full CLI wiring (splitter folds -> sigma specs -> per-fold nominal + noisy
 cells -> aggregate -> gate -> obs_noise_report.json + exit code) without torch
 or checkpoints.
 
-Architecture: ``.agent/artifacts/protocol_v27_b_obs_noise_stage_3_5_architecture.md`` (IC-5)
+Architecture: the SharpOps v2.7-B observation-noise (Stage 3.5) architecture note (IC-5)
 """
 from __future__ import annotations
 

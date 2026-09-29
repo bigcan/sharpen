@@ -39,7 +39,7 @@ gates:
   # deploy bar - the deploy decision is rl_beats_linear above).
   wf_net_sharpe_floor: 0.40
 
-  # Fixed-lot stress sub-report (X3; Protocol v2 Stage 3) sanity bounds.
+  # Fixed-lot stress sub-report (X3; SharpOps Stage 3) sanity bounds.
   stress_dd_buffer_pp: 1.0               # headroom of worst fixed-lot DD from the cap (pp)
   stress_leverage_max: 6.0              # matches env.max_gross_exposure ceiling
 

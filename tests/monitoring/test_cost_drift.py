@@ -1,4 +1,4 @@
-"""Tests for Protocol v2 §4.5 trigger #6 CostDriftTracker."""
+"""Tests for SharpOps §4.5 trigger #6 CostDriftTracker."""
 
 from __future__ import annotations
 

@@ -1,4 +1,4 @@
-"""Protocol v2.3 atomic ensemble swap-bundle reader.
+"""SharpOps v2.3 atomic ensemble swap-bundle reader.
 
 Counterpart to the writer at
 ``scripts/sg1_xauusd_ensemble_eval.py:_pack_swap_bundle``. Lays out the
@@ -7,7 +7,7 @@ hashes against ``ensemble_manifest.json``, and surfaces a
 :class:`BundleContents` dataclass that the live runners feed into
 ``EnsembleAgent``.
 
-Live container contract (per ``docs/protocol_v2.md`` §4 v2.3):
+Live container contract (per ``docs/sharpops.md`` §4 v2.3):
 - Bundle SHA256 (the top-level ``.sha256`` sidecar) must match the
   archive byte-for-byte before extraction.
 - Every checkpoint file under ``checkpoints/seed_<id>/`` and every

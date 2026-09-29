@@ -14,7 +14,7 @@ HPs and checkpoints selected against those metrics are invalid. This is a **retr
 
 ## Status: WIRED — blocked only on data recency
 
-All five stage configs are protocol-v2 compliant. Validated 2026-07-19 (`scripts/validate_config.py`);
+All five stage configs are SharpOps compliant. Validated 2026-07-19 (`scripts/validate_config.py`);
 the **only** failure on each is the data-freshness gate:
 
 | Stage | Config | Freshness gate | Current data | Status |
@@ -38,7 +38,7 @@ No config defects, no protocol violations — the pipeline is ready the moment t
 4. Confirm training builds from a branch that **contains the X2 fix** (`main` now does; the fix is
    NOT on the April2026 lineage tags).
 
-## Stage sequence (Protocol v2 — see `docs/protocol_v2.md`)
+## Stage sequence (SharpOps — see `docs/sharpops.md`)
 
 Each stage is one WandB run = one decision artifact. The config-validation gate is now wired into
 the pipeline (audit F10): pass `--stage` and a FAIL aborts before any GPU time is spent.
@@ -49,7 +49,7 @@ python scripts/run_full_pipeline.py --config configs/gmgp1_btc_velotrade_hpo.yam
     --agent sac --stage hpo
 
 # Stage 2 — L1 multiseed (N=10 seeds, batches of 5; upstream = HPO manifest PASS)
-#   follow docs/protocol_v2.md stage 3 runner with:
+#   follow docs/sharpops.md stage 3 runner with:
 #   configs/gmgp1_btc_velotrade_rehpo_l1_multiseed.yaml   (--stage l1-multiseed)
 
 # Stage 3 — Walk-forward (+ stress); configs/gmgp1_btc_velotrade_wf.yaml   (--stage wf)

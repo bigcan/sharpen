@@ -11,7 +11,7 @@ Centralizes the three agent-loading modes used by all live runners
   * **legacy ensemble** — `agent.ensemble.{seeds, checkpoint_pattern, fold,
     aggregation_rule}` (globs each seed's checkpoint, loads N SACAgents into
     an EnsembleAgent). Retained for v2.1/v2.2 retro-apply paper deploys per
-    `docs/protocol_v2.md` §4. New L1-retrain promotions MUST emit a bundle.
+    `docs/sharpops.md` §4. New L1-retrain promotions MUST emit a bundle.
 
 The two public entry points mirror the structure runners already use:
 

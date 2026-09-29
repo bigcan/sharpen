@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""GMGP1-BTC Velotrade L1 ensemble-confirm (Stage 2.5-R, Protocol v2.3 + v2.4.1).
+"""GMGP1-BTC Velotrade L1 ensemble-confirm (Stage 2.5-R, SharpOps v2.3 + v2.4.1).
 
 BTC variant of the val-split ensemble-confirm eval. Delegates to
 `sg1.run_stage_2_5_val_selection()` — this file supplies the BTC-specific
@@ -7,7 +7,7 @@ seed/checkpoint map, seed PFs, buffer function (Velotrade, no daily-loss gate),
 and output dir. Protocol logic (val-argmax-pf rule selection + v2.3 bootstrap
 gate + v2.4.1 §11 replay-buffer purge) lives in the shared helper.
 
-Protocol (per `decision_protocol_v2_mandatory.md` + Protocol v2.3):
+Protocol (per the SharpOps mandatory-adoption decision note + SharpOps v2.3):
   Phase 1: run all 4 ensemble rules + N solos on L1 **val** window
   Phase 2: argmax(val_PF) across ensembles → chosen_rule (no test peek)
   Phase 3: run chosen_rule + N solos on L1 **test** window
@@ -153,7 +153,7 @@ def main() -> None:
         trigger="L1_retrain_along_2m_S522",
     )
 
-    print("\n========== GMGP1 BTC ENSEMBLE-CONFIRM (Protocol v2.3 + v2.4.1) ==========")
+    print("\n========== GMGP1 BTC ENSEMBLE-CONFIRM (SharpOps v2.3 + v2.4.1) ==========")
     print(json.dumps(verdict, indent=2, default=str))
 
 

@@ -32,7 +32,7 @@ const PILLARS = [
     look: 'finrl_pro_ds/envs/dsr.py, finrl_pro_ds/envs/continuous_swing_env.py, signal_gated_wrapper.py, risk_shaping_wrapper.py, ~/.claude/skills/math/FORMULAS.md (MATH-R01/R04)' },
   { key: 'P5', title: 'Training & HPO',
     focus: 'BUG-01 (objective=PF, reward locked). Training-health kill gates (entropy/q-div/action-sat) — DECLARED vs WIRED? Training-budget multiplicity [15,40] check actually in validate_config? Per-trial seeding/reproducibility, val-window single-point risk, reward<->PF Spearman computed?',
-    look: 'finrl_pro_ds/training/objective.py, sac_trainer.py, scripts/run_full_pipeline.py, evaluate.py, distributed_hpo_worker.py, scripts/validate_config.py, docs/protocol_v2.md' },
+    look: 'finrl_pro_ds/training/objective.py, sac_trainer.py, scripts/run_full_pipeline.py, evaluate.py, distributed_hpo_worker.py, scripts/validate_config.py, docs/sharpops.md' },
   { key: 'P6', title: 'Validation — L1 multiseed (Stage 2)',
     focus: 'Gate code workstream-agnostic (or XAUUSD-hardcoded)? Seed convergence — does CV measure robustness or seed-degeneracy (inter-seed action corr)? val_argmax top-3 vs test top-3 decoupling. Full-N eval baseline + challenge_target_hit_rate present?',
     look: 'scripts/auto_queue_wf_after_l1.py, scripts/launch_l1_multiseed.py, results/<workstream>*/seed_report.json, *.gates.yaml' },
@@ -50,7 +50,7 @@ const PILLARS = [
     look: 'finrl_pro_ds/crypto/live/live_engine.py, scripts/check_retrain_triggers.py, agent_loader.py, ensemble_bundle.py, configs/live_<workstream>*.yaml' },
   { key: 'P11', title: 'External SOTA benchmark',
     focus: 'Compare the pipeline to financial-ML best practice: deflated-Sharpe / PBO / CSCV (Bailey & Lopez de Prado), purged/embargoed CPCV, risk-sensitive reward (CVaR/Calmar/distributional), domain randomization / obs-noise / exec-failure stress, regime-conditioning. Name the single highest-value MISSING overfitting control. Query the NotebookLM KB (4aef5475-7fec-4d1f-96a7-efb3cafbb371) before web.',
-    look: 'docs/protocol_v2.md, results verdicts, literature via Researcher/NotebookLM' },
+    look: 'docs/sharpops.md, results verdicts, literature via Researcher/NotebookLM' },
 ]
 
 const selected = scopeKeys ? PILLARS.filter(p => scopeKeys.includes(p.key)) : PILLARS
@@ -120,7 +120,7 @@ function finderPrompt(p) {
     ADVERSARIAL,
     `Pillar focus: ${p.focus}`,
     `Start by reading (then follow imports/configs/results as needed): ${p.look}`,
-    `Also read CLAUDE.md (invariants incl. LEAK-1/LEAK-2/SHORT-ACCT/BUG-01/DATA-CLEAN/PF-XCHECK) and docs/protocol_v2.md for the stage contract.`,
+    `Also read CLAUDE.md (invariants incl. LEAK-1/LEAK-2/SHORT-ACCT/BUG-01/DATA-CLEAN/PF-XCHECK) and docs/sharpops.md for the stage contract.`,
     `Return ALL findings for this pillar (include explicit POSITIVES as S4 so the skeptic can credit them). Use IDs like ${p.key}-01, ${p.key}-02. Every finding needs file:line evidence.`,
   ].join('\n\n')
 }

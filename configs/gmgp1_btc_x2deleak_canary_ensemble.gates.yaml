@@ -55,18 +55,18 @@ gates:
     uplift_ratio_min: 1.05
     metric: median
 
-  # === Protocol v2.5 PRIMARY: block-bootstrap probability gate ===
+  # === SharpOps v2.5 PRIMARY: block-bootstrap probability gate ===
   ensemble_bootstrap_p_pf_promote: 0.90
   ensemble_bootstrap_p_mdd_promote: 0.90
   ensemble_bootstrap_p_pf_ambiguous: 0.75
   ensemble_bootstrap_resamples: 10000
   ensemble_bootstrap_block_len: null
 
-  # === Protocol v2.5 SECONDARY (audit/sanity only) ===
+  # === SharpOps v2.5 SECONDARY (audit/sanity only) ===
   ensemble_uplift_min: 1.10
   ensemble_ambiguous_min: 1.05
 
-  # === Protocol v2.6 Stage 2.5-R Sensitivity Audit (Phase α — dormant) ===
+  # === SharpOps v2.6 Stage 2.5-R Sensitivity Audit (Phase α — dormant) ===
   edge_stability_pf_ratio_floor: 0.70
   sensitivity_deadband_grid: [0.20, 0.25, 0.30]
   sensitivity_max_leverage_mults: [0.5, 1.0, 1.5]
@@ -75,7 +75,7 @@ gates:
   pf_xcheck_report_only: true
   pf_xcheck_divergence_halt: 0.30
 
-  # === Protocol v2.7-B Stage 3.5 obs-noise robustness (Phase α — dormant) ===
+  # === SharpOps v2.7-B Stage 3.5 obs-noise robustness (Phase α — dormant) ===
   obs_noise_sigma_levels:
     "10bps": 0.001
     "50bps": 0.005
@@ -113,7 +113,7 @@ gates:
   stress_dd_buffer_pp: 0.5         # 10% Velotrade cap - worst fixed-lot trailing DD% >= this (=> worst DD <= 9.5%)
   stress_leverage_max: 2.0         # peak |position| (max_leverage units) <= this; = canary HPO leverage axis cap
 
-  # Protocol v2.2 §8.2 live action-distribution drift thresholds (schema parity)
+  # SharpOps v2.2 §8.2 live action-distribution drift thresholds (schema parity)
   drift:
     window_bars: 400
     min_bars_before_check: 200
@@ -126,13 +126,13 @@ gates:
     regime_conditioning: true
     vol_estimator_bars: 20
 
-  # Protocol v2.2 §8.3 tiered safe-mode (schema parity)
+  # SharpOps v2.2 §8.3 tiered safe-mode (schema parity)
   safe_mode:
     crit_triggers_flatten: true
     crit_repeat_window_hours: 24
     crit_repeat_count_before_lockout: 2
 
-  # Protocol v2.3 §4.5 retrain triggers (schema parity)
+  # SharpOps v2.3 §4.5 retrain triggers (schema parity)
   retrain:
     ensemble_recheck_days: 90
     live_pf_ratio: 0.8

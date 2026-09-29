@@ -36,7 +36,7 @@
 #
 # DOWNSTREAM CHAIN (operator-driven post-Phase-2)
 #   1. Phase 2 N=10 results → seed_report.json
-#   2. Stage 2.5-R val_argmax_pf top-3 selection + bootstrap PRIMARY (Protocol v2.5)
+#   2. Stage 2.5-R val_argmax_pf top-3 selection + bootstrap PRIMARY (SharpOps v2.5)
 #   3. Stage 3 WF (8 folds × top-3 seeds) on extended-window data
 #   4. Bake ensemble bundle (sg1_xauusd_volume_study_v2_phase2/ensemble_v1.tar.gz)
 #   5. Live container swap (sg1-xauusd) — drift baseline recal first per S535 lesson
@@ -141,7 +141,7 @@ hpo:
 
 workstream: sg1_xauusd_volume_study_v2_phase2
 
-gates:                               # Protocol v2 §4 Stage 2 (S488 N=10 + bootstrap)
+gates:                               # SharpOps §4 Stage 2 (S488 N=10 + bootstrap)
   hpo_pf_floor: 1.2
   hpo_min_trials_completed: 30
   entropy_floor: 0.01
@@ -151,7 +151,7 @@ gates:                               # Protocol v2 §4 Stage 2 (S488 N=10 + boot
   l1_pf_cv_max: 0.30
   l1_pf_floor: 1.2
   l1_pf_cv_ambiguous: [0.22, 0.38]
-  # Protocol v2.5: bootstrap PRIMARY for live-capital workstreams.
+  # SharpOps v2.5: bootstrap PRIMARY for live-capital workstreams.
   ensemble_uplift_min: 1.10          # legacy point-estimate (audit-only in v2.5)
   ensemble_ambiguous_min: 1.05       # legacy ambiguous floor (audit-only)
   ensemble_bootstrap_p_pf_promote: 0.90
@@ -182,7 +182,7 @@ gates:                               # Protocol v2 §4 Stage 2 (S488 N=10 + boot
 
 wandb:
   project: "FinRL-Pro-DS"
-  consolidate: true                   # Protocol v2 §4 default; launcher --separate_runs overrides at runtime
+  consolidate: true                   # SharpOps §4 default; launcher --separate_runs overrides at runtime
   tags: ["sg-1", "XAUUSD", "SAC", "3min", "signal-gated", "FTMO", "prop-firm",
          "volume-study", "volume-study-v2", "phase2", "budget-4m-promote",
          "extended-window", "oanda-spot", "rehpo-trial56", "steady-state",

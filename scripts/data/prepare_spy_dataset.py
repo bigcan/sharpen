@@ -15,7 +15,7 @@ but it is NOT tape volume and any finding that leans on volume levels must say s
 FEES ARE MEASURED, NOT ASSUMED. `mean_spread` is the realized bid-ask on the instrument the
 bars come from, so the cost model is derived from the same feed as the prices rather than
 from a table. Reported as bps of price so it can go straight into `env.taker_fee` as a
-steady-state fee from step 0 (protocol v2 s3.5.4 forbids curriculum schedules outside HPO
+steady-state fee from step 0 (SharpOps s3.5.4 forbids curriculum schedules outside HPO
 sensitivity runs; BUG-01).
 
 Usage:

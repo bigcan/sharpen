@@ -1,4 +1,4 @@
-"""Protocol v2.3 §8.2 (extension) live agreement-decay tracker.
+"""SharpOps v2.3 §8.2 (extension) live agreement-decay tracker.
 
 Silent-death detector for ensemble-deployed strategies that use a consensus
 aggregation rule (`ens_agreement` / `ens_majority`). Under regime shift the

@@ -5,7 +5,7 @@
 # Growth per user decision (matches sibling SG-1-EURUSD-OANDA already paper
 # LIVE on HG; weekend-hold allowed simplifies FX ops vs FTMO Fri-flatten).
 # Fresh workstream — no upstream baseline; broad-search HPO (narrow_mode off).
-# Cell pre-committed per [[feedback-anchor-cells-via-protocol-v25-multiplicity]]:
+# Cell pre-committed per the SharpOps v2.5.1 multiplicity note:
 #   - 22mo calendar window (2024-06-02 -> 2026-03-31, satisfies 22mo min)
 #   - 500K steps per HPO trial; best-trial retrain to 1.5M (32x mult @ ~46K bars)
 #   - Buffer 500K (DO NOT change)
@@ -25,7 +25,7 @@
 #            sibling SG-1-EURUSD-OANDA Bar 1 validated 5bps fits real fill
 #            with 0.8 pip slippage 2026-05-26)
 #   - Asset class: cfd_forex
-#   - Window: 22mo (vs XAUUSD 8mo) — calendar-anchored per protocol v2.5.1
+#   - Window: 22mo (vs XAUUSD 8mo) — calendar-anchored per SharpOps v2.5.1
 #   - DD caps: Hyper Growth (6% max / 3% daily; buffers 1pp per HG overlay)
 #   - Risk eod_hour_utc: 21 (FX day rolls 21:00 UTC = NY 17:00 / 16:00 DST)
 #
@@ -136,7 +136,7 @@ hpo:
   steps_per_trial: 500000
   # narrow_mode: false (default) — first-time on EURUSD, no prior to narrow around
 
-gates:                             # Protocol v2 §4 numeric gates
+gates:                             # SharpOps §4 numeric gates
   # Stage 1 HPO
   hpo_pf_floor: 1.2
   hpo_min_trials_completed: 30

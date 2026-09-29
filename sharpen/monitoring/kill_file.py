@@ -1,4 +1,4 @@
-"""Protocol v2.2 §8.3 kill_file JSON format + repeat-CRIT lockout.
+"""SharpOps v2.2 §8.3 kill_file JSON format + repeat-CRIT lockout.
 
 Legacy kill_file convention is "file exists = stop". v2.2 promotes the file
 to structured JSON so the watchdog / engine-startup gate can distinguish
@@ -118,7 +118,7 @@ def should_lockout(
 ) -> tuple[bool, str]:
     """Decide whether a startup/engine-restart should be refused.
 
-    Lockout semantics (Protocol v2.2 §8.3):
+    Lockout semantics (SharpOps v2.2 §8.3):
       * Any kill_file present → refuse startup. Manual re-enable requires
         deleting the kill_file (operator is acknowledging the halt).
       * Repeat-CRIT (drift_crit reason, count ≥ threshold within window) →

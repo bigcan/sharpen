@@ -5,7 +5,7 @@
 # fields are descriptive).
 #
 # Derived from configs/sg1_xauusd_ensemble.gates.yaml (S488 baseline) with
-# Phase 2 top-3 seeds + Protocol v2.5 bootstrap PRIMARY thresholds.
+# Phase 2 top-3 seeds + SharpOps v2.5 bootstrap PRIMARY thresholds.
 #
 # Decision rule: ALL five gates (G1..G5) must PASS → approve Phase 2 ensemble
 # for SG-1-XAUUSD paper-deploy aggregation (replaces ens v1 [42, 2025, 3141]
@@ -47,19 +47,19 @@ gates:
     uplift_ratio_min: 1.10
     metric: "median"
 
-  # === Protocol v2.5 PRIMARY (S526): block-bootstrap probability gate. ===
+  # === SharpOps v2.5 PRIMARY (S526): block-bootstrap probability gate. ===
   ensemble_bootstrap_p_pf_promote: 0.90
   ensemble_bootstrap_p_mdd_promote: 0.90
   ensemble_bootstrap_p_pf_ambiguous: 0.75
   ensemble_bootstrap_resamples: 10000
   ensemble_bootstrap_block_len: null            # null → auto = sqrt(n_bars)
 
-  # === Protocol v2.5 SECONDARY (audit/sanity only). ===
+  # === SharpOps v2.5 SECONDARY (audit/sanity only). ===
   ensemble_uplift_min: 1.10                     # legacy point-estimate (audit-only in v2.5)
   ensemble_ambiguous_min: 1.05
 
-  # === Protocol v2.6 Stage 2.5-R Sensitivity Audit (S553, Phase α calibration) ===
-  # See .agent/artifacts/protocol_v27_a_sensitivity_audit_architecture.md for design.
+  # === SharpOps v2.6 Stage 2.5-R Sensitivity Audit (S553, Phase α calibration) ===
+  # See the SharpOps v2.7-A sensitivity-audit architecture note for design.
   # Phase α (S553+): keys present but sensitivity_audit_required=false → calibration phase.
   # Phase β (post-backfill): operator bumps protocol_version to '2.6' AND flips required=true.
   edge_stability_pf_ratio_floor: 0.70             # PRIMARY: pf_inner_min / pf_center >= floor
@@ -108,7 +108,7 @@ gates:
     crit_repeat_window_hours: 24
     crit_repeat_count_before_lockout: 2
 
-  # Protocol v2.3 §4.5 Stage 2.5-R retrain triggers (inherited from S488 baseline).
+  # SharpOps v2.3 §4.5 Stage 2.5-R retrain triggers (inherited from S488 baseline).
   retrain:
     ensemble_recheck_days: 90
     live_pf_ratio: 0.8

@@ -287,6 +287,6 @@
     "deadband_abs": 0.25,
     "vol_estimator_bars": 20,
     "rule": "ens_pf_weighted",
-    "rationale": "Ensemble v1 (seeds [2025, 3141, 9999], aggregation ens_pf_weighted) baseline captures the ensemble's action distribution across all 8 Hyper Growth WF OOS test windows for regime breadth. Stage 3 WF G3 point-estimate FAILed (1.081 < 1.10) but Protocol v2.5 block-bootstrap PROMOTEd. Live drift monitor compares Bybit demo trading-time action histogram against this baseline."
+    "rationale": "Ensemble v1 (seeds [2025, 3141, 9999], aggregation ens_pf_weighted) baseline captures the ensemble's action distribution across all 8 Hyper Growth WF OOS test windows for regime breadth. Stage 3 WF G3 point-estimate FAILed (1.081 < 1.10) but SharpOps v2.5 block-bootstrap PROMOTEd. Live drift monitor compares Bybit demo trading-time action histogram against this baseline."
   }
 }

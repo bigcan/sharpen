@@ -11,7 +11,7 @@ BTC 15-min:
 Twin to scripts/run_volume_study.py (which sweeps budget at fixed window).
 HPs frozen from v5 HPO `6xluh826` T29 (same agent, swap data axis).
 
-Per Protocol v2 Stage 2: each (window, budget) cell launches via
+Per SharpOps Stage 2: each (window, budget) cell launches via
 launch_l1_multiseed.py with --separate_runs (per-seed wandb runs). Cells
 are sequential to avoid GPU contention. Within a cell, seeds are
 fanned across slots (or concurrent on a single slot).

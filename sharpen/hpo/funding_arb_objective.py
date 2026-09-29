@@ -2,7 +2,7 @@
 
 Wired into `make_objective` (`sharpen/hpo/objective.py`) via env-type
 dispatch so the distributed HPO stack (coordinator → worker → objective)
-can run funding-arb DSAC under protocol v2.
+can run funding-arb DSAC under SharpOps.
 
 Differences from the V7/cmgp1 HPO path:
   - Reads `config["environment"]` (funding-arb uses this key; V7 uses `env`).
@@ -10,7 +10,7 @@ Differences from the V7/cmgp1 HPO path:
   - Samples DSAC-specific axes when `agents.sac.distributional: true`:
     cvar_alpha, n_quantiles, kappa — in addition to SAC HPs.
   - Objective = profit_factor (BUG-01) computed step-level from val portfolio.
-  - Uses window 0 from the walk-forward schedule for HPO (protocol v2
+  - Uses window 0 from the walk-forward schedule for HPO (SharpOps
     stage 1 = single HPO artifact; stage 3 handles walk-forward rollover).
 """
 from __future__ import annotations
@@ -221,7 +221,7 @@ def make_funding_arb_objective(
             logger.error("Trial %d: walk-forward schedule empty or failed", trial.number)
             return 0.0
 
-        # Protocol v2 stage 1: single HPO run per workstream → one window.
+        # SharpOps stage 1: single HPO run per workstream → one window.
         # Window selection: configurable, default 0 (earliest). Stage 3
         # (walk-forward) is where rollover happens.
         hpo_cfg = config.get("hpo", {})
@@ -285,7 +285,7 @@ def make_funding_arb_objective(
                 logger.warning("Trial %d: checkpoint save failed (non-fatal): %s",
                                trial.number, save_err)
 
-            # Evaluate on val — protocol v2 stage 1 gate.
+            # Evaluate on val — SharpOps stage 1 gate.
             val_env = create_env(val_arrays, cfg_for_env)
             val_metrics = _evaluate_agent_on_env(model, val_env)
             pv = val_metrics.get("_portfolio_values")

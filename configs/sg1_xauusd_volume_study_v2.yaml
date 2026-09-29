@@ -36,7 +36,7 @@
 #
 # FEE MODEL
 #   Steady-state 2.35bps OANDA-aligned (S464 audit; live-deploy uses 2.35bps).
-#   No fee curriculum — Protocol v2.4.1 §8 default.
+#   No fee curriculum — SharpOps v2.4.1 §8 default.
 #
 # DISPATCHER
 #   scripts/run_volume_study.py extended in S537 with --base_config and
@@ -153,7 +153,7 @@ training:
 hpo:
   enabled: false
 
-# Protocol v2 §4 Stage 2 gates — mirror the rehpo-l1-multiseed-oanda config.
+# SharpOps §4 Stage 2 gates — mirror the rehpo-l1-multiseed-oanda config.
 # Volume study analysis uses configs/sg1_xauusd_volume_study_v2.gates.yaml
 # (separate file with H1-H5 + decision_tree).
 gates:

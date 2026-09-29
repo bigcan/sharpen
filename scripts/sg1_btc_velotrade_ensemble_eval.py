@@ -417,7 +417,7 @@ def run_wf_ensemble(wf_config_path: str, gates_path: str, device: str,
                               chosen_rule=chosen_rule)
 
     # --- X3: fixed-lot stress sub-report (no early-term truncation) ----------
-    # Protocol v2 Stage 3 + audit P7-03/P7-07: the engine's buffered 8% early-term
+    # SharpOps Stage 3 + audit P7-03/P7-07: the engine's buffered 8% early-term
     # can truncate the recorded trailing DD, making the Velotrade G4 buffer
     # near-non-binding. Reconstruct the honest fixed-lot worst DD + peak leverage
     # from the GRADED rule's per-fold trajectories and gate it (stress_dd_buffer_pp /
@@ -766,7 +766,7 @@ def run_single_window_ensemble(config_path: str, device: str, gates_path: Option
     return {"summary": summary, "verdict": verdict}
 
 
-# --- S495 Protocol v2 amendment: val-split rule selection -------------------
+# --- S495 SharpOps amendment: val-split rule selection -------------------
 # When the L1 config declares `gates.ensemble_rule_selection: val_argmax_pf`,
 # Stage 2.5 confirmation runs through the shared helper in
 # sg1_xauusd_ensemble_eval.py (see `decision_ensemble_val_selection_s495.md`).
@@ -828,7 +828,7 @@ def run_single_window_val_selection(
         bundle_version="v1",
     )
 
-    print(f"\n========== {workstream.upper()} ENSEMBLE-CONFIRM (Protocol v2.3) ==========")
+    print(f"\n========== {workstream.upper()} ENSEMBLE-CONFIRM (SharpOps v2.3) ==========")
     print(json.dumps(verdict, indent=2, default=str))
     return verdict
 

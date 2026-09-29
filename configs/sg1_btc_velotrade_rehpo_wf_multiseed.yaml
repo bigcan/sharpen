@@ -13,7 +13,7 @@
 #                        placeholder populated post-L1 by the reconcile step.
 #   - Stage 2.5      : ensemble-confirm gates pre-committed in
 #                        `configs/sg1_btc_velotrade_ensemble.gates.yaml`.
-#                        Protocol v2 §4 S493 mandates Stage 2.5 between L1
+#                        SharpOps §4 S493 mandates Stage 2.5 between L1
 #                        and WF for prop-firm workstreams.
 #
 # Splitter (8 folds, mirrors XAUUSD cadence):
@@ -146,7 +146,7 @@ agents:
     checkpoint_interval: 250000
 
 training:
-  total_timesteps: 500000             # Protocol v2 Stage 3 budget (matches XAUUSD WF)
+  total_timesteps: 500000             # SharpOps Stage 3 budget (matches XAUUSD WF)
   log_interval: 1000
   use_amp: true
   amp_dtype: "bfloat16"
@@ -177,7 +177,7 @@ ensemble:
   # Pointer to pre-committed gate YAML:
   gates_file: "configs/sg1_btc_velotrade_ensemble.gates.yaml"
 
-gates:                                # Protocol v2 §4 Stage 3 (training-level)
+gates:                                # SharpOps §4 Stage 3 (training-level)
   # Upstream-stage gates retained so multi-stage validation walks this config
   # without complaining about missing keys (mirrors XAUUSD WF multiseed).
   hpo_pf_floor: 1.2

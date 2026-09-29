@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Protocol v2.2 §2 eval_distribution backfill for paper-deployed workstreams.
+"""SharpOps v2.2 §2 eval_distribution backfill for paper-deployed workstreams.
 
 Paper-deployed strategies with manifests predating the v2.2 amendment
 (SG-1 XAUUSD per S489, GMGP1 XAUUSD CME per S493) need `eval_distribution`

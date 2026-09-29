@@ -31,12 +31,12 @@
 #   Fold 3 test covers 2026-Q1 (live-unseen during L1 which tested through
 #   2025-12-31). Matches 6-month train cadence of prior gmgp1_btc_wf_r{1..3}.
 #
-# Gate (Protocol v2 Stage 3):
+# Gate (SharpOps Stage 3):
 #   - wf_windows >= 4, wf_pf_floor >= 1.1 per-fold
 #   - velotrade_trailing_dd_buffer_pp >= 0.5pp (i.e. worst EOD trailing DD
 #     <= 8.5% against 10% Velotrade cap; 8% wrapper line + 0.5pp buffer)
 #   ALL PASS -> seed 456 checkpoint promoted to Stage 4 recent-OOS
-#   ANY FAIL -> back to Stage 2 (or HPO) per Protocol v2
+#   ANY FAIL -> back to Stage 2 (or HPO) per SharpOps
 #
 # Launch:
 #   python scripts/validate_config.py --config configs/gmgp1_btc_velotrade_wf.yaml --stage wf
@@ -142,7 +142,7 @@ training:
 hpo:
   enabled: false
 
-gates:                                # Protocol v2 §4 Stage 3 (training-level)
+gates:                                # SharpOps §4 Stage 3 (training-level)
   # Upstream-stage gates retained so multi-stage validation walks this config
   # without complaining about missing keys (matches sg1_btc WF multiseed).
   hpo_pf_floor: 1.2

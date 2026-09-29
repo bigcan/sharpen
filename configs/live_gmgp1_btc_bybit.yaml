@@ -142,7 +142,7 @@ safety:
   capture_max_bars: 96              # 96 × 15-min = 24h
   capture_dir: "/app/state"
 
-# --- Protocol v2.2 §8.2 Live Action-Drift ---
+# --- SharpOps v2.2 §8.2 Live Action-Drift ---
 # Baseline = Stage 2.5 ensemble-confirm backfill. Live checkpoint is L1
 # multiseed seed-123 (gmgp1-btc-l1-multiseed_20260407_070227); Stage 2.5
 # seed_report.json contains eval distributions for seeds 123, 456, 1337.
@@ -156,7 +156,7 @@ drift:
   min_bars_before_check: 500
   vol_estimator_bars: 20
 
-# --- Protocol v2 Gates (paper-deploy requirement; mirrors §drift/§safe_mode) ---
+# --- SharpOps Gates (paper-deploy requirement; mirrors §drift/§safe_mode) ---
 gates:
   drift:
     window_bars: 1000

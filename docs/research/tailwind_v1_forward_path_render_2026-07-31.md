@@ -145,7 +145,7 @@ came back FLAGS, not CLEAR. Still outstanding:
    the same object.
 3. **Tier-2 deep lifecycle audit** of the tailwind book — never run; the 2026-07-01 audit noted
    tailwind has no Stage-4 OOS artifact (P8-10).
-4. **Protocol-v2 wiring**: `validate_config.py --stage paper-deploy` currently FAILs on the challenge
+4. **SharpOps wiring**: `validate_config.py --stage paper-deploy` currently FAILs on the challenge
    config — `risk.static_peak`, `kill_file`, `flatten_on_kill_file`, `drift.enabled`, the v2.2
    `gates.drift` keys, and `gates.safe_mode` keys are all missing. (A seventh FAIL, "Missing `gates:`
    block", is a validator defect — `check_gates_block` at line 403 ignores `ensemble.gates_file`

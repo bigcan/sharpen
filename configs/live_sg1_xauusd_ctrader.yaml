@@ -217,7 +217,7 @@ safety:
   flatten_on_kill_file: true           # graceful flatten on CRIT, not "halt"
   emergency_flatten_on_error: true
 
-# --- Protocol v2.2 §8.2 Live Action-Drift ---
+# --- SharpOps v2.2 §8.2 Live Action-Drift ---
 # Baseline baked into the image from baselines/sg1_xauusd_fold_07/ via
 # Dockerfile.live-engine `COPY baselines/ /app/baselines/`. The source of
 # truth is the backfilled ensemble_report.json for the deployed WF fold-07
@@ -244,7 +244,7 @@ drift:
   # regime_cutpoints omitted — manifest-side `regime_cutpoints` wiring is a
   # follow-up (vol-quartile bucketing falls back to global baseline).
 
-# --- Protocol v2 Gates (live copy — mirrors sg1_xauusd_ensemble.gates.yaml §drift/§safe_mode) ---
+# --- SharpOps Gates (live copy — mirrors sg1_xauusd_ensemble.gates.yaml §drift/§safe_mode) ---
 # The live engine reads drift/safe_mode thresholds from `drift:` block above
 # (T1 _init_drift_tracker fallback order); this duplicate block exists to
 # satisfy validate_config.py's paper-deploy stage check, which requires

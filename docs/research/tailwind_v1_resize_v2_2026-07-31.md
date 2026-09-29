@@ -60,7 +60,7 @@ that the 15% book breached the firm's own limits on its normal drawdown.
 | operator go-ahead | ❌ outstanding |
 
 Plus, still open and independent of the render: the sizing-mechanism reconciliation above, and the
-six protocol-v2 wiring gaps `validate_config --stage paper-deploy` reports (`risk.static_peak`,
+six SharpOps wiring gaps `validate_config --stage paper-deploy` reports (`risk.static_peak`,
 `kill_file`, `flatten_on_kill_file`, `drift.enabled`, v2.2 `gates.drift` keys, `gates.safe_mode`).
 
 **A challenge attempt remains BLOCKED.** What changed is that the vehicle is no longer mis-sized —

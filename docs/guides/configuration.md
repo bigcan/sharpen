@@ -62,7 +62,7 @@ easiest way to manufacture a fake edge.
 ### Fee models are workstream-locked
 
 Fees are set from step 0 to match the live venue, not ramped. A curriculum that starts at
-zero fees trains an agent for a market that does not exist. See `docs/protocol_v2.md`
+zero fees trains an agent for a market that does not exist. See `docs/sharpops.md`
 §3.5.4 for the per-asset-class models.
 
 ---

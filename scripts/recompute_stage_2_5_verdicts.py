@@ -186,7 +186,7 @@ def recompute(
             else None
         )
 
-    # --- compose verdict (Protocol v2.5 schema; legacy keys preserved) ---
+    # --- compose verdict (SharpOps v2.5 schema; legacy keys preserved) ---
     if bs_primary_basis == "legacy_uplift":
         decision = prior.get("legacy_decision") or prior.get("decision")
         decision_source = "legacy_uplift_v2.1"

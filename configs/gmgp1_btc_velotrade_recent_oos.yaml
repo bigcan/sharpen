@@ -7,7 +7,7 @@
 #
 # GMGP1-BTC Velotrade — Stage 4 Recent-OOS (solo seed 456, fold 3 checkpoint)
 #
-# Stage 4 per Protocol v2: unseen-window backtest against the Stage 3 WF
+# Stage 4 per SharpOps: unseen-window backtest against the Stage 3 WF
 # graduation checkpoint. Window chosen to maximise post-training unseen time
 # while staying inside the extended parquet (through 2026-04-12).
 #
@@ -23,7 +23,7 @@
 #   (norm cutoff = 2026-01-06 so EMA-Z statistics are frozen at end-of-training;
 #   val window from the WF fold is re-evaluated here as part of recent-OOS).
 #
-# Gate (Protocol v2 Stage 4):
+# Gate (SharpOps Stage 4):
 #   - oos_pf_floor >= 1.10 (per _wf.yaml line 164)
 #   - velotrade_trailing_dd_buffer_pp >= 0.5pp
 #   - sanity: trade_count >= 200 over ~96-day window

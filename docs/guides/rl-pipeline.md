@@ -1,8 +1,8 @@
 # RL Training Pipeline
 
-Sharpen trains reinforcement-learning trading agents under **Training Protocol v2**, a
+Sharpen trains reinforcement-learning trading agents under **SharpOps**, a
 staged pipeline where each stage is one Weights & Biases run producing one decision
-artifact. The full normative spec is [`docs/protocol_v2.md`](../protocol_v2.md); this guide
+artifact. The full normative spec is [`docs/sharpops.md`](../sharpops.md); this guide
 is the practical version.
 
 > **Read this first.** Single-asset directional RL is **falsified** in this repo. The
@@ -75,7 +75,7 @@ python scripts/run_full_pipeline.py --config configs/gmgp1_sac_gc_15min.yaml --s
 | Flag | Meaning |
 |---|---|
 | `--config` | Config YAML |
-| `--stage` | Protocol v2 stage; validates the config first and aborts on FAIL |
+| `--stage` | SharpOps stage; validates the config first and aborts on FAIL |
 | `--agent` | `sac` \| `iqn` \| `bdq` \| `ppo` (**use `sac`**) |
 | `--trials` | HPO trial count |
 | `--steps` | Training-step override |
@@ -87,7 +87,7 @@ python scripts/run_full_pipeline.py --config configs/gmgp1_sac_gc_15min.yaml --s
 | `--tags`, `--run_name` | WandB metadata |
 | `--skip_validate` | Skip the protocol gate — **never in CI or scheduled jobs** |
 
-> **Scope note.** `docs/protocol_v2.md` §5 describes a staged DAG launcher with
+> **Scope note.** `docs/sharpops.md` §5 describes a staged DAG launcher with
 > `--hp-run`, `--seeds`, `--windows`, `--wf-run`, `--upstream-run`, `--resume`,
 > `--allow-cold-replay`, `--allow-env-drift` and `--stage all`. **None of those flags exist
 > in `run_full_pipeline.py` today** — that section documents a planned refactor, and the

@@ -9,7 +9,7 @@
 #   - Stage 2 N=10 PASS S536-cont (val PF mean 2.746 CV 2.98%, test 2.563 CV 3.22%)
 #   - Top-3 by val_argmax_pf: [456, 1024, 2025]
 #   - project_gmgp1_gold_steadystate_a2_results.md
-#   - decision_protocol_v25_bootstrap_primary.md
+#   - the SharpOps v2.5 bootstrap-primary decision note
 #
 # Decision rule: ALL five gates (G1..G5) must PASS -> approve ensemble for
 # gmgp1-gold paper-deploy aggregation. ANY fail -> ensemble rejected; solo seed
@@ -54,19 +54,19 @@ gates:
     uplift_ratio_min: 1.05
     metric: median
 
-  # === Protocol v2.5 PRIMARY (S526): block-bootstrap probability gate. ===
+  # === SharpOps v2.5 PRIMARY (S526): block-bootstrap probability gate. ===
   ensemble_bootstrap_p_pf_promote: 0.90           # P(ens_PF > solo_best_PF) >= 0.90 for PROMOTE
   ensemble_bootstrap_p_mdd_promote: 0.90           # P(ens_MDD better) >= 0.90 for PROMOTE on DD channel
   ensemble_bootstrap_p_pf_ambiguous: 0.75          # v2.5 ambiguous floor on P(PF)
   ensemble_bootstrap_resamples: 10000              # B in stationary block bootstrap
   ensemble_bootstrap_block_len: null               # auto = sqrt(n_bars), capped at 0.1*n
 
-  # === Protocol v2.5 SECONDARY (audit/sanity only). ===
+  # === SharpOps v2.5 SECONDARY (audit/sanity only). ===
   ensemble_uplift_min: 1.10                        # legacy point-estimate
   ensemble_ambiguous_min: 1.05                     # legacy ambiguous floor
 
-  # === Protocol v2.6 Stage 2.5-R Sensitivity Audit (S553, Phase α calibration) ===
-  # See .agent/artifacts/protocol_v27_a_sensitivity_audit_architecture.md for design.
+  # === SharpOps v2.6 Stage 2.5-R Sensitivity Audit (S553, Phase α calibration) ===
+  # See the SharpOps v2.7-A sensitivity-audit architecture note for design.
   # Phase α (S553+): keys present but sensitivity_audit_required=false → calibration phase.
   # Phase β (post-backfill): operator bumps protocol_version to '2.6' AND flips required=true.
   edge_stability_pf_ratio_floor: 0.70             # PRIMARY: pf_inner_min / pf_center >= floor
@@ -80,8 +80,8 @@ gates:
   pf_xcheck_report_only: true                    # N2/ADR-N5 Phase α: surface (H+L)/2-vs-close PF divergence, never HALT
   pf_xcheck_divergence_halt: 0.30                # lock per-workstream vs observed divergence, then flip report_only false (enforce)
 
-  # === Protocol v2.7-B Stage 3.5 obs-noise robustness (S553-cont-25, Phase α) ===
-  # Design: .agent/artifacts/protocol_v27_b_obs_noise_stage_3_5_architecture.md
+  # === SharpOps v2.7-B Stage 3.5 obs-noise robustness (S553-cont-25, Phase α) ===
+  # Design: the SharpOps v2.7-B observation-noise (Stage 3.5) architecture note
   # Math gate: same doc "§ Math Audit Verdict" (PASS WITH NOTES). Price-path
   # randomization re-rolls the PROMOTE policy through multiplicative log-noise on
   # the raw 1-min OHLC (σ is log-space; bps = σ·1e4, MATH-OBS-2), recomputes every
@@ -123,7 +123,7 @@ gates:
       across folds must be at or below cv_max. Same threshold as BTC.
     cv_pf_max: 0.35
 
-  # Protocol v2.2 §8.2 live action-distribution drift thresholds — mirrors
+  # SharpOps v2.2 §8.2 live action-distribution drift thresholds — mirrors
   # gmgp1-gold L1 gates. Window 400 bars at 15-min ≈ 4 days continuous (CME
   # closes overnight + weekends so calendar-time conversion needed at live
   # check; tracker uses bar count not wall time).
@@ -144,7 +144,7 @@ gates:
     crit_repeat_window_hours: 24
     crit_repeat_count_before_lockout: 2
 
-  # Protocol v2.3 §4.5 Stage 2.5-R retrain triggers — calendar-day windows
+  # SharpOps v2.3 §4.5 Stage 2.5-R retrain triggers — calendar-day windows
   # (CME GC trades ~6.5h/day so per-day bar count differs from BTC).
   retrain:
     ensemble_recheck_days: 90                      # quarterly cadence
@@ -157,7 +157,7 @@ gates:
     cost_drift_ratio: 1.20
     cost_drift_window_trades: 100
 
-  # Protocol v2.3 §8.2 agreement-decay live monitor.
+  # SharpOps v2.3 §8.2 agreement-decay live monitor.
   drift_agreement:
     enabled_for_rules: ["ens_agreement", "ens_majority"]
     flat_delta_warn: 0.20

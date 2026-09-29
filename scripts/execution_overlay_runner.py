@@ -1,7 +1,7 @@
 #!/usr/bin/env python
 """RL execution-overlay runner — train the scheduler + render the deploy gate (exec-overlay step 5).
 
-Stage-driven runner (protocol_v2; NOT a fused pipeline) for the RL execution overlay
+Stage-driven runner (SharpOps; NOT a fused pipeline) for the RL execution overlay
 (``.agent/artifacts/execution_overlay_architecture.md``). The overlay shapes only the *trade
 path* of the FIXED linear 2-sleeve target (momentum + rates-carry) emitted by
 ``TwoSleeveExecutor.sim_oracle``; it points RL at EXECUTION (the one production-proven,
@@ -317,7 +317,7 @@ def main() -> int:
     ap.add_argument("--gates", default=None, help="gates yaml (default: ensemble.gates_file)")
     ap.add_argument("--out", default="results/execution_overlay/overlay_gate_verdict.json")
     ap.add_argument("--stage", default="wf",
-                    help="protocol_v2 stage for the fail-closed validate_config gate")
+                    help="SharpOps stage for the fail-closed validate_config gate")
     ap.add_argument("--train_frac", type=float, default=0.7,
                     help="fraction of bars used to TRAIN the overlay; the disjoint tail is the "
                          "OOS window the deploy gate is graded on (default 0.7)")
@@ -372,7 +372,7 @@ def main() -> int:
         if result.status == "FAIL":
             for m in result.failures:
                 log.error("validate_config FAIL: %s", m)
-            log.error("config violates protocol_v2 at stage=%s — refusing to run", args.stage)
+            log.error("config violates SharpOps at stage=%s — refusing to run", args.stage)
             return 2
         log.info("validate_config PASS (stage=%s)", args.stage)
 

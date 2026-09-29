@@ -7,7 +7,7 @@ before-quantile MDD ordering), the gate resolver (ADR-6), and the noised-parquet
 writer. The impure orchestrator ``run_obs_noise_stage`` (B2) is exercised by the
 B2 integration smoke test.
 
-Architecture: ``.agent/artifacts/protocol_v27_b_obs_noise_stage_3_5_architecture.md``
+Architecture: the SharpOps v2.7-B observation-noise (Stage 3.5) architecture note
 """
 from __future__ import annotations
 

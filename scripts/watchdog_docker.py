@@ -558,7 +558,7 @@ def _has_crit_kill_file(container) -> tuple[bool, dict | None]:
     """Return (is_crit, payload) for the container's kill_file.
 
     `is_crit` is True iff the kill_file payload's `reason` is in
-    `CRIT_REASONS` (operator-only re-enable per Protocol v2.2 §8.3).
+    `CRIT_REASONS` (operator-only re-enable per SharpOps v2.2 §8.3).
     Currently `drift_crit` + `agreement_decay_crit`; the source of truth
     is `sharpen.monitoring.kill_file.CRIT_REASONS` so adding a new
     reason there widens this guard automatically.
@@ -582,7 +582,7 @@ def _should_auto_restart(container_name: str, streak: int, now: float | None = N
 
     NOTE: CRIT halts (drift_crit / agreement_decay_crit / any future
     `CRIT_REASONS`) are checked by callers via `_has_crit_kill_file`
-    before this function is consulted (Protocol v2.2 §8.3: watchdog does
+    before this function is consulted (SharpOps v2.2 §8.3: watchdog does
     NOT auto-restart on these; manual human re-enable required).
     """
     if not AUTO_RESTART_ENABLED:

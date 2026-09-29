@@ -1,7 +1,7 @@
 # SG-1 XAUUSD Volume Study v2 Phase 2 — Stage 3 Walk-Forward, top-3 ensemble.
 #
 # Drafted 2026-05-19 (S540-cont) to confirm Phase 2 Stage 2.5-R verdict on
-# temporal robustness across folds, per Protocol v2.5 §4.5 ("WF re-confirmation
+# temporal robustness across folds, per SharpOps v2.5 §4.5 ("WF re-confirmation
 # MANDATORY after Stage 2.5-R PROMOTE").
 #
 # Upstream:
@@ -141,7 +141,7 @@ agents:
     checkpoint_interval: 250000
 
 training:
-  total_timesteps: 500000              # Protocol v2 Stage 3 budget (matches SG-1-BTC FU-3)
+  total_timesteps: 500000              # SharpOps Stage 3 budget (matches SG-1-BTC FU-3)
   log_interval: 1000
   use_amp: true
   amp_dtype: "bfloat16"
@@ -170,7 +170,7 @@ ensemble:
     9999: 2.0858
   gates_file: "configs/sg1_xauusd_volume_study_v2_phase2_ensemble.gates.yaml"
 
-gates:                                 # Protocol v2 §4 Stage 3 (training-level)
+gates:                                 # SharpOps §4 Stage 3 (training-level)
   hpo_pf_floor: 1.2
   hpo_min_trials_completed: 30
   entropy_floor: 0.01

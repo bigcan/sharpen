@@ -134,7 +134,7 @@ agents:
     checkpoint_interval: 250000
 
 training:
-  total_timesteps: 500000             # Protocol v2 Stage 3 budget (matches leaked WF)
+  total_timesteps: 500000             # SharpOps Stage 3 budget (matches leaked WF)
   log_interval: 1000
   use_amp: true
   amp_dtype: "bfloat16"

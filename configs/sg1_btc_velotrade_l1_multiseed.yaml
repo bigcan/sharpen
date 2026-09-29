@@ -1,4 +1,4 @@
-# SG-1 BTC Velotrade — L1 Multi-Seed Stability (Protocol v2 Stage 2)
+# SG-1 BTC Velotrade — L1 Multi-Seed Stability (SharpOps Stage 2)
 #
 # Data windows: matched to HPO source `sg1_btc_velotrade_hpo.yaml` so trial #44
 # HPs are evaluated on the same splits they were optimized against.
@@ -19,7 +19,7 @@
 #   After L1 completes, top-3 seeds by backtest_test/profit_factor feed
 #   scripts/sg1_xauusd_ensemble_eval.py (or a BTC-ported variant). Gate numbers
 #   are pre-committed in configs/sg1_btc_velotrade_ensemble.gates.yaml.
-#   Protocol v2 §4 S493 mandates Stage 2.5 between L1 and WF for prop-firm.
+#   SharpOps §4 S493 mandates Stage 2.5 between L1 and WF for prop-firm.
 
 data:
   file_path: "data/btc_usdt_1min_bybit.parquet"
@@ -119,7 +119,7 @@ training:
 hpo:
   enabled: false
 
-gates:                                 # Protocol v2 Stage 2 (S488 escalation) + Stage 2.5 (S493)
+gates:                                 # SharpOps Stage 2 (S488 escalation) + Stage 2.5 (S493)
   hpo_pf_floor: 1.2
   hpo_min_trials_completed: 30
   entropy_floor: 0.01
@@ -129,7 +129,7 @@ gates:                                 # Protocol v2 Stage 2 (S488 escalation) +
   l1_pf_cv_max: 0.30
   l1_pf_floor: 1.2
   l1_pf_cv_ambiguous: [0.22, 0.38]     # S488: pre-committed escalation range
-  # Protocol v2.5: bootstrap is PRIMARY (S526); legacy uplift below = audit-only.
+  # SharpOps v2.5: bootstrap is PRIMARY (S526); legacy uplift below = audit-only.
   ensemble_uplift_min: 1.10            # legacy point-estimate (audit-only in v2.5)
   ensemble_ambiguous_min: 1.05         # legacy ambiguous floor (audit-only in v2.5)
   ensemble_bootstrap_p_pf_ambiguous: 0.75  # v2.5 PRIMARY: AMBIGUOUS_BOOT band floor on P(PF)

@@ -1,5 +1,5 @@
 # ============================================================================
-# CROSS-ASSET MOMENTUM ALLOCATOR — xsec-mom-v1 (Protocol v2)
+# CROSS-ASSET MOMENTUM ALLOCATOR — xsec-mom-v1 (SharpOps)
 # ============================================================================
 # Phase 3 of the cross-sectional pivot (S553-cont-33). Config for the RL allocator
 # built on the validated linear TSMOM core (net Sharpe ~0.60 @2bps, 4/4 classes;
@@ -11,7 +11,7 @@
 #    rl_beats_linear gate, so the capital-bound strategy is the FROZEN LINEAR core
 #    (configs/live_cross_asset_paper.yaml + the paper executor + the paper_soak gates), which
 #    runs no SAC. This pipeline runs SINGLE-SEED HPO/train per window (no l1-multiseed, no
-#    seed=), so its WF manifest is RESEARCH evidence, NOT a Protocol-v2 deploy gate — Principle-6
+#    seed=), so its WF manifest is RESEARCH evidence, NOT a SharpOps deploy gate — Principle-6
 #    (multiseed median) does not bind it. The seeded multiseed is the X1 alternative NOT taken.
 #    This resolves the cont-58 S1 (P6-04): no capital decision rests on a single-run RL verdict.
 #
@@ -38,7 +38,7 @@ strategy:
   # P6-04 (cont-58): RESEARCH-TIER, NOT capital-bound. Per the cont-53 ship-linear verdict the
   # capital path is the FROZEN LINEAR core (configs/live_cross_asset_paper.yaml + paper executor
   # + paper_soak gates), which runs no SAC. This RL allocator's single-seed WF answers the
-  # rl_beats_linear RESEARCH question only; it does NOT gate capital, so Protocol-v2 Principle-6
+  # rl_beats_linear RESEARCH question only; it does NOT gate capital, so SharpOps Principle-6
   # (multiseed median) does not bind it (the seeded multiseed = the un-taken X1 alternative).
   tier: research
   deploy_gating: false

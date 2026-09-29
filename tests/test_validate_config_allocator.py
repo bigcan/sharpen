@@ -114,7 +114,7 @@ def test_yfinance_source_requires_frequency():
 
 
 # --------------------------------------------------------------------------- #
-# Training-budget multiplicity (Protocol v2.5.1 §3.5) — allocator branch.
+# Training-budget multiplicity (SharpOps v2.5.1 §3.5) — allocator branch.
 # The gate used to return None for non-crypto, so the 500k/1260-bar = 397x
 # Stage-1 overfit slipped validation (S553-cont-34). These are the regression
 # tests that keep that hole closed.

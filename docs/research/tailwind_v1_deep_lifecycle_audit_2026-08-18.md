@@ -25,7 +25,7 @@ Capital gate after this audit:
 | 1 | Forward-path render | ⚠ CLEAR **by exactly zero margin**, and it was reading FLAGS until today (P10-01) |
 | 2 | Sizing reconciliation | ✅ measured — but see P3-01a, which re-explains what it measured |
 | 3 | Tier-2 audit | ❌ **this document — BLOCK** |
-| 4 | Protocol-v2 wiring | ✅ 6 FAILs → 0 — but 33 of 48 declared gates are inert (P10-06) |
+| 4 | SharpOps wiring | ✅ 6 FAILs → 0 — but 33 of 48 declared gates are inert (P10-06) |
 | 5 | Operator go-ahead | ⏳ open |
 
 ---

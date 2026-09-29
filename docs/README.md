@@ -22,7 +22,7 @@ Task-oriented, written for someone using the platform.
 | [Data](guides/data.md) | **Read before anything using real prices.** Sources, credentials, the mandatory hygiene pipeline, point-in-time correctness, survivorship bias |
 | [Signal research](guides/signal-research.md) | Writing a signal, the T0–T5 validation funnel, reading a verdict, the alpha DSL |
 | [Crucible](guides/crucible.md) | The alpha-mining loop, substrates, the anti-oracle moat, calibrating expectations |
-| [RL pipeline](guides/rl-pipeline.md) | Training Protocol v2 in practice, stages, environments, agents, invariants, HPO |
+| [RL pipeline](guides/rl-pipeline.md) | SharpOps in practice, stages, environments, agents, invariants, HPO |
 | [Configuration](guides/configuration.md) | Training / gates / live config schemas, deploy overlays, environment variables |
 | [Live trading](guides/live-trading.md) | Broker adapters, runners, Docker stack, observability, kill switch, drift |
 | [Architecture](guides/architecture.md) | Package map, data flow, how the research and trading stacks meet |
@@ -37,13 +37,13 @@ Normative documents. These define contracts; the guides explain how to work with
 
 | Document | Covers |
 |---|---|
-| [Training Protocol v2.7](protocol_v2.md) | The six-stage pipeline, manifest schema, per-stage gates, drift and safe mode. **Authoritative for training work.** |
+| [SharpOps v2.7](sharpops.md) | The six-stage pipeline, manifest schema, per-stage gates, drift and safe mode. **Authoritative for training work.** |
 | [Crucible agentic discovery spec](research/crucible_agentic_discovery_spec.md) | Crucible's design contract |
 | [Signal eval system design](research/signal_eval_system_design.md) | The evaluation funnel's design |
 | [Manifest schema](schemas/manifest.schema.json) | JSON schema for stage manifests |
 | [Deep lifecycle audit template](audit/deep_lifecycle_audit_template.md) | The Tier-2 audit structure |
 
-> **Caveat on `protocol_v2.md` §5.** That section describes a *planned* staged DAG launcher.
+> **Caveat on `sharpops.md` §5.** That section describes a *planned* staged DAG launcher.
 > Flags such as `--hp-run`, `--seeds`, `--windows`, `--wf-run`, `--upstream-run`,
 > `--resume` and `--stage all` do **not** exist in `run_full_pipeline.py` today. The
 > currently working commands are in [RL pipeline](guides/rl-pipeline.md).
@@ -94,7 +94,7 @@ Human contributors want the [guides](#guides) instead.
 [Signal research](guides/signal-research.md) → [Crucible](guides/crucible.md) →
 [the validation archive](research/README.md).
 
-**Here to train RL agents:** [Data](guides/data.md) → [protocol_v2.md](protocol_v2.md) →
+**Here to train RL agents:** [Data](guides/data.md) → [sharpops.md](sharpops.md) →
 [RL pipeline](guides/rl-pipeline.md) → [Configuration](guides/configuration.md).
 
 **Here to deploy:** [Configuration](guides/configuration.md) →

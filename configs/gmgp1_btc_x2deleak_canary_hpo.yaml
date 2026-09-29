@@ -1,5 +1,5 @@
 # ============================================================================
-# GMGP1-BTC X2-DE-LEAK CLEAN CANARY — FRESH HPO (Stage 1, Protocol v2)
+# GMGP1-BTC X2-DE-LEAK CLEAN CANARY — FRESH HPO (Stage 1, SharpOps)
 # ============================================================================
 # PURPOSE (operator falsification test, S553-cont-31): the strictly-clean test
 # that has NEVER been run. Every prior de-leak WF (configs/*_x2deleak*.yaml)
@@ -149,7 +149,7 @@ training:
 # ---------- HPO (Stage 1) ----------------------------------------------------
 hpo:
   enabled: true
-  objective: "profit_factor"             # BUG-01 / Protocol v2 §4 stage 1
+  objective: "profit_factor"             # BUG-01 / SharpOps §4 stage 1
   trials: 24                             # 10 random + 14 TPE (operator range 20-30)
   steps_per_trial: 1000000               # 22.8x multiplicity on the 15mo window (in [15,40])
   narrow_mode: false                     # full space — no valid leaky anchor on de-leaked env
@@ -165,7 +165,7 @@ hpo:
       low: 0.15
       high: 0.40
 
-# ---------- GATES (Protocol v2 — RECALIBRATED for de-leaked numbers) ----------
+# ---------- GATES (SharpOps — RECALIBRATED for de-leaked numbers) ----------
 # NOTE: the leaky hpo_pf_floor:1.2 / l1_pf_floor:1.5 were calibrated on
 # X2-leak-INFLATED PFs (project_hpo_leak_contaminated_at_selection_s553). On the
 # de-leaked + cost-corrected env these are meaningless. Floors below are SANITY
@@ -189,7 +189,7 @@ gates:
   # Recent-OOS stage (not run in this canary; declared for schema parity)
   oos_pf_floor: 1.1
 
-  # Protocol v2.2 §8.2 drift thresholds — declared for schema parity (validator
+  # SharpOps v2.2 §8.2 drift thresholds — declared for schema parity (validator
   # runs check_drift_safemode_gates unconditionally; this config is prop-firm-tagged).
   drift:
     window_bars: 400
@@ -203,7 +203,7 @@ gates:
     regime_conditioning: true
     vol_estimator_bars: 20
 
-  # Protocol v2.2 §8.3 tiered safe-mode.
+  # SharpOps v2.2 §8.3 tiered safe-mode.
   safe_mode:
     crit_triggers_flatten: true
     crit_repeat_window_hours: 24

@@ -16,7 +16,7 @@
 #      (sg1_btc_velotrade_decay01_wf_multiseed.yaml:118-119).
 #   3. post-X2 causal coarse-bar alignment is CODE-LEVEL (multiscale_handler.py,
 #      committed 6c027e19 / S553-cont-7) — applies automatically, no config flag.
-# Per Protocol v2 §4.5 this is the cost-drift (#6) + env-change (#1) trigger that
+# Per SharpOps §4.5 this is the cost-drift (#6) + env-change (#1) trigger that
 # mandates a full L1 re-derive before reading any downstream WF. Expect LOWER PFs
 # than the cost-free / pre-X2 cohort (best-solo was 2.53 cost-free / 1.69
 # cost-corrected-but-leaky pre-X2; the de-leaked numbers will be lower again).
@@ -138,7 +138,7 @@ training:
 hpo:
   enabled: false
 
-gates:                                 # Protocol v2 Stage 2 (S488 escalation) + Stage 2.5 (S493/S526)
+gates:                                 # SharpOps Stage 2 (S488 escalation) + Stage 2.5 (S493/S526)
   hpo_pf_floor: 1.2
   hpo_min_trials_completed: 30
   entropy_floor: 0.01

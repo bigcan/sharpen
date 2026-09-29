@@ -1,6 +1,6 @@
 """Tests for the live-engine factory `_init_cost_drift_tracker`.
 
-Covers the gates.retrain → CostDriftTracker wiring (Protocol v2 §4.5 #6):
+Covers the gates.retrain → CostDriftTracker wiring (SharpOps §4.5 #6):
 config-cost denominator resolution (trading → env fallback, optional
 slippage), threshold/window pass-through, and the no-block / no-cost
 degradation paths.

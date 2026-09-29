@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""GMGP1-XAUUSD OANDA WF Stage 2.5 ensemble-confirm wrapper (Protocol v2.1 S495).
+"""GMGP1-XAUUSD OANDA WF Stage 2.5 ensemble-confirm wrapper (SharpOps v2.1 S495).
 
 Per-fold val-argmax-PF rule selection (S495 amendment) across the 8-fold OANDA
 WF. Wraps scripts/sg1_xauusd_ensemble_eval.py::run_stage_2_5_val_selection so

@@ -1,8 +1,8 @@
 {
   "$schema": "http://json-schema.org/draft-07/schema#",
   "$id": "https://chiwin-tech/finrl-pro-ds/manifest.schema.json",
-  "title": "Protocol v2 Stage-2 / Stage-2.5 manifest",
-  "description": "Validates seed_report.json (Stage 2) and ensemble_report.json (Stage 2.5) emitted by the L1 multiseed and ensemble-confirm pipelines. Three protocol versions coexist on disk; selection is keyed on the top-level `protocol` field. See docs/protocol_v2.md §2 + §4.",
+  "title": "SharpOps Stage-2 / Stage-2.5 manifest",
+  "description": "Validates seed_report.json (Stage 2) and ensemble_report.json (Stage 2.5) emitted by the L1 multiseed and ensemble-confirm pipelines. Three protocol versions coexist on disk; selection is keyed on the top-level `protocol` field. See docs/sharpops.md §2 + §4.",
 
   "oneOf": [
     { "$ref": "#/$defs/seed_report_v2_2" },

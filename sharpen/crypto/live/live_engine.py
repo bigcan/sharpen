@@ -60,7 +60,7 @@ logger = logging.getLogger(__name__)
 
 
 def _init_drift_tracker(config: dict) -> Optional[ActionDriftTracker]:
-    """Build a Protocol v2.2 §8.2 ActionDriftTracker from engine config.
+    """Build a SharpOps v2.2 §8.2 ActionDriftTracker from engine config.
 
     Returns None (tracker disabled) when:
       * `drift.enabled` is false/missing, OR
@@ -163,7 +163,7 @@ def _init_agreement_decay_tracker(
     config: dict,
     agent,
 ) -> Optional[AgreementDecayTracker]:
-    """Build a Protocol v2.3 §8.2-extension AgreementDecayTracker.
+    """Build a SharpOps v2.3 §8.2-extension AgreementDecayTracker.
 
     Returns None (tracker disabled) when:
       * the live agent isn't a consensus-rule ensemble (`ens_agreement` /
@@ -268,7 +268,7 @@ def _init_agreement_decay_tracker(
 
 
 def _init_cost_drift_tracker(config: dict) -> Optional[CostDriftTracker]:
-    """Build a Protocol v2 §4.5 trigger #6 CostDriftTracker from engine config.
+    """Build a SharpOps §4.5 trigger #6 CostDriftTracker from engine config.
 
     Returns None when no `gates.retrain` block is declared (no cost-drift
     thresholds to gate on). Thresholds come from `gates.retrain`:
@@ -596,7 +596,7 @@ class LiveTradingEngine:
                 f"restart (count resets on every container start).",
             )
 
-        # Protocol v2.2 §8.2 action-drift tracker. Engine-side concerns:
+        # SharpOps v2.2 §8.2 action-drift tracker. Engine-side concerns:
         #   - observe(target_position, current_close) after agent.predict()
         #   - WARN: disable new entries (handled in _apply_drift_status); holds stay
         #   - CRIT: write kill_file (§8.3 T2) + FTMO force-close; watchdog lockout
@@ -622,7 +622,7 @@ class LiveTradingEngine:
             )
         self._feature_variance_veto_scale = _scale
 
-        # Protocol v2.3 §8.2-extension agreement-decay tracker. Active only
+        # SharpOps v2.3 §8.2-extension agreement-decay tracker. Active only
         # for ensemble agents whose aggregation_rule is consensus-based
         # (`ens_agreement` / `ens_majority`). Silent-death detector: when
         # seeds diverge under regime shift the consensus filter stays flat
@@ -636,7 +636,7 @@ class LiveTradingEngine:
         self._agreement_decay_warn_active = False
         self._agreement_decay_last_status = None
 
-        # Protocol v2 §4.5 trigger #6 cost-drift tracker. Rolling realized
+        # SharpOps §4.5 trigger #6 cost-drift tracker. Rolling realized
         # one-way cost (fee + slippage vs the decision-bar close) measured
         # against the configured cost assumption. A FIRED status is a
         # Stage 2.5-R retrain signal — logged once per transition + surfaced
@@ -1125,7 +1125,7 @@ class LiveTradingEngine:
             )
             return
 
-        # --- 5a. Action-drift tracking (Protocol v2.2 §8.2 + v2.6 ADR-1) ---
+        # --- 5a. Action-drift tracking (SharpOps v2.2 §8.2 + v2.6 ADR-1) ---
         # observe() records the *policy output* before any overlays / deadband
         # / risk clipping, so the live distribution matches the stage-2/2.5
         # eval baseline (which was also the raw policy output).
@@ -1169,7 +1169,7 @@ class LiveTradingEngine:
             except Exception as e:  # noqa: BLE001
                 logger.warning(f"drift tracker error (non-fatal): {e}")
 
-        # --- 5a-bis. Agreement-decay tracking (Protocol v2.3 §8.2 ext) ---
+        # --- 5a-bis. Agreement-decay tracking (SharpOps v2.3 §8.2 ext) ---
         # Same observe-then-dispatch pattern as the action-drift block above;
         # the WARN gate reuses _blocked_by_drift_warn (no-new-entries) since
         # the failure mode is identical from the engine's POV.
@@ -2598,7 +2598,7 @@ class LiveTradingEngine:
     def _check_kill_file_startup_gate(self) -> bool:
         """Return True if engine must refuse to start (kill_file present).
 
-        Lockout semantics per Protocol v2.2 §8.3 (see
+        Lockout semantics per SharpOps v2.2 §8.3 (see
         `sharpen.monitoring.kill_file.should_lockout`). We log the
         reason and exit via `_request_stop` so the main loop falls through
         without connecting to the broker. Any existing kill_file halts
@@ -2663,7 +2663,7 @@ class LiveTradingEngine:
             )
 
     async def _request_drift_crit(self, report, bar_time: datetime) -> None:
-        """Protocol v2.2 §8.3 CRIT path.
+        """SharpOps v2.2 §8.3 CRIT path.
 
         1. Write/increment drift_crit kill_file JSON (count enables repeat-CRIT
            lockout on the next restart).
@@ -2735,7 +2735,7 @@ class LiveTradingEngine:
             self._cost_drift_fired = False
 
     async def _apply_drift_status(self, report, bar_time: datetime) -> None:
-        """Dispatch a Protocol v2.2 §8.2 DriftReport into engine side-effects.
+        """Dispatch a SharpOps v2.2 §8.2 DriftReport into engine side-effects.
 
         * WARN  → set self._drift_warn_active so the step loop blocks new
                   entries / flips / size-ups via `_blocked_by_drift_warn`.
@@ -2793,7 +2793,7 @@ class LiveTradingEngine:
     async def _request_agreement_decay_crit(
         self, report, bar_time: datetime,
     ) -> None:
-        """Protocol v2.3 §8.2-ext CRIT path (parallel to _request_drift_crit).
+        """SharpOps v2.3 §8.2-ext CRIT path (parallel to _request_drift_crit).
 
         Distinct kill_file reason (`agreement_decay_crit`) so retrospective
         analysis can attribute the §4.5 Stage 2.5-R retrain trigger #4
@@ -2840,7 +2840,7 @@ class LiveTradingEngine:
     async def _apply_agreement_decay_status(
         self, report, bar_time: datetime,
     ) -> None:
-        """Dispatch a Protocol v2.3 §8.2-ext AgreementDecayReport.
+        """Dispatch a SharpOps v2.3 §8.2-ext AgreementDecayReport.
 
         Mirrors :meth:`_apply_drift_status`: WARN flips
         ``_agreement_decay_warn_active`` (engine then refuses new entries
@@ -2951,7 +2951,7 @@ class LiveTradingEngine:
             metrics["order_fee"] = order.fee
             metrics["order_fill_price"] = order.avg_fill_price
 
-        # Protocol v2 §4.5 #6 cost-drift telemetry (rolling realized vs config
+        # SharpOps §4.5 #6 cost-drift telemetry (rolling realized vs config
         # cost). Emitted every bar so the ratio trend is visible even between
         # fills; None-valued stats (warmup / log-only) are filtered like the
         # §8.2 drift report. `drift/cost_fired` is the retrain-trigger flag —

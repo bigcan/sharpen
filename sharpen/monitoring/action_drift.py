@@ -1,4 +1,4 @@
-"""Protocol v2.2 §8.2 live action-distribution drift tracker.
+"""SharpOps v2.2 §8.2 live action-distribution drift tracker.
 
 An RL agent in unseen conditions often does not fail loudly — it can quietly
 collapse to a single safe action (for V7 scalar envs, the deadband-flat case).
@@ -110,7 +110,7 @@ def _marginal_kl_from_hists(
 class ActionDriftTracker:
     """Per-strategy rolling action-distribution drift tracker.
 
-    Baseline schema matches the Protocol v2.2 §2 `eval_distribution` block
+    Baseline schema matches the SharpOps v2.2 §2 `eval_distribution` block
     emitted by the Stage 2 / 2.5 report writers (see
     `sharpen.reporting.eval_distribution`). The tracker reads:
 

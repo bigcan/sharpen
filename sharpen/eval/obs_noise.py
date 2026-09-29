@@ -1,4 +1,4 @@
-"""Stage 3.5 Observation-Noise Robustness — Protocol v2.7-B (S553-cont-25).
+"""Stage 3.5 Observation-Noise Robustness — SharpOps v2.7-B (S553-cont-25).
 
 Price-path randomization for a frozen PROMOTE policy: re-roll the ensemble
 through *price-path-randomized* OHLC (multiplicative log-noise on the raw 1-min
@@ -6,7 +6,7 @@ bars -> real feature recompute via the unmodified handler -> ensemble rollout),
 aggregate PF/MDD across ``noise_seeds x WF folds x sigma-levels``, and gate on
 edge survival under perturbation.
 
-Architecture: ``.agent/artifacts/protocol_v27_b_obs_noise_stage_3_5_architecture.md``
+Architecture: the SharpOps v2.7-B observation-noise (Stage 3.5) architecture note
 Math gate:    same doc, "§ Math Audit Verdict" (S553-cont-25, PASS WITH NOTES)
 Researcher:   ``.agent/artifacts/mc_robustness_methods_research.md`` (Method #4 GO)
 

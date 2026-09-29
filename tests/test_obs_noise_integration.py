@@ -8,7 +8,7 @@ parquet a config points at and builds a portfolio_value path from its close
 column, so the sigma=0 nominal must reproduce a direct un-noised rollout (ADR-3)
 and sigma>0 must perturb it.
 
-Architecture: ``.agent/artifacts/protocol_v27_b_obs_noise_stage_3_5_architecture.md``
+Architecture: the SharpOps v2.7-B observation-noise (Stage 3.5) architecture note
 """
 from __future__ import annotations
 

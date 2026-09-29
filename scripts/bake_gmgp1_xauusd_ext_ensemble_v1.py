@@ -3,7 +3,7 @@
 
 Stage 3 WF 8-fold landed PROMOTE on bootstrap PRIMARY (P(PF)=1.000,
 P(MDD)=0.986). Legacy G3 uplift FAIL by 0.0015 (1.0985 < 1.10) — audit-only per
-Protocol v2.5. Bundle wraps fold_07 checkpoints (training data through
+SharpOps v2.5. Bundle wraps fold_07 checkpoints (training data through
 2026-02-28, freshest fold) for top-3 seeds [789, 2025, 1024].
 
 Predecessor: solo seed-42 fold-07 OANDA L1 (live since 2026-04-24); this is

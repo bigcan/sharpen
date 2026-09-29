@@ -12,7 +12,7 @@
 #   slippage_base_bps:  unset  -> 5.0       (one-way limit-cross, ~4.58 bps measured)
 # Both consumed natively by continuous_swing_env.py:58 (slippage), :364-366 +
 # :387 (applied to tc_bps AND equity delta). Expect sim PF 2.53 / +26.98%/14d
-# to drop materially. NOTE: changing the cost model is a Protocol v2 §4.5
+# to drop materially. NOTE: changing the cost model is a SharpOps §4.5
 # Stage 2.5-R trigger (#1 env-change / #6 cost-drift) — the cost-free top-3
 # seed selection [456,42,2025] is inherited here; a full cost-corrected
 # re-selection requires re-training the L1 N=10 cohort under these same params.
@@ -22,7 +22,7 @@
 # 2025] LOCKED by val_argmax_pf over the N=10 cohort; chosen aggregation rule
 # = the rule that wins Phase 2 on val) on temporal robustness across folds.
 #
-# Per Protocol v2.5 §4.5: WF re-confirmation MANDATORY after Stage 2.5-R PROMOTE
+# Per SharpOps v2.5 §4.5: WF re-confirmation MANDATORY after Stage 2.5-R PROMOTE
 # — "temporal robustness on new data is not transitive."
 #
 # Inheritance / diff vs sister sg1_btc_velotrade_rehpo_wf_multiseed_extended.yaml:
@@ -168,7 +168,7 @@ agents:
     checkpoint_interval: 250000
 
 training:
-  total_timesteps: 500000             # Protocol v2 Stage 3 budget (matches extended WF)
+  total_timesteps: 500000             # SharpOps Stage 3 budget (matches extended WF)
   log_interval: 1000
   use_amp: true
   amp_dtype: "bfloat16"
@@ -209,7 +209,7 @@ ensemble:
   # Pointer to pre-committed gate YAML:
   gates_file: "configs/sg1_btc_velotrade_ensemble.gates.yaml"
 
-gates:                                # Protocol v2 §4 Stage 3 (training-level)
+gates:                                # SharpOps §4 Stage 3 (training-level)
   # Upstream-stage gates retained so multi-stage validation walks this config
   # without complaining about missing keys (mirrors L1 + extended WF).
   hpo_pf_floor: 1.2

@@ -13,13 +13,13 @@
 # better sim-to-paper feature-parity match than the IC Markets pivot
 # this replaces.
 #
-# Stage 3 WF ensemble v1 (Protocol v2.5 bootstrap PROMOTE, S550):
+# Stage 3 WF ensemble v1 (SharpOps v2.5 bootstrap PROMOTE, S550):
 #   bundle SHA efd4853d1deb4d2018b62820aac686b78056bf3327684f32df5a75b1a51001cf
 #   seeds [2025, 3141, 9999] rule ens_pf_weighted
 #   L1 N=10: median test PF 1.5985, CV 0.0479
 #   Stage 2.5-R bootstrap: P(PF)=0.9991, P(MDD)=0.9713 -> PROMOTE
 #   Stage 3 WF 8-fold: G1/G2/G4/G5 PASS; G3 1.081 < 1.10 legacy FAIL
-#     -> Protocol v2.5 manual block-bootstrap on stitched 13,452 OOS bars:
+#     -> SharpOps v2.5 manual block-bootstrap on stitched 13,452 OOS bars:
 #        P(ens > solo_2025) = 1.0000, P(ens > best_solo) = 0.9994 -> PROMOTE
 #
 # ---------------------------------------------------------------------------
@@ -67,7 +67,7 @@ contract:
 #   efd4853d1deb4d2018b62820aac686b78056bf3327684f32df5a75b1a51001cf
 #   bootstrap P(PF)=0.9991, P(MDD)=0.9713.
 # - Stage 3 WF 8-fold ens_pf_weighted: G1/G2/G4/G5 PASS, G3 1.081 FAIL by
-#   legacy point-estimate (uplift_ratio_min 1.10). Protocol v2.5 manual
+#   legacy point-estimate (uplift_ratio_min 1.10). SharpOps v2.5 manual
 #   block-bootstrap on stitched 13,452 OOS bars: P(ens > solo_2025) = 1.0000,
 #   P(ens > best_solo) = 0.9994 -> PROMOTE.
 # - Manifest chosen_rule: ens_pf_weighted; seed_pfs weights from L1 test PFs.
@@ -206,7 +206,7 @@ safety:
   flatten_on_kill_file: true
   emergency_flatten_on_error: true
 
-# --- Protocol v2.2 §8.2 Live Action-Drift ---
+# --- SharpOps v2.2 §8.2 Live Action-Drift ---
 # Baseline = ens_pf_weighted distribution aggregated across all 8 HG WF OOS
 # test windows (13,460 bars, ~2025-09-01 -> 2026-04-01) for regime breadth.
 # deadband_frac 0.1857, sat 0.0958, mean -0.0383, std 0.6621.
@@ -218,7 +218,7 @@ drift:
   min_bars_before_check: 500
   vol_estimator_bars: 20
 
-# --- Protocol v2 Gates (paper-deploy requirement; mirrors §drift/§safe_mode) ---
+# --- SharpOps Gates (paper-deploy requirement; mirrors §drift/§safe_mode) ---
 gates:
   drift:
     window_bars: 1000
@@ -283,7 +283,7 @@ provenance:
     l1_metrics: "median test PF 1.5985, CV 0.0479 (N=10, S550)"
     stage_2_5_r_bootstrap: "P(PF)=0.9991, P(MDD)=0.9713 -> PROMOTE (S550)"
     stage_3_wf_gates: "G1/G2/G4/G5 PASS; G3 1.081 < 1.10 legacy FAIL"
-    stage_3_wf_bootstrap_override: "P(ens > solo_2025) = 1.0000, P(ens > best_solo) = 0.9994 (Protocol v2.5 primary; legacy demoted to audit-only S526)"
+    stage_3_wf_bootstrap_override: "P(ens > solo_2025) = 1.0000, P(ens > best_solo) = 0.9994 (SharpOps v2.5 primary; legacy demoted to audit-only S526)"
     stage_3_wf_decision: "PROMOTE (S550)"
   drift_baseline_path: "/app/baselines/sg1_eurusd_hg_ensemble_v1/ensemble_report.json"
   live_run_id: "live-sg1-eurusd-oanda-paper-ensemble-v1"

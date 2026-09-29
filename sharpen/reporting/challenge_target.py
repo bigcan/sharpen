@@ -1,4 +1,4 @@
-"""Protocol v2.2 §2 ``challenge_target_hit_rate_per_window`` helper.
+"""SharpOps v2.2 §2 ``challenge_target_hit_rate_per_window`` helper.
 
 Per the prop-firm decoupling (S495, Open Question #5 resolved 2026-04-24),
 L1 and WF manifests carry a per-seed (and per-ensemble) summary of how

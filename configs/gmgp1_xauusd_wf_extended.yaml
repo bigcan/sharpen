@@ -2,7 +2,7 @@
 #
 # Drafted S550-cont-8 2026-05-26 after L1 N=10 CLEAN PASS
 # (results/gmgp1_xauusd_extended_l1_*, median test PF 2.6601, CV 5.38%).
-# Per Protocol v2.5 §4.5: WF re-confirmation MANDATORY after Stage 2 PASS
+# Per SharpOps v2.5 §4.5: WF re-confirmation MANDATORY after Stage 2 PASS
 # before paper-deploy aggregation.
 #
 # Upstream:
@@ -35,7 +35,7 @@
 #
 # NOTE on training budget: total_timesteps = 1.1M per fold preserves the L1
 # extended cell's 30.5x multiplicity (1.5M / ~49K bars). 18mo @ 15-min OANDA
-# yields ~36K bars; 1.1M / 36K = 30.5x. Holds Protocol v2.5.1 multiplicity
+# yields ~36K bars; 1.1M / 36K = 30.5x. Holds SharpOps v2.5.1 multiplicity
 # steady from L1 to WF. (NOT the predecessor's 500K — that would underfit
 # the larger asset class at 13.9x, below the 15x floor.)
 #
@@ -136,7 +136,7 @@ agents:
     checkpoint_interval: 250000
 
 training:
-  total_timesteps: 1100000           # Protocol v2.5.1 multiplicity-anchored (30.5x @ ~36K bars/fold)
+  total_timesteps: 1100000           # SharpOps v2.5.1 multiplicity-anchored (30.5x @ ~36K bars/fold)
   log_interval: 1000
   use_amp: true
   amp_dtype: "bfloat16"
@@ -162,7 +162,7 @@ ensemble:
     1024: 2.8181
   gates_file: "configs/gmgp1_xauusd_extended_ensemble.gates.yaml"
 
-gates:                               # Protocol v2 §4 Stage 3 (training-level)
+gates:                               # SharpOps §4 Stage 3 (training-level)
   hpo_pf_floor: 1.2
   hpo_min_trials_completed: 30
   entropy_floor: 0.01
@@ -203,7 +203,7 @@ gates:                               # Protocol v2 §4 Stage 3 (training-level)
 
 wandb:
   project: "FinRL-Pro-DS"
-  consolidate: true                  # Protocol v2 §4 default; launcher --separate_runs overrides at runtime
+  consolidate: true                  # SharpOps §4 default; launcher --separate_runs overrides at runtime
   tags: ["gmgp1-xauusd", "Gold", "SAC", "15min", "CFD", "FTMO", "prop-firm",
          "extended-window", "oanda-spot", "rehpo-trial10", "steady-state",
          "walk_forward", "wf-stage3", "ensemble", "ensemble-confirm",

@@ -148,7 +148,7 @@ safety:
   flatten_on_kill_file: true         # v2.2 §8.3 CRIT graceful flatten
   emergency_flatten_on_error: true
 
-# --- Protocol v2.2 §8.2 Live Action-Drift ---
+# --- SharpOps v2.2 §8.2 Live Action-Drift ---
 # PLACEHOLDER — baseline artifact does not exist until L1 multiseed
 # completes. Path reflects the expected post-L1 location; deploy will
 # error at startup with "baseline not found" until the report is baked
@@ -162,7 +162,7 @@ drift:
   min_bars_before_check: 500
   vol_estimator_bars: 20
 
-# --- Protocol v2 Gates (paper-deploy requirement; mirrors §drift/§safe_mode) ---
+# --- SharpOps Gates (paper-deploy requirement; mirrors §drift/§safe_mode) ---
 gates:
   drift:
     window_bars: 1000

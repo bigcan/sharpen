@@ -90,7 +90,7 @@ training:
 hpo:
   enabled: false                    # Stage 2 only — HPs locked from 6xluh826 T29
 
-# Validator-required gates (Protocol v2 §4 stage 2 + universal).
+# Validator-required gates (SharpOps §4 stage 2 + universal).
 # H1-H4 hypothesis gates are in configs/gmgp1_volume_study.gates.yaml,
 # read by scripts/analyze_volume_study.py.
 gates:

@@ -1,4 +1,4 @@
-"""Validator tests for `check_ensemble_confirm` (Protocol v2.5 promotion).
+"""Validator tests for `check_ensemble_confirm` (SharpOps v2.5 promotion).
 
 Covers the 7 rule-coverage cases in C-2 of the v2.5 architecture plan
 (.agent/artifacts/stage_2_5_bootstrap_primary_architecture.md):

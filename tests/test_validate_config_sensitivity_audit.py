@@ -1,7 +1,7 @@
-"""Validator tests for `check_sensitivity_audit` (Protocol v2.6, S553).
+"""Validator tests for `check_sensitivity_audit` (SharpOps v2.6, S553).
 
 Covers the Phase α / Phase β operator-decision behavior locked in
-`.agent/artifacts/protocol_v27_a_sensitivity_audit_architecture.md` ADR-3:
+the SharpOps v2.7-A sensitivity-audit architecture note ADR-3:
 
   Phase α (legacy / protocol_version != "2.6"):
     1. Legacy v2.5 config → no-op (exempt), regardless of prop-firm tag

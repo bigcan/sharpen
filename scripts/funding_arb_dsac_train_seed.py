@@ -1,4 +1,4 @@
-"""Funding-Arb DSAC — single-seed training runner (Protocol v2 Stage 2).
+"""Funding-Arb DSAC — single-seed training runner (SharpOps Stage 2).
 
 Train ONE seed with HPs already baked into the config (typically from a
 post-HPO L1 multiseed YAML such as `configs/funding_arb_dsac_l1_multiseed.yaml`).
@@ -188,7 +188,7 @@ def train_seed(
             missing.append("dsac_params (n_quantiles/cvar_alpha/kappa)")
         raise RuntimeError(
             f"Config missing HPO'd HPs in agents.sac.*: {missing}. "
-            f"This runner expects baked-in HPs (Protocol v2 Stage 2).",
+            f"This runner expects baked-in HPs (SharpOps Stage 2).",
         )
 
     logger.info("Seed %d | agent_params=%s | dsac_params=%s", seed, agent_params, dsac_params)

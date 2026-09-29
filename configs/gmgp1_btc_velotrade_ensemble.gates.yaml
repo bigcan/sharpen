@@ -69,11 +69,11 @@ gates:
     uplift_ratio_min: 1.05
     metric: median                               # across-folds aggregation
 
-  # === Protocol v2.5 PRIMARY (S526): block-bootstrap probability gate. ===
+  # === SharpOps v2.5 PRIMARY (S526): block-bootstrap probability gate. ===
   # Mirrors sg1_btc_velotrade_ensemble.gates.yaml. Velotrade Step 1 cast (10%
   # trailing cap, no daily-loss gate); PROMOTE_DD_ONLY here = trailing-DD
   # tightens enough to widen the 10% buffer. See
-  # decision_protocol_v25_bootstrap_primary.md for the gate-ordering flip.
+  # the SharpOps v2.5 bootstrap-primary decision note for the gate-ordering flip.
   ensemble_bootstrap_p_pf_promote: 0.90        # P(ens_PF > solo_PF) >= 0.90 for PROMOTE
   ensemble_bootstrap_p_mdd_promote: 0.90       # P(ens_MDD better) >= 0.90 for PROMOTE on DD channel
                                                 #   (PF-pass + MDD-fail → PROMOTE on PF dominance;
@@ -84,12 +84,12 @@ gates:
   ensemble_bootstrap_resamples: 10000           # B in stationary block bootstrap
   ensemble_bootstrap_block_len: null            # null → auto = sqrt(n_bars), capped at 0.1*n
 
-  # === Protocol v2.5 SECONDARY (audit/sanity only). ===
+  # === SharpOps v2.5 SECONDARY (audit/sanity only). ===
   ensemble_uplift_min: 1.10                     # legacy point-estimate (audit-only in v2.5)
   ensemble_ambiguous_min: 1.05                  # legacy ambiguous floor (audit-only in v2.5)
 
-  # === Protocol v2.6 Stage 2.5-R Sensitivity Audit (S553, Phase α calibration) ===
-  # See .agent/artifacts/protocol_v27_a_sensitivity_audit_architecture.md for design.
+  # === SharpOps v2.6 Stage 2.5-R Sensitivity Audit (S553, Phase α calibration) ===
+  # See the SharpOps v2.7-A sensitivity-audit architecture note for design.
   # Phase α (S553+): keys present but sensitivity_audit_required=false → calibration phase.
   # Phase β (post-backfill): operator bumps protocol_version to '2.6' AND flips required=true.
   edge_stability_pf_ratio_floor: 0.70             # PRIMARY: pf_inner_min / pf_center >= floor
@@ -103,8 +103,8 @@ gates:
   pf_xcheck_report_only: true                    # N2/ADR-N5 Phase α: surface (H+L)/2-vs-close PF divergence, never HALT
   pf_xcheck_divergence_halt: 0.30                # lock per-workstream vs observed divergence, then flip report_only false (enforce)
 
-  # === Protocol v2.7-B Stage 3.5 obs-noise robustness (S553-cont-25, Phase α) ===
-  # Design: .agent/artifacts/protocol_v27_b_obs_noise_stage_3_5_architecture.md
+  # === SharpOps v2.7-B Stage 3.5 obs-noise robustness (S553-cont-25, Phase α) ===
+  # Design: the SharpOps v2.7-B observation-noise (Stage 3.5) architecture note
   # Math gate: same doc "§ Math Audit Verdict" (PASS WITH NOTES). Price-path
   # randomization re-rolls the PROMOTE policy through multiplicative log-noise on
   # the raw 1-min OHLC (σ is log-space; bps = σ·1e4, MATH-OBS-2), recomputes every
@@ -147,7 +147,7 @@ gates:
       PF across folds must be at or below cv_max.
     cv_pf_max: 0.35
 
-  # Protocol v2.2 §8.2 live action-distribution drift thresholds. Defaults
+  # SharpOps v2.2 §8.2 live action-distribution drift thresholds. Defaults
   # mirror sg1_btc_velotrade_ensemble.gates.yaml for cross-workstream parity.
   # GMGP1 BTC Velotrade runs 24/7 15-min bars: window_bars=400 ≈ 4 days
   # continuous (vs ~3.5 days at 5-min). Deadband/saturation deltas tuned for
@@ -164,14 +164,14 @@ gates:
     regime_conditioning: true
     vol_estimator_bars: 20
 
-  # Protocol v2.2 §8.3 tiered safe-mode. CRIT must graceful-flatten (S491
+  # SharpOps v2.2 §8.3 tiered safe-mode. CRIT must graceful-flatten (S491
   # bleed-window lesson), not "halt while holding".
   safe_mode:
     crit_triggers_flatten: true
     crit_repeat_window_hours: 24
     crit_repeat_count_before_lockout: 2
 
-  # Protocol v2.3 §4.5 Stage 2.5-R retrain triggers. Each is a separate
+  # SharpOps v2.3 §4.5 Stage 2.5-R retrain triggers. Each is a separate
   # auto-fire condition; any one trips a Stage 2.5-R rerun (re-pick top-K +
   # re-bootstrap + new ensemble_v{N+1}.tar.gz bundle). Bar-windows scale to
   # GMGP1 BTC 15-min cadence (24/7): 600 bars ≈ 6 days continuous, 1500 bars
@@ -192,7 +192,7 @@ gates:
     cost_drift_ratio: 1.20                      # realized cost > 1.20x backtest assumption
     cost_drift_window_trades: 100               # over rolling 100 trades
 
-  # Protocol v2.3 §8.2 agreement-decay live monitor (ensemble-deployed only).
+  # SharpOps v2.3 §8.2 agreement-decay live monitor (ensemble-deployed only).
   # No-op for ens_mean / ens_median / ens_pf_weighted (only consensus rules
   # have the silent-flat failure mode). Tracker compares live flat_bar_frac
   # against ensemble_eval_distribution.deadband_frac from ensemble_report.json.

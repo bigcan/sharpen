@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """GMGP1-XAUUSD OANDA WF fold-7 Stage 2.5 ensemble-confirm (single-fold).
 
-Protocol v2.1/v2.2 Stage 2.5 val-split rule selection (S495), scoped to the
+SharpOps v2.1/v2.2 Stage 2.5 val-split rule selection (S495), scoped to the
 freshest WF fold (fold 7, the paper-deploy candidate). This is a SINGLE-FOLD
 application of the multi-fold WF-gate framework in
 `scripts/sg1_xauusd_ensemble_eval.py` (run_wf_ensemble) — strict 8/8 fold

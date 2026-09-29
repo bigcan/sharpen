@@ -5,7 +5,7 @@ Sweeps `training.total_timesteps` in {500K, 1M, 2M, 3M, 5M} at N=5 seeds each
 (25 runs total) on GMGP1 SAC Gold 15-min. HPs are frozen from v5 HPO `6xluh826`
 (T29 best, copied via `configs/gmgp1_volume_study.yaml`).
 
-Per Protocol v2 Stage 2: one consolidated WandB run per budget, with seed<N>/*
+Per SharpOps Stage 2: one consolidated WandB run per budget, with seed<N>/*
 namespaces. The 5 budget-runs are sibling experiments; analysis script joins
 them by tag `volume-study`.
 

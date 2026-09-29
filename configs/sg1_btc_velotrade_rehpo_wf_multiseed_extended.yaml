@@ -5,7 +5,7 @@
 # bootstrap P(PF)=0.9833, P(MDD)=0.2232; legacy uplift 1.024 would have said
 # SOLO_BEST_FALLBACK) on temporal robustness across folds.
 #
-# Per Protocol v2.5 §4.5: WF re-confirmation MANDATORY after Stage 2.5-R PROMOTE
+# Per SharpOps v2.5 §4.5: WF re-confirmation MANDATORY after Stage 2.5-R PROMOTE
 # — "temporal robustness on new data is not transitive."
 #
 # Inheritance / diff vs base sg1_btc_velotrade_rehpo_wf_multiseed.yaml:
@@ -144,7 +144,7 @@ agents:
     checkpoint_interval: 250000
 
 training:
-  total_timesteps: 500000             # Protocol v2 Stage 3 budget (matches base WF)
+  total_timesteps: 500000             # SharpOps Stage 3 budget (matches base WF)
   log_interval: 1000
   use_amp: true
   amp_dtype: "bfloat16"
@@ -177,7 +177,7 @@ ensemble:
   # Pointer to pre-committed gate YAML:
   gates_file: "configs/sg1_btc_velotrade_ensemble.gates.yaml"
 
-gates:                                # Protocol v2 §4 Stage 3 (training-level)
+gates:                                # SharpOps §4 Stage 3 (training-level)
   # Upstream-stage gates retained so multi-stage validation walks this config
   # without complaining about missing keys (mirrors base WF + L1 extended).
   hpo_pf_floor: 1.2

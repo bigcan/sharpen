@@ -170,11 +170,11 @@ risk:
   # junction (shipped S542). Counter decrements only on would-be TRADES.
   post_restart_cooldown_bars: 3
 
-# --- Protocol v2 §4.5 offline retrain gate (scripts/check_retrain_triggers.py) ---
+# --- SharpOps §4.5 offline retrain gate (scripts/check_retrain_triggers.py) ---
 # Complements the LIVE cost-drift trigger (gates.retrain.cost_drift_* above):
 # this block drives the monthly/cron OOS-PF + staleness + live-DD + feature-
 # drift-KS gate. The two schemas are intentionally distinct — offline rolling
-# backtest vs live execution signal — NOT duplicative (docs/protocol_v2.md §4.5).
+# backtest vs live execution signal — NOT duplicative (docs/sharpops.md §4.5).
 # `checkpoint_path` is read in preference to agent.checkpoint_path so a
 # bundle-deployed strategy (agent.checkpoint_path: "") still has a raw
 # checkpoint for the rolling OOS backtest.
@@ -227,7 +227,7 @@ safety:
   capture_max_bars: 480
   capture_dir: "/app/state"
 
-# --- Protocol v2.2 §8.2 Live Action-Drift ---
+# --- SharpOps v2.2 §8.2 Live Action-Drift ---
 # Baseline = DECAY-01 solo_456 distribution aggregated across all 8 WF OOS
 # test windows (57036 bars, 2025-09-01 -> 2026-04-01) for regime breadth.
 # Mean shift from +0.04 (FU-2 ens_mean) -> -0.16 (DECAY-01 solo_456) reflects
@@ -240,7 +240,7 @@ drift:
   min_bars_before_check: 500
   vol_estimator_bars: 20
 
-# --- Protocol v2 Gates (paper-deploy requirement; mirrors §drift/§safe_mode) ---
+# --- SharpOps Gates (paper-deploy requirement; mirrors §drift/§safe_mode) ---
 # v2.6 (S551-cont-9, 2026-05-28): asymmetric thresholds + feature_variance_veto
 # applied here too. S551-cont-4 updated the canonical
 # `configs/sg1_btc_velotrade_ensemble.gates.yaml` but the live engine reads
@@ -276,7 +276,7 @@ gates:
     crit_triggers_flatten: true
     crit_repeat_window_hours: 24
     crit_repeat_count_before_lockout: 2
-  # Protocol v2 §4.5 Stage 2.5-R retrain triggers. Mirrors the canonical
+  # SharpOps §4.5 Stage 2.5-R retrain triggers. Mirrors the canonical
   # configs/sg1_btc_velotrade_ensemble.gates.yaml `gates.retrain` block —
   # the live engine reads thresholds from THIS file at runtime (S551-cont-9
   # both-files lesson; the canonical gates yaml gates Stage-3 WF verdicts).

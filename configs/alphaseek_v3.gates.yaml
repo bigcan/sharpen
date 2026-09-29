@@ -37,17 +37,17 @@ gates:
   l1_pf_cv_ambiguous: [0.22, 0.38]             # auto-extend to N=20 if CV in range
   l1_pf_floor: 1.0                             # per-seed median PF >= 1.0
 
-  # ----- Stage 2.5 ensemble (Protocol v2.5 + S495 val-selection) -----
+  # ----- Stage 2.5 ensemble (SharpOps v2.5 + S495 val-selection) -----
   # Block-bootstrap on per-bar returns is the PRIMARY gate (S526). Legacy
   # uplift demoted to audit-only. See
-  # decision_protocol_v25_bootstrap_primary.md.
-  # === Protocol v2.5 PRIMARY ===
+  # the SharpOps v2.5 bootstrap-primary decision note.
+  # === SharpOps v2.5 PRIMARY ===
   ensemble_bootstrap_p_pf_promote: 0.90         # P(ens_PF > solo_PF) >= 0.90 for PROMOTE
   ensemble_bootstrap_p_mdd_promote: 0.90        # P(ens_MDD better) >= 0.90 for PROMOTE on DD channel
   ensemble_bootstrap_p_pf_ambiguous: 0.75       # v2.5 ambiguous floor on P(PF)
   ensemble_bootstrap_resamples: 10000
   ensemble_bootstrap_block_len: null            # null → auto = sqrt(n_bars)
-  # === Protocol v2.5 SECONDARY (audit-only) ===
+  # === SharpOps v2.5 SECONDARY (audit-only) ===
   ensemble_uplift_min: 1.10                     # legacy point-estimate (audit-only in v2.5)
   ensemble_ambiguous_min: 1.05                  # legacy ambiguous floor (audit-only in v2.5)
   ensemble_top_k: 3
@@ -73,7 +73,7 @@ gates:
   throughput_min_fills_per_episode: 10
   throughput_n_warmup_steps: 20000
 
-  # Protocol v2.2 §8.2 live action-distribution drift thresholds. AlphaSeek
+  # SharpOps v2.2 §8.2 live action-distribution drift thresholds. AlphaSeek
   # v3 uses discrete {-1,0,+1} Q-value action; deadband_frac maps to "argmax
   # 0 fraction", saturation_frac to "argmax ±1 fraction". Conservative
   # defaults pre-Stage-4; revisit when live shadow data lands.
@@ -89,7 +89,7 @@ gates:
     regime_conditioning: false                 # crypto perp; no session split
     vol_estimator_bars: 60
 
-  # Protocol v2.2 §8.3 tiered safe-mode. CRIT must graceful-flatten (S491
+  # SharpOps v2.2 §8.3 tiered safe-mode. CRIT must graceful-flatten (S491
   # bleed-window lesson); not applicable until Stage 5, but declared for
   # schema completeness.
   safe_mode:
@@ -97,7 +97,7 @@ gates:
     crit_repeat_window_hours: 24
     crit_repeat_count_before_lockout: 2
 
-  # Protocol v2.3 §4.5 Stage 2.5-R retrain triggers (post-deploy).
+  # SharpOps v2.3 §4.5 Stage 2.5-R retrain triggers (post-deploy).
   retrain:
     ensemble_recheck_days: 90                  # quarterly cadence
     live_pf_ratio: 0.8                         # live PF < 0.8 * paper PF
@@ -109,7 +109,7 @@ gates:
     cost_drift_ratio: 1.20
     cost_drift_window_trades: 200
 
-  # Protocol v2.3 §8.2 agreement-decay live monitor (consensus rules only).
+  # SharpOps v2.3 §8.2 agreement-decay live monitor (consensus rules only).
   drift_agreement:
     enabled_for_rules: ["ens_agreement", "ens_majority"]
     flat_delta_warn: 0.20

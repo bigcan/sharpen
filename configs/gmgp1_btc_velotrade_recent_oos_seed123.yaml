@@ -107,7 +107,7 @@ training:
 hpo:
   enabled: false
 
-# Stage-4 gates (Protocol v2) — all thresholds live here, never hardcoded (project invariant).
+# Stage-4 gates (SharpOps) — all thresholds live here, never hardcoded (project invariant).
 gates:
   oos_pf_floor: 1.1
   velotrade_trailing_dd_buffer_pp: 0.5

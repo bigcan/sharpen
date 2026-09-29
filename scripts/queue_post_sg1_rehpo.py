@@ -7,7 +7,7 @@ Pipeline:
         (S486: queued here so SG-1 fleet is re-used before GMGP1 seed-refresh.)
     2.  Refresh `agents.sac:` block of `configs/gmgp1_xauusd_ftmo_hpo.yaml` from
         SG-1 XAUUSD best trial params (writes `.bak` copy of original).
-    3.  Re-validate refreshed XAUUSD config (protocol v2).
+    3.  Re-validate refreshed XAUUSD config (SharpOps).
     4.  Launch `distributed_hpo_coordinator.py` for GMGP1 XAUUSD; wait.
     5.  Launch `distributed_hpo_coordinator.py` for GMGP1 BTC; wait.
     6.  Launch `distributed_hpo_coordinator.py` for Funding-Arb DSAC re-HPO.

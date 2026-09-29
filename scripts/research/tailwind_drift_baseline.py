@@ -1,6 +1,6 @@
 """TAILWIND-v1 action-drift baseline — the artifact `drift.baseline_path` points at.
 
-Protocol v2.2 §8.2 requires a prop-firm config to declare `drift.enabled: true` and resolve a
+SharpOps v2.2 §8.2 requires a prop-firm config to declare `drift.enabled: true` and resolve a
 baseline. TAILWIND has no Stage-2/2.5 `seed_report.json` (it is a LINEAR book — there is no RL
 seed sweep to emit one), so the baseline is built here directly from the deployable book.
 

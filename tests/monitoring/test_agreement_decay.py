@@ -1,4 +1,4 @@
-"""Tests for Protocol v2.3 §8.2-extension AgreementDecayTracker."""
+"""Tests for SharpOps v2.3 §8.2-extension AgreementDecayTracker."""
 
 from __future__ import annotations
 

@@ -1,4 +1,4 @@
-"""Live post-deploy monitoring (Protocol v2.2 / v2.3 §8)."""
+"""Live post-deploy monitoring (SharpOps v2.2 / v2.3 §8)."""
 
 from sharpen.monitoring.action_drift import (
     ActionDriftTracker,

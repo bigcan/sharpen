@@ -3,7 +3,7 @@
 # Provenance: Tier B2 extended-window L1 N=10 → Stage 3 WF 8-fold (S550-cont-6 → S551-cont-6).
 # WF Stage 3 verdict (S551-cont-7, 2026-05-28): bootstrap PRIMARY PROMOTE
 #   (P(PF)=1.000, P(MDD)=0.986); legacy G3 uplift FAIL by 0.0015 (1.0985 < 1.10)
-#   audit-only per Protocol v2.5. G1/G2/G4/G5 PASS (8/8 folds clean).
+#   audit-only per SharpOps v2.5. G1/G2/G4/G5 PASS (8/8 folds clean).
 #   Median ens_PF 2.722 vs solo seed-2025 median 2.402; ensemble dominates 8/8 folds.
 #   See results/gmgp1_xauusd_extended_wf_ensemble/verdict.json.
 # Predecessor: solo seed-42 fold-07 OANDA L1 (LIVE 2026-04-24 → 2026-05-28).
@@ -178,7 +178,7 @@ safety:
   flatten_on_kill_file: true           # graceful flatten on CRIT (not "halt")
   emergency_flatten_on_error: true     # Flatten all positions on unrecoverable error
 
-# --- Protocol v2.2 §8.2 Live Action-Drift ---
+# --- SharpOps v2.2 §8.2 Live Action-Drift ---
 # Ensemble baseline (ens_pf_weighted, 8-fold concatenated WF OOS = 15,683 bars).
 # Baked by scripts/bake_gmgp1_xauusd_ext_drift_baseline.py.
 # No baseline_seed (ensemble rule, not a per-seed baseline).
@@ -189,7 +189,7 @@ drift:
   min_bars_before_check: 500
   vol_estimator_bars: 20
 
-# --- Protocol v2 Gates (validator requirement; mirrors §drift/§safe_mode) ---
+# --- SharpOps Gates (validator requirement; mirrors §drift/§safe_mode) ---
 # SOURCE OF TRUTH for research: configs/gmgp1_xauusd_ensemble.gates.yaml.
 gates:
   drift:

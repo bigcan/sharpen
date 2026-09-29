@@ -5,7 +5,7 @@ Step one of the "less-liquid-market" thesis test (S553-cont, research artifact
 FinMind daily bars for TWSE/TPEx stocks and TAIFEX futures, runs the canonical
 DATA-CLEAN, and writes a v2 manifest whose ``status`` is EARNED from the stale-print
 scan — mirroring :mod:`sharpen.data.cross_asset_loader` so downstream gates and
-``protocol_v2`` treat Taiwan data identically to ETF/crypto data.
+SharpOps treat Taiwan data identically to ETF/crypto data.
 
 Why the HTTP REST route (not the FinMind SDK): the endpoint + dataset names are the
 stable, verified contract (https://finmind.github.io/tutor/TaiwanMarket/Technical),

@@ -2,7 +2,7 @@
 #
 # Drafted S551-cont-9 2026-05-29 after Stage 2.5-R PROMOTE
 # (results/gmgp1_eurusd_hg_ensemble/ensemble_v1.tar.gz, chosen_rule=ens_pf_weighted,
-# P(PF)=0.914 / P(MDD)=0.945, sha256 TBD). Per Protocol v2.5 §4.5: WF
+# P(PF)=0.914 / P(MDD)=0.945, sha256 TBD). Per SharpOps v2.5 §4.5: WF
 # re-confirmation MANDATORY after Stage 2.5-R PROMOTE.
 #
 # Upstream:
@@ -12,7 +12,7 @@
 #     (results/gmgp1_eurusd_l1_seed_report.json).
 #   - Stage 2.5-R: PROMOTE on ens_pf_weighted (bundle ensemble_v1.tar.gz,
 #     P(PF)=0.914, P(MDD)=0.945; legacy uplift 1.049 = SOLO_BEST_FALLBACK
-#     audit-only per Protocol v2.5).
+#     audit-only per SharpOps v2.5).
 #
 # Top-3 by L1 val_argmax_pf (S495), CONFIRMED by Stage 2.5-R diversity-audit
 # (pool=K=3 so naive top-K is the only choice — no reseat needed):
@@ -37,7 +37,7 @@
 #
 # NOTE on budget: total_timesteps = 1.0M per fold. Anchored to L1 cell's ~33x
 # multiplicity (1.5M / ~46K bars). 14mo WF folds yield ~30K bars; 1.0M / 30K =
-# ~33x, holds multiplicity steady from L1 to WF per Protocol v2.5.1. Matches
+# ~33x, holds multiplicity steady from L1 to WF per SharpOps v2.5.1. Matches
 # GMGP1-XAUUSD-extended WF anchoring (1.1M @ 36K bars = 30.5x).
 #
 # Gate (pre-committed at configs/gmgp1_eurusd_oanda_ensemble.gates.yaml):
@@ -130,7 +130,7 @@ agents:
     checkpoint_interval: 250000
 
 training:
-  total_timesteps: 1000000             # Protocol v2.5.1 multiplicity hold (33x @ ~30K bars)
+  total_timesteps: 1000000             # SharpOps v2.5.1 multiplicity hold (33x @ ~30K bars)
   log_interval: 1000
   use_amp: true
   amp_dtype: "bfloat16"
@@ -156,7 +156,7 @@ ensemble:
     5150: 2.4965
   gates_file: "configs/gmgp1_eurusd_oanda_ensemble.gates.yaml"
 
-gates:                                 # Protocol v2 §4 Stage 3 (training-level)
+gates:                                 # SharpOps §4 Stage 3 (training-level)
   hpo_pf_floor: 1.2
   hpo_min_trials_completed: 30
   entropy_floor: 0.01

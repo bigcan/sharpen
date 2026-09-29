@@ -59,7 +59,7 @@ gates:
     max_net_vega_per_100k: 50000.0
     cvar95_floor_pct: -8.0
 
-  # Fixed-lot stress sub-report (X3; Protocol v2 Stage 3) sanity bounds.
+  # Fixed-lot stress sub-report (X3; SharpOps Stage 3) sanity bounds.
   stress_dd_buffer_pp: 1.0
   stress_leverage_max: 3.0               # delta-hedge perp leverage ceiling
 

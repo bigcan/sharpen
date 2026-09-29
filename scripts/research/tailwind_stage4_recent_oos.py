@@ -7,7 +7,7 @@ rule, so this is a native implementation rather than a port.
 
 THREE DESIGN DECISIONS, all load-bearing:
 
-1. WINDOW IS CUTOFF-ANCHORED, NOT ROLLING. Protocol v2's Stage 4 uses `today - 60d`, which
+1. WINDOW IS CUTOFF-ANCHORED, NOT ROLLING. SharpOps's Stage 4 uses `today - 60d`, which
    assumes "out of sample" means "after this checkpoint's train cutoff". TAILWIND is never
    trained — its parameters were locked once — so the true holdout boundary is the research
    sample end (`gates.research_cutoff`). The protocol's rolling window is computed too, and
@@ -181,7 +181,7 @@ def subperiod_baseline(combined: pd.Series, subperiods: dict, cutoff: pd.Timesta
 
 def compliance_block(daily: pd.Series, turnover_daily: pd.Series, cfg: dict,
                      n_rebalances: int) -> dict:
-    """Protocol v2 Stage-4 FTMO compliance filter. Velotrade has no such caps.
+    """SharpOps Stage-4 FTMO compliance filter. Velotrade has no such caps.
 
     ⚠️ The active-days leg is only meaningful over a window long enough for the book's own
     cadence to generate the trades. TAILWIND rebalances MONTHLY, so it can place at most one
@@ -204,7 +204,7 @@ def compliance_block(daily: pd.Series, turnover_daily: pd.Series, cfg: dict,
     day_share_ok = max_share is None or max_share <= max_day
     window_sufficient = n_rebalances >= min_days
     return {
-        "firm": "FTMO (Velotrade has no daily-loss compliance filter — protocol v2 Stage 4)",
+        "firm": "FTMO (Velotrade has no daily-loss compliance filter — SharpOps Stage 4)",
         "n_active_days": n_active,
         "min_active_days_required": min_days,
         "max_single_day_profit_share": round(max_share, 4) if max_share is not None else None,
@@ -223,7 +223,7 @@ def compliance_block(daily: pd.Series, turnover_daily: pd.Series, cfg: dict,
 
 
 def verdict_for(oos_pf: float | None, baseline_pf: float | None, cfg: dict) -> str:
-    """Protocol v2 Stage-4 buckets, unchanged."""
+    """SharpOps Stage-4 buckets, unchanged."""
     if oos_pf is None or baseline_pf is None or baseline_pf <= 0:
         return "INDETERMINATE"
     if oos_pf >= cfg["oos_hold_ratio"] * baseline_pf:

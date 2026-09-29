@@ -123,7 +123,7 @@ significance:
   test: "mann_whitney_u"
   alternative: "two_sided"
   p_max: 0.10
-  rationale: "loose alpha matches Protocol v2 Stage-2 ambiguity-band convention at small N (5 seeds)"
+  rationale: "loose alpha matches SharpOps Stage-2 ambiguity-band convention at small N (5 seeds)"
 
 # ---------------------------------------------------------------------------
 # Per-rung stability + health gates (validator-required + research-tier)
@@ -132,7 +132,7 @@ gates:
   l1_seeds: 5
   l1_pf_floor: 1.0            # research-tier sanity floor; NOT a promote-to-paper gate
   l1_pf_cv_max: 0.30          # cross-seed CV(PF) per rung
-  entropy_floor: -10.0        # Protocol v2 health flag
+  entropy_floor: -10.0        # SharpOps health flag
 
 # ---------------------------------------------------------------------------
 # Sanity anchor

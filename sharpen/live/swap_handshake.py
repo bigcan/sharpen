@@ -1,4 +1,4 @@
-"""Protocol v2.3 §4.5 step 6 ensemble-bundle swap-approval handshake.
+"""SharpOps v2.3 §4.5 step 6 ensemble-bundle swap-approval handshake.
 
 The atomic ensemble swap-bundle reader (`ensemble_bundle.py`) verifies
 SHA256 integrity but does NOT gate on operator approval. For prop-firm

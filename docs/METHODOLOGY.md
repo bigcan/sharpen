@@ -190,7 +190,7 @@ The decision contract, in execution order, is §12 of the
 
 ## 8. Training protocol for RL
 
-[`docs/protocol_v2.md`](protocol_v2.md) is the full contract. The parts that matter for credibility:
+[`docs/sharpops.md`](sharpops.md) is the full contract. The parts that matter for credibility:
 
 - **Staged runs**: `data-prep` → `hpo` → `l1-multiseed` → `ensemble-confirm` → `wf` → `oos` →
   `paper-deploy`. Each stage is its own tracked run that writes a manifest, and a downstream stage names

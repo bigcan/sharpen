@@ -159,7 +159,7 @@ gates:
   leverage_pf_uplift_min: 1.15          # +15% over baseline (plan PRIMARY gate)
   leverage_dd_buffer_floor_pp: 0.5      # match FTMO daily DD buffer floor
 
-  # Protocol v2.2 §8.2 / §8.3 declarations (advisory at HPO; load-bearing at paper-deploy)
+  # SharpOps v2.2 §8.2 / §8.3 declarations (advisory at HPO; load-bearing at paper-deploy)
   drift:
     window_bars: 1800
     min_bars_before_check: 600

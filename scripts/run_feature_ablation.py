@@ -11,7 +11,7 @@ Rung table + hypotheses live in configs/gmgp1_btc_feature_ablation.gates.yaml
 configs/gmgp1_btc_feature_ablation_base.yaml by overriding only the feature
 axis, then launches scripts/launch_l1_multiseed.py.
 
-Per Protocol v2 this is a pure Stage-3 (l1-multiseed) sweep — NO HPO, no fused
+Per SharpOps this is a pure Stage-3 (l1-multiseed) sweep — NO HPO, no fused
 pipeline. Each rung = one decision artifact (5 seed runs).
 
 Fleet utilization: rungs run SEQUENTIALLY; within each rung the 5 seeds fan out

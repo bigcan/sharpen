@@ -186,7 +186,7 @@ def test_restart_failure_does_not_record_success(wd):
 # Pre-S548-cont the watchdog refused auto-restart only when the kill_file
 # `reason == "drift_crit"`. An `agreement_decay_crit` kill_file would
 # fall through and the watchdog would bounce the container, defeating
-# Protocol v2.2 §8.3 operator-only re-enable semantics. Fix: use the
+# SharpOps v2.2 §8.3 operator-only re-enable semantics. Fix: use the
 # canonical `CRIT_REASONS` tuple from `sharpen.monitoring.kill_file`
 # (currently `{drift_crit, agreement_decay_crit}`) so adding a new
 # write_kill_file reason there auto-widens this guard.
