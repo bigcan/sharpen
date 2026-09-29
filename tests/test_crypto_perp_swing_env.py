@@ -811,3 +811,28 @@ class TestHaltWhileHolding:
         assert env.positions[1] == pytest.approx(eth_pos_at_open, rel=1e-12), (
             "Stop-loss falsely triggered by halt zero-fill close"
         )
+
+
+# ---------------------------------------------------------------------------
+# T4-10: an add books the share-weighted VWAP as its entry price.
+# ---------------------------------------------------------------------------
+
+
+class TestAddEntryPrice:
+    """entry_notional / entry_price is the share count, so an add must book the VWAP."""
+
+    @pytest.mark.parametrize("side", [1.0, -1.0])
+    def test_add_at_a_higher_price_books_the_share_weighted_vwap(self, side):
+        """Audit T4-10 hand case: buy $100 at $1, add $100 at $2, mark at $2. The book holds
+        150 shares at a $1.333 VWAP, so the P&L is +100 (-100 short). The notional-weighted
+        mean entry of $1.50 booked 133 shares and +66.67."""
+        env = _make_env(n_assets=3, initial_balance=1_000.0)
+        # reset() reads slot 10 and each step() the next: fills at 11 and 12, mark at 13.
+        env.handler._base_close[10:14, 0] = [1.0, 1.0, 2.0, 2.0]
+        env.handler._base_funding[:] = 0.0
+        env.reset()
+        env.step(np.array([0.1 * side, 0.0, 0.0]))    # $100 at close[11] = 1
+        env.step(np.array([0.2 * side, 0.0, 0.0]))    # +$100 at close[12] = 2 (sized on pv at 1)
+        _, _, _, _, info = env.step(np.array([0.2 * side, 0.0, 0.0]))  # hold; mark at 2
+        assert env.entry_prices[0] == pytest.approx(200.0 / 150.0, abs=1e-9)
+        assert info["portfolio_value"] - 1_000.0 == pytest.approx(100.0 * side, abs=1e-6)

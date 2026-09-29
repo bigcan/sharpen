@@ -467,7 +467,7 @@ class CryptoPerpEnv(gym.Env):
         """Update entry prices and notionals for position changes.
 
         Tracks fixed entry notionals so PnL is independent of margin changes.
-        For increased positions, compute weighted average entry price/notional.
+        For increased positions, sum the notionals and book the share-weighted VWAP.
         For reduced positions, scale down notional proportionally.
         For new positions (from flat or flipped), set fresh entry.
 
@@ -503,10 +503,13 @@ class CryptoPerpEnv(gym.Env):
             added_notional = np.abs(delta_weights[increased]) * portfolio_value
             old_notional = self.entry_notionals[increased]
             new_notional = old_notional + added_notional
-            self.entry_prices[increased] = (
-                self.entry_prices[increased] * old_notional
-                + current_price[increased] * added_notional
-            ) / (new_notional + 1e-10)
+            # Share-weighted VWAP: the price at which the combined shares cost new_notional,
+            # so new_notional / entry_price stays the share count every P&L term assumes. The
+            # notional-weighted arithmetic mean over-states it whenever the fill prices differ
+            # (arithmetic >= harmonic mean): longs were under-, shorts over-credited (T4-10).
+            shares = (old_notional / (self.entry_prices[increased] + 1e-10)
+                      + added_notional / (current_price[increased] + 1e-10))
+            self.entry_prices[increased] = new_notional / (shares + 1e-10)
             self.entry_notionals[increased] = new_notional
 
         # Case 5: Position reduced (same sign, smaller magnitude)

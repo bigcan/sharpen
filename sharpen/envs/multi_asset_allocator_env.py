@@ -19,9 +19,9 @@ Design (see ``.agent/artifacts/multi_asset_allocator_architecture.md``):
     (SHORT-ACCT — shorts never accrue notional_debt), vectorized realize/cost paths,
     proportional gross-exposure cap. Funding generalizes to a per-bar ``carry`` accrual
     (v1 shipped carry = 0; ADR-6). An opt-in financing leg sets carry = -rf plus a borrow
-    fee on shorts (``sharpen.data.financing``, TAILWIND Tier-2 N2). One deliberate change:
-    an add books the share-weighted VWAP as its entry price, where ``CryptoPerpEnv`` still
-    uses the notional-weighted mean (TAILWIND Tier-2 T4-10).
+    fee on shorts (``sharpen.data.financing``, TAILWIND Tier-2 N2). An add books the
+    share-weighted VWAP as its entry price (TAILWIND Tier-2 T4-10, fixed here first and
+    then in ``CryptoPerpEnv``, which had used the notional-weighted mean).
   - **Reward = DSR(portfolio step return) - turnover_penalty * sum|Δw|** (reuses the
     shared Moody-Saffell ``DSRCalculator``); ``reward_type`` falls back to a Sortino or
     simple return signal.

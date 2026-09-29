@@ -1,7 +1,7 @@
 """PnL / SHORT-ACCT tests for MultiAssetAllocatorEnv.
 
-The fixed-entry-notional accounting is copied from CryptoPerpEnv, except that an add books
-the share-weighted VWAP as its entry price. These tests guard the copy: shorts must
+The fixed-entry-notional accounting is copied from CryptoPerpEnv, and an add books the
+share-weighted VWAP as its entry price. These tests guard the copy: shorts must
 lose/gain symmetrically with longs (no ``notional_debt`` inflation), closing realizes the
 PnL into margin (buyback in equity), and the book stays share-exact across adds.
 """

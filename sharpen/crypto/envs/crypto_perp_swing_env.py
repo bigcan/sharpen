@@ -617,10 +617,12 @@ class CryptoPerpSwingEnv(gym.Env):
             added_notional = np.abs(delta_weights[increased]) * portfolio_value
             old_notional = self.entry_notionals[increased]
             new_notional = old_notional + added_notional
-            self.entry_prices[increased] = (
-                self.entry_prices[increased] * old_notional
-                + current_price[increased] * added_notional
-            ) / (new_notional + 1e-10)
+            # Share-weighted VWAP, as CryptoPerpEnv._update_entry_prices: new_notional /
+            # entry_price must stay the share count. The notional-weighted mean over-states
+            # the entry when the fill prices differ (T4-10).
+            shares = (old_notional / (self.entry_prices[increased] + 1e-10)
+                      + added_notional / (current_price[increased] + 1e-10))
+            self.entry_prices[increased] = new_notional / (shares + 1e-10)
             self.entry_notionals[increased] = new_notional
 
         reduced = ~closed & ~from_flat & ~flipped & ~increased & (abs_new < abs_old)
