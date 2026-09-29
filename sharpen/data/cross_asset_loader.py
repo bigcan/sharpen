@@ -60,6 +60,17 @@ LOADER_MANIFEST_VERSION = 2
 # book serves stale curve weights past the curve's end (P1-05; the audit saw a 6-day desync).
 _CURVE_ETF_DESYNC_TOL_DAYS = 5
 
+# Conviction cutoff lag each allocator signal's array builder declares: row t of conviction_ary
+# reads data <= t - lag. The decision lead (allocator_factory, execution.decision_lead_bars)
+# reads row k+1 at step k, which is causal only for lag >= 1; the drive refuses anything else
+# and validate_config FAILs a lead config with a lag-0 sleeve (TAILWIND Tier-2 N4). Declare >= 1
+# only where a current-bar tripwire proves it:
+#   tsmom        1  prices <= t-skip (skip >= 1); cross_asset_signals.assert_causal crashes bar t
+#   defensive    1  close <= t-1; defensive_signals.assert_causal crashes bar t
+#   rates_carry  0  NOT verified: rates_carry.assert_causal sweeps future bars only, never bar t,
+#                   so a same-bar read would pass it
+CONVICTION_CUTOFF_LAG: dict[str, int] = {"tsmom": 1, "defensive": 1, "rates_carry": 0}
+
 # yfinance field (level-0 column) -> our lowercase OHLCV name.
 _YF_FIELDS = {"Open": "open", "High": "high", "Low": "low",
               "Close": "close", "Volume": "volume"}
@@ -418,7 +429,13 @@ def build_allocator_arrays(
 
     Returns dict with keys: ``price_ary (T,N), tech_ary (T, N*tech_dim),
     vol_ary (T,N), carry_ary (T,N), volume_ary (T,N), timestamps (T,),
-    conviction_ary (T,N), tech_cols, assets``.
+    conviction_ary (T,N), tech_cols, assets, conviction_cutoff_lag, vol_cutoff_lag``.
+
+    ``*_cutoff_lag`` declares the causal contract of the row: row ``t`` of that array is a
+    function of data ``<= t - lag``. Both are 1 here, and both are tripwire-verified at load:
+    ``cross_asset_signals.assert_causal`` runs a current-bar crash on ``trend_conviction``
+    and ``vol``. ``allocator_factory`` reads them before it lets the linear-core drive
+    decide a bar early (``execution.decision_lead_bars``).
     """
     assets = list(assets)
     n = len(assets)
@@ -484,6 +501,8 @@ def build_allocator_arrays(
         "conviction_ary": conviction_ary,
         "tech_cols": tcols,
         "assets": assets,
+        "conviction_cutoff_lag": CONVICTION_CUTOFF_LAG["tsmom"],
+        "vol_cutoff_lag": 1,          # returns <= t-1 (.shift(1)); current-bar tripwired
     }
 
 
@@ -635,6 +654,8 @@ def build_rates_carry_arrays(
         "conviction_ary": conviction_ary,
         "tech_cols": ["rates_carry_conviction"],
         "assets": rates_assets,
+        "conviction_cutoff_lag": CONVICTION_CUTOFF_LAG["rates_carry"],   # 0: the lead refuses it
+        "vol_cutoff_lag": 1,          # cas._realized_vol: returns <= t-1
     }
 
 
@@ -689,6 +710,8 @@ def build_defensive_arrays(
         "conviction_ary": conviction_ary,
         "tech_cols": ["defensive_conviction"],
         "assets": defensive_assets,
+        "conviction_cutoff_lag": CONVICTION_CUTOFF_LAG["defensive"],
+        "vol_cutoff_lag": 1,          # cas._realized_vol: returns <= t-1
     }
 
 

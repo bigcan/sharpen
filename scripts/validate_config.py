@@ -720,6 +720,52 @@ def _check_multiplicity(cfg: dict, total_steps, label: str, r: ValidationResult)
         )
 
 
+def _is_linear_core_allocator(cfg: dict) -> bool:
+    """A book driven by the frozen linear core (``execution.shadow: linear_core_*``) through the
+    multi-asset allocator env: the paper/rung-1 TAILWIND and two-/multi-sleeve books."""
+    shadow = str((cfg.get("execution") or {}).get("shadow", ""))
+    return (cfg.get("env") or {}).get("type") == "multi_asset_allocator" and shadow.startswith("linear_core")
+
+
+def check_decision_lead(cfg: dict, r: ValidationResult) -> None:
+    """``execution.decision_lead_bars`` on a linear-core allocator book (TAILWIND Tier-2 N4).
+
+    The key picks WHICH book the drive trades: 1 decides a bar early so the month-end rebalance
+    fills at the month-end close, 0 is the legacy drive, one close later. At run time an absent
+    key silently means 0, which is how a certified book and a wired book came apart (T6-15), so
+    a linear-core book must declare it. The value must be the integer 0 or 1 (the run-time
+    parser rejects anything else). A lead also needs every allocator sleeve's conviction to be
+    causal at t-1: a sleeve whose builder declares a 0 cutoff lag (``rates_carry``) would be
+    read on the bar being filled (LEAK-2). The drive refuses it at run time; this FAILs it first.
+    """
+    if not _is_linear_core_allocator(cfg):
+        return
+    execution = cfg.get("execution") or {}
+    if "decision_lead_bars" not in execution:
+        r.fail("execution.decision_lead_bars missing on a linear-core allocator book: declare 1 "
+               "(decide a bar early, fill at the month-end close) or 0 (legacy drive, one close "
+               "later). Absent silently runs the legacy drive (TAILWIND Tier-2 N4).")
+        return
+    lead = execution["decision_lead_bars"]
+    if isinstance(lead, bool) or not isinstance(lead, int) or lead not in (0, 1):
+        r.fail(f"execution.decision_lead_bars must be the integer 0 or 1, got {lead!r}")
+        return
+    if lead == 1:
+        from sharpen.data.cross_asset_loader import CONVICTION_CUTOFF_LAG, _sleeve_specs
+        try:
+            specs = _sleeve_specs(cfg)
+        except (KeyError, ValueError) as exc:
+            r.fail(f"execution.decision_lead_bars: 1 but the sleeves do not resolve: {exc}")
+            return
+        lag0 = [name for name, sig, _ in specs if CONVICTION_CUTOFF_LAG.get(sig, 0) < 1]
+        if lag0:
+            r.fail(f"execution.decision_lead_bars: 1 with sleeve(s) {lag0} whose conviction "
+                   f"cutoff lag is 0 (no current-bar tripwire): deciding a bar early would read "
+                   f"the bar being filled (LEAK-2). Set 0 or drop the sleeve.")
+            return
+    r.ok(f"execution.decision_lead_bars = {lead} (linear-core drive)")
+
+
 def check_execution_cost_realism(cfg: dict, stage: str, r: ValidationResult) -> None:
     """Prop-firm configs that bear execution must model slippage. Selecting,
     grading, or deploying a policy under slippage=0 understates live cost and is
@@ -2481,6 +2527,7 @@ def validate(config_path: Path, stage: str, overlays: list[str] | None = None) -
     check_data_manifest(cfg, stage, r)
     check_execution_cost_realism(cfg, stage, r)
     check_execution_overlay_gates(cfg, r)
+    check_decision_lead(cfg, r)
     check_wandb_consolidation(cfg, stage, r)
 
     for check in STAGE_CHECKS[stage]:

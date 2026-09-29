@@ -138,7 +138,9 @@ def monthly_rebal_conviction(timestamps: np.ndarray, conviction_ary: np.ndarray)
     forward / incremental reader MUST NOT take ``monthly_rebal_conviction(window)[-1]`` as the
     live target: use :func:`linear_core_weights` ``w[-1]`` (which lags to the last CONFIRMED
     month-end) or an independent true-month-end calendar. Reading the in-progress tail is an
-    ADR-2 "daily is a different strategy" / X2-class look-ahead trap."""
+    ADR-2 "daily is a different strategy" / X2-class look-ahead trap. The decision lead
+    (:func:`_apply_decision_lead`), which reads row ``k+1`` at step ``k``, would reach that
+    final-bar flag at the last decision, so it holds there instead of consuming it."""
     ts = np.asarray(timestamps, dtype=np.int64)
     dates = pd.to_datetime(ts, unit="s")
     months = dates.to_period("M")
@@ -157,14 +159,20 @@ def monthly_rebal_conviction(timestamps: np.ndarray, conviction_ary: np.ndarray)
 
 
 def _drive(env: MultiAssetAllocatorEnv, action_at_step) -> tuple[dict, np.ndarray, dict]:
-    """Run ``env`` to termination, action chosen by ``action_at_step(step_idx, obs)``
-    (env-native convention: action at step k governs the k→k+1 move). Returns
-    ``(metrics, weights, trajectory)``: ``metrics`` from the env's own step returns /
-    turnover; ``weights[k]`` the signed target weight held during the k→k+1 move
-    (``info['position']`` after the step — post vol-scaling, availability-zeroing,
-    and gross cap); ``trajectory`` the per-step series (equity curve, step returns,
-    turnover, running fees) the paper executor's parity harness consumes as the sim
-    oracle (ADR-7)."""
+    """Run ``env`` to termination, action chosen by ``action_at_step(step_idx, obs)``.
+
+    Env-native timing: the action at step ``k`` is decided at bar ``k`` and FILLS at close
+    ``k+1`` (``MultiAssetAllocatorEnv.step`` advances the clock, then rebalances at
+    ``price[k+1]``). The new weight therefore earns the ``(k+1)->(k+2)`` move; step ``k``'s
+    own return is the ``k->(k+1)`` move of the weights held before it. (Before 2026-09-29
+    this said "governs the k→k+1 move" — one bar early; full-codebase audit R-3.)
+
+    Returns ``(metrics, weights, trajectory)``: ``metrics`` from the env's own step returns /
+    turnover; ``weights[k]`` the signed weight filled at close ``k+1`` and held over
+    ``(k+1)->(k+2)`` (``info['position']`` after the step — post vol-scaling,
+    availability-zeroing, and gross cap); ``trajectory`` the per-step series (equity curve,
+    step returns, turnover, running fees) the paper executor's parity harness consumes as
+    the sim oracle (ADR-7)."""
     obs, _ = env.reset()
     step_returns: list[float] = []
     turnovers: list[float] = []
@@ -241,6 +249,69 @@ def _exposure_metrics(weights, n_steps: int) -> dict:
     }
 
 
+_DECISION_LEAD_KEY = "decision_lead_bars"
+_CUTOFF_LAG_KEYS = ("conviction_cutoff_lag", "vol_cutoff_lag")
+
+
+def decision_lead_bars(config: Mapping) -> int:
+    """``execution.decision_lead_bars``: 0 (default, the legacy drive) or 1.
+
+    The env fills a step-``k`` decision at close ``k+1`` (its one-bar execution latency, the
+    paper fill model's "next close"). The linear-core arrays are ALREADY causal at ``t-1``:
+    row ``t`` of ``conviction_ary`` / ``vol_ary`` reads data ``<= t-1``. Feeding row ``k`` at
+    step ``k`` therefore puts two bars between the data cutoff and the fill, so the month-end
+    rebalance lands on the first close of the NEXT month — one day staler than the validated
+    research convention (month-end ``d`` weights from data ``<= d-1``, filled at close ``d``;
+    full-codebase audit 2026-09-23, R-3).
+
+    ``1`` feeds row ``k+1`` at step ``k``: the decision reads data ``<= k`` and fills at close
+    ``k+1`` — one bar from cutoff to fill, the research convention under the env's own
+    latency, with no same-close idealization. Like the live scheduler (the parity harness's
+    true-month-end calendar), it needs to know a bar ahead that ``k+1`` is a month-end: the
+    trading calendar is public ex ante, prices are not.
+    """
+    raw = dict(config.get("execution", {}) or {}).get(_DECISION_LEAD_KEY, 0)
+    # The integer 0 or 1 only (TAILWIND Tier-2 N4): int() would coerce True, 1.7 or "1" into a
+    # lead and silently swap the book a run measures.
+    if isinstance(raw, bool) or not isinstance(raw, (int, np.integer)) or int(raw) not in (0, 1):
+        raise ValueError(f"execution.{_DECISION_LEAD_KEY} must be the integer 0 or 1, got {raw!r}")
+    return int(raw)
+
+
+def _apply_decision_lead(arrays: Mapping, conv_monthly: np.ndarray) -> tuple[dict, np.ndarray]:
+    """Present row ``k+1`` of the conviction and vol arrays at decision step ``k``.
+
+    FAIL-CLOSED on the causal contract: each shifted array must declare a cutoff lag >= 1
+    (``*_cutoff_lag`` from the array builder — row ``t`` reads data ``<= t - lag``), so the
+    row read at step ``k`` uses data ``<= k``. An undeclared or 0 lag raises instead of
+    silently reading the bar being filled (LEAK-2).
+
+    The FINAL bar is never acted on: ``monthly_rebal_conviction`` flags a window's last bar as
+    a month-end whether or not its month is complete (P2-01), so the last decision HOLDS the
+    previous conviction rather than consume that unconfirmed flag. The final step's own return
+    is the move of the weights held before it, so this changes the last weight row only.
+    """
+    for key in _CUTOFF_LAG_KEYS:
+        lag = arrays.get(key)
+        if lag is None or int(lag) < 1:
+            raise ValueError(
+                f"execution.{_DECISION_LEAD_KEY}=1 needs arrays['{key}'] >= 1 (row t reads data "
+                f"<= t-1), got {lag!r}. Deciding a bar early on an array that reads its own bar "
+                f"is look-ahead (LEAK-2): declare the lag only where a current-bar tripwire "
+                f"proves it.")
+    conv = np.asarray(conv_monthly, dtype=np.float64)
+    T = conv.shape[0]
+    if T < 2:
+        return dict(arrays), conv.copy()
+    conv_lead = conv.copy()
+    conv_lead[:-1] = conv[1:]
+    conv_lead[T - 2] = conv[T - 2]           # last decision: hold, never act on the final bar
+    vol = np.asarray(arrays["vol_ary"], dtype=np.float64)
+    vol_lead = vol.copy()
+    vol_lead[:-1] = vol[1:]                  # row k+1 = returns <= k: known at decision bar k
+    return {**arrays, "vol_ary": vol_lead}, conv_lead
+
+
 def _linear_core_drive(
     arrays: Mapping,
     config: Mapping,
@@ -252,7 +323,9 @@ def _linear_core_drive(
     """Shared frozen-linear-core env drive behind :func:`evaluate_linear_core` (the
     gate metrics) and :func:`linear_core_weights` (the executor's weight trajectory).
     Keeping ONE drive path guarantees the executor's target weights are byte-identical
-    to the gate baseline (ADR-7) — rung-1 paper-sim parity is ≈0 by construction.
+    to the gate baseline (ADR-7) — rung-1 paper-sim parity is ≈0 by construction. The one
+    exception is a config with ``execution.decision_lead_bars: 1``, which only the executor
+    paths accept (see :func:`_refuse_lead_for_gate_baseline`).
 
     Drives the env (real config costs, ``eval_mode``) with the monthly-rebalanced
     ``conviction_ary`` under the env-native convention. Forces the v1.1 execution
@@ -275,6 +348,10 @@ def _linear_core_drive(
             raise KeyError("the linear-core drive needs arrays['conviction_ary'] "
                            "(build_allocator_arrays output)")
         conv_monthly = monthly_rebal_conviction(arrays["timestamps"], arrays["conviction_ary"])
+    # Applied HERE, the single drive path, so the gate baseline, the executor's sim oracle
+    # and the forward-recompute drive (conv_monthly supplied) all get the same timing.
+    if decision_lead_bars(config) == 1:
+        arrays, conv_monthly = _apply_decision_lead(arrays, conv_monthly)
     core_overrides = dict(overrides or {})
     if force_levers_off:
         core_overrides.update(_EXECUTION_LEVERS_OFF)
@@ -295,8 +372,22 @@ def evaluate_linear_core(
     RL eval, so the RL−baseline uplift is well-posed. Requires
     ``arrays['conviction_ary']`` (from ``build_allocator_arrays``).
     """
+    _refuse_lead_for_gate_baseline(config, "evaluate_linear_core")
     metrics, _, _ = _linear_core_drive(arrays, config, overrides)
     return metrics
+
+
+def _refuse_lead_for_gate_baseline(config: Mapping, caller: str) -> None:
+    """The RL-beats-linear baseline must run under the RL's own env timing: the policy
+    reads observation row ``k`` (data ``<= k-1``) at step ``k``. With the decision lead
+    the baseline would read row ``k+1`` (data ``<= k``) — one bar more information than
+    the policy it is scored against, which silently tilts the gate toward the baseline.
+    ``decision_lead_bars`` is an EXECUTOR setting; refuse it here (fail closed)."""
+    if decision_lead_bars(config) != 0:
+        raise ValueError(
+            f"{caller}: execution.{_DECISION_LEAD_KEY}=1 is an executor setting. The "
+            f"RL-beats-linear baseline must share the RL policy's timing (obs row k at "
+            f"step k); drive it with a config that leaves the lead at 0.")
 
 
 def evaluate_linear_core_levered(
@@ -323,6 +414,7 @@ def evaluate_linear_core_levered(
     a `rebalance_interval > 1` can block the monthly cadence itself, which is precisely
     the point — it is the RL's discipline applied to the baseline's signal.
     """
+    _refuse_lead_for_gate_baseline(config, "evaluate_linear_core_levered")
     metrics, _, _ = _linear_core_drive(arrays, config, overrides, force_levers_off=False)
     return metrics
 
@@ -336,10 +428,13 @@ def linear_core_weights(
     """Per-step target-weight trajectory of the frozen linear core — the paper
     executor's weight source (ADR-7; resolves spec Open-Item-1 toward the env path).
 
-    Returns ``w`` of shape ``(n_steps, N)`` where ``w[k]`` is the signed weight the
-    core holds during the k→k+1 move (vol-scaled monthly conviction, capped). Because
+    Returns ``w`` of shape ``(n_steps, N)`` where ``w[k]`` is the signed weight decided at
+    bar ``k``, filled at close ``k+1`` and held over ``(k+1)->(k+2)`` (vol-scaled monthly
+    conviction, capped; see :func:`_drive` for the timing and
+    :func:`decision_lead_bars` for which bar's data the decision reads). Because
     it shares :func:`_linear_core_drive` with :func:`evaluate_linear_core`, the
     executor's target weights are byte-identical to the RL-beats-linear gate baseline
+    (for a config without the decision lead, which the gate baseline refuses)
     and rung-1 paper-sim parity is ≈0 by construction (on the accounting axis — see
     :func:`linear_core_trajectory`). ``w[-1]`` is the weight to hold going forward from the
     most recent bar (the live order-generation target) — and it is the SAFE forward target:
@@ -363,7 +458,8 @@ def linear_core_trajectory(
 
     Shares :func:`_linear_core_drive` with :func:`evaluate_linear_core` and
     :func:`linear_core_weights`, so the ``weights`` and ``equity_curve`` returned here
-    are byte-identical to the RL-beats-linear gate baseline. The paper executor's forward
+    are byte-identical to the RL-beats-linear gate baseline (for a config without the
+    decision lead, which the gate baseline refuses). The paper executor's forward
     (SimFillEngine + paper_state) path is compared against this trajectory; rung-1 parity
     is ≈0 by construction. NOTE (Tier-2 audit 2026-06-14): that 0 is load-bearing for
     ACCOUNTING (``daily_return_te_bps`` / equity diverge if the book is wrong) but

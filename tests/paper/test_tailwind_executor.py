@@ -54,6 +54,10 @@ def _tailwind_bundle(*, T: int = 780, seed: int = 21, volume: float = 5e8) -> di
         "timestamps": ts,
         "conviction_ary": np.sign(rng.normal(0, 1, (T, n))),
         "assets": list(_NAMES),
+        # The causal contract build_allocator_arrays declares (tailwind_v1.yaml runs the
+        # decision lead, which refuses undeclared arrays). _causal_vol reads returns <= t-1.
+        "conviction_cutoff_lag": 1,
+        "vol_cutoff_lag": 1,
     }
     conv_def = np.tanh(rng.normal(0, 1, (T, n)))
     defensive = {
@@ -65,6 +69,8 @@ def _tailwind_bundle(*, T: int = 780, seed: int = 21, volume: float = 5e8) -> di
         "timestamps": ts,
         "conviction_ary": conv_def,
         "assets": list(_NAMES),
+        "conviction_cutoff_lag": 1,                     # as build_defensive_arrays declares
+        "vol_cutoff_lag": 1,
     }
     union = {
         "price_ary": price.copy(),

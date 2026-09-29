@@ -161,6 +161,12 @@ execution:
   venue: none                            # rung-1; "ib" for rung-2
   rebalance_cadence: monthly             # MUST match gates.paper_soak.rebalance_cadence
   fill_reference: close
+  # 2026-09-29 (full-codebase audit R-3): decide a bar early so the month-end rebalance fills
+  # at the month-end close (the validated research convention) instead of the next month's
+  # first close. Causal: the drive reads rows whose data ends one bar before the fill, and it
+  # refuses sleeves without a tripwire-proven cutoff (allocator_factory.decision_lead_bars).
+  # Set 0 to reproduce pre-fix executor numbers.
+  decision_lead_bars: 1
 
 # ---------- GATES (pre-registered paper_soak + decision gates) --------------
 ensemble:
