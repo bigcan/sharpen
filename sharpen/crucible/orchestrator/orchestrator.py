@@ -29,7 +29,9 @@ from __future__ import annotations
 
 import hashlib
 import logging
+import math
 from dataclasses import dataclass, field
+from dataclasses import replace as _dc_replace
 from pathlib import Path
 
 import numpy as np
@@ -53,13 +55,15 @@ from ...signals.generation.grammar import available_terminals, per_name_slots
 from ...signals.spec import SignalSpec
 from .budget import TickBudget
 from .burst import route_burst
-from .fdr import OnlineFDR
+from .fdr import LordSequence, OnlineFDR
 from .substrate import (
     OrchestratorStore,
     PowerGuard,
     PreparedSubstrate,
     Substrate,
+    SubstratePower,
     TickRecord,
+    stamp_substrate_power,
     substrate_dirty,
 )
 
@@ -316,6 +320,19 @@ def _process_substrate(
     # (and no --force-underpowered) SKIP the mine — conserving proposer tokens + FDR wealth — while
     # still accruing forward incubation above. This is the guard that would have caught the 504-bar
     # flagship. Byte-identical when no power stamp / no guard is configured. ------------------------
+    # POWER-LORD-01, WIRED (crucible-v16.0). The prepared stamp reads the calibration curve at a FRESH
+    # account's first level, but a corrected-contract tick is thresholded at the substrate's LIVE LORD++
+    # level, which only decays over a barren stream (us_equity: fresh 0.0219 -> 7e-6 at 152 charges).
+    # So the guard claimed power at a threshold production does not use. Re-stamp at the level the
+    # tick's FIRST test will spend (the loosest this tick can offer): if even that one cannot detect a
+    # plausible alpha, nothing in the batch can. Read by level, so replenishment and refunds are honoured.
+    live_acct: OnlineFDR | None = None
+    if (sub.contract == "corrected" and prepared.power is not None and power_gate is not None
+            and power_gate.sweep):
+        live_acct = store.load_fdr(sub.substrate_id, alpha=sub.fdr_alpha, w0=sub.fdr_w0,
+                                   alpha_floor=sub.fdr_alpha_floor)
+        prepared = _dc_replace(prepared, power=_restamp_at_level(prepared, power_gate,
+                                                                 live_acct.next_level()))
     pw = prepared.power
     if pw is not None and power_gate is not None and power_gate.enabled \
             and pw.implied_mde_delta_sr > power_gate.ceiling:
@@ -420,7 +437,15 @@ def _process_substrate(
 
     # --- Stage 3+4: UNCHANGED mine + T0–T5 (reuse P2 loop; no 2nd proposer call) -------------------
     run_id = f"tick-{sub.substrate_id}-{tick_ts}"
-    lord_level = _tick_lord_level(sub, store, n_tests=n_fresh) if sub.contract == "corrected" else None
+    # v16.0: under prereg_only every decided pre-registration is tested at its OWN sequential LORD++ level
+    # (LordSequence, on a private copy of the account); `_tick_lord_level` (one level for the whole batch —
+    # the tightest) remains only for `offspring_policy: all`, where offspring are promotable but uncharged.
+    lord_sequence = (LordSequence.from_account(store.load_fdr(
+                         sub.substrate_id, alpha=sub.fdr_alpha, w0=sub.fdr_w0,
+                         alpha_floor=sub.fdr_alpha_floor))
+                     if _sequential_lord(sub) else None)
+    lord_level = (_tick_lord_level(sub, store, n_tests=n_fresh)
+                  if sub.contract == "corrected" and lord_sequence is None else None)
     # v15.0: when the cohort adjudication is OUTSTANDING, a mined tick runs it over the substrate's WHOLE
     # pre-registered pool (ledger pool + this tick's fresh specs), not just tonight's batch. Before, the
     # batch cohort satisfied the edge trigger (set_cohort_key below), so on any substrate whose first
@@ -429,6 +454,15 @@ def _process_substrate(
     # before and does NOT consume the trigger.
     whole_pool_cohort = cohort_pending
     cohort_pool = (_whole_cohort_pool(sub, fresh_specs) if whole_pool_cohort else None)
+    # v16.0: the U4 rejection class is read at the TIGHTEST level this batch can spend (its last test,
+    # no discovery) — a spec tested late in a sequential batch had that little power, and a class read
+    # at the batch's first level could call its rejection DECISIVE (a family kill) on power it never had.
+    class_power = prepared.power
+    if live_acct is not None and n_fresh > 1:
+        probe = OnlineFDR.from_json(live_acct.to_json())
+        for _ in range(n_fresh - 1):
+            probe.observe(is_discovery=False)
+        class_power = _restamp_at_level(prepared, power_gate, probe.next_level())
     result = run_hypothesis_loop(
         panel=prepared.panel, base_returns=prepared.base_returns,
         timestamps=prepared.timestamps, cfg=sub.cfg, evolve_kwargs=sub.evolve_kwargs,
@@ -439,9 +473,10 @@ def _process_substrate(
         cohort_gates_hash=sub.cohort_gates_hash, base_components=prepared.base_components,
         contract=sub.contract, corrected_cfg=sub.corrected_cfg,
         corrected_gates_hash=sub.corrected_gates_hash, lord_level=lord_level,
+        lord_sequence=lord_sequence,
         search_memory_cfg=sub.search_memory_cfg,
         search_memory_gates_hash=sub.search_memory_gates_hash,
-        substrate_mde=(None if prepared.power is None else prepared.power.implied_mde_delta_sr),
+        substrate_mde=(None if class_power is None else class_power.implied_mde_delta_sr),
         cohort_pool=cohort_pool)
 
     # --- online-FDR: charge one test per pre-registered spec the holdout gate DECIDED -------------
@@ -453,8 +488,19 @@ def _process_substrate(
     fdr = store.load_fdr(sub.substrate_id, alpha=sub.fdr_alpha, w0=sub.fdr_w0,
                          alpha_floor=sub.fdr_alpha_floor)
     fdr_total = 0.0
+    # v16.0: replay the loop's sequential decisions on the persistent account, in testing order. The
+    # sequence ran on a copy of THIS account, so each charged level must equal the level it was tested at.
+    sequenced: set[str] = set()
+    for chash, level, discovery in result.lord_decisions:
+        charged = fdr.observe(is_discovery=discovery)
+        if not math.isclose(charged, level, rel_tol=1e-9, abs_tol=1e-15):
+            raise RuntimeError(f"substrate {sub.substrate_id}: LORD++ replay drift for {chash} "
+                               f"(tested at {level!r}, charged {charged!r})")
+        sub.ledger.update_fdr_charge(chash, charged)
+        fdr_total += charged
+        sequenced.add(chash)
     for pr in sorted(fresh_specs, key=lambda s: s.candidate_hash):
-        if pr.candidate_hash not in result.adjudicated_hashes:
+        if pr.candidate_hash not in result.adjudicated_hashes or pr.candidate_hash in sequenced:
             continue
         charged = fdr.observe(is_discovery=(pr.candidate_hash in promising_hashes))
         sub.ledger.update_fdr_charge(pr.candidate_hash, charged)
@@ -637,7 +683,8 @@ def _incubate_active(sub: Substrate, prepared: PreparedSubstrate, tick_ts: str) 
                 base_returns=prepared.base_returns, timestamps=prepared.timestamps,
                 proposal_ts=entry.proposal_ts, cfg=sub.cfg, hold_horizon=hold_horizon,
                 cost_bps=cost_bps, ls_min_names=ls_min_names,
-                base_components=prepared.base_components)
+                base_components=prepared.base_components,
+                criterion=entry.criterion)          # v16.0: the rule the entry was ENROLLED under
         except Exception:                    # noqa: BLE001 — one poison entry must not crash the tick
             log.exception("substrate %s: incubation FAILED for %s on snapshot %s",
                           sub.substrate_id, entry.candidate_hash, prepared.snapshot_hash)
@@ -688,6 +735,28 @@ def _lockbox_fields(sub: Substrate, touched: list[LockboxEntry], *, n_enrolled: 
         n_cleared=sum(1 for e in entries if e.status == STATUS_CLEARED),
         n_rejected=sum(1 for e in entries if e.status == STATUS_REJECTED),
         lockbox_entries=list(touched))
+
+
+def _restamp_at_level(prepared: PreparedSubstrate, power_gate: PowerGuard | None,
+                      level: float) -> "SubstratePower | None":
+    """The prepared power stamp re-read at LORD++ ``level`` (crucible-v16.0, POWER-LORD-01): same panel
+    depth, bar clock and candidate types, only the calibration row changes. Returns the prepared stamp
+    unchanged when there is no stamp or the guard carries no curves."""
+    pw = prepared.power
+    if pw is None or power_gate is None or not power_gate.sweep:
+        return pw
+    return stamp_substrate_power(pw.panel_T, pw.holdout_frac, power_gate.sweep,
+                                 power_gate.sweep_hash or pw.calibration_sweep_hash,
+                                 candidate_types=tuple(sorted(power_gate.sweep)),
+                                 bars_per_year=pw.bars_per_year, live_level=float(level))
+
+
+def _sequential_lord(sub: Substrate) -> bool:
+    """Whether this substrate's tick tests pre-registrations at sequential per-spec LORD++ levels
+    (crucible-v16.0): the corrected contract under ``offspring_policy: prereg_only`` — the policy under
+    which the decision unit (one pre-registered spec) is exactly the charging unit."""
+    return bool(sub.contract == "corrected" and sub.corrected_cfg is not None
+                and sub.corrected_cfg.offspring_policy == "prereg_only")
 
 
 def _tick_lord_level(sub: Substrate, store: OrchestratorStore, *, n_tests: int) -> float:

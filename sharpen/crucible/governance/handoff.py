@@ -56,6 +56,9 @@ class Tier2Handoff:
     # forward-incubation evidence (CR-8) — the binding forward gate that made this eligible
     incubation_status: str = STATUS_CLEARED
     forward_sharpe: float | None = None
+    forward_delta_sr: float | None = None      # v16.0: the statistic an ``sprt`` entry was cleared on
+    sprt_llr: float | None = None
+    incubation_test: str = "fixed"
     min_forward_sharpe: float | None = None
     n_forward_bars: int = 0
     min_forward_bars: int | None = None
@@ -219,6 +222,7 @@ def handoff_for(entry: LockboxEntry, *, workstream: str, scope: str,
         data_snapshot_hash=entry.data_snapshot_hash,
         verdict_snapshot_hash=entry.verdict_snapshot_hash,
         incubation_status=entry.status, forward_sharpe=entry.forward_sharpe,
+        forward_delta_sr=entry.forward_delta_sr, sprt_llr=entry.sprt_llr, incubation_test=entry.test,
         min_forward_sharpe=entry.min_forward_sharpe, n_forward_bars=entry.n_forward_bars,
         min_forward_bars=entry.min_forward_bars, forward_start_ts=entry.forward_start_ts,
         forward_end_ts=entry.forward_end_ts,

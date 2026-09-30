@@ -20,6 +20,7 @@ Usage:
 from __future__ import annotations
 
 import argparse
+import dataclasses
 import hashlib
 import json
 import logging
@@ -793,6 +794,10 @@ def main() -> int:
     else:
         power_gate, sweep, sweep_hash = _load_power_guard(
             args.power_gates, force=args.force_underpowered, contract=args.contract)
+        if power_gate is not None and sweep:
+            # v16.0 (POWER-LORD-01 wired): the guard carries its curves so the tick can re-stamp at the
+            # substrate's LIVE LORD++ level before deciding (see orchestrator._restamp_at_level).
+            power_gate = dataclasses.replace(power_gate, sweep=sweep, sweep_hash=sweep_hash)
     sub, catalog = _build_substrate(args, cfg, ek, meta, sweep, sweep_hash)
     out_dir = Path(args.out) / args.mode
     store = OrchestratorStore(out_dir / "orchestrator.db")

@@ -118,6 +118,11 @@ class PowerGuard:
     ceiling: float
     action: str
     force: bool = False              # --force-underpowered: mine anyway under action='refuse'
+    # crucible-v16.0 (POWER-LORD-01 wired): the calibration curves the stamp was read from, so the
+    # orchestrator can RE-STAMP at the live account's LORD++ level before the guard decides. Empty ⇒
+    # the prepared (fresh-level) stamp is used unchanged, exactly as before.
+    sweep: "Mapping[str, dict] | None" = None
+    sweep_hash: str = ""
 
 
 def _power_holdout_bars(panel_T: int, holdout_frac: float) -> int:
@@ -153,6 +158,31 @@ def lord_depth_for(sweep: dict, lord_tests_already: int) -> "int | None":
         return None
     k = int(lord_tests_already)
     return next((g for g in grid if g >= k), grid[-1])
+
+
+#: ``lord_depth_for_level``'s answer when the live level is TIGHTER than every measured one.
+LORD_BEYOND_GRID = -1
+
+
+def lord_depth_for_level(sweep: dict, level: float) -> "int | None":
+    """The measured account depth to read for a live account whose NEXT test is charged ``level``
+    (crucible-v16.0), or ``None`` when the sweep records no level family (``lord_levels``).
+
+    Selection is by LEVEL, not by test count, because the level is what the gate actually thresholds
+    and the count only determines it for a barren stream: a discovery REPLENISHES the level (a count
+    reading would then claim less power than exists), and a store whose phantom charges were refunded
+    has a count that no longer describes its history. We take the LOOSEST measured level that is not
+    looser than the live one — a tighter level has a higher MDE, so this can only over-state the MDE
+    (fail-closed). A live level tighter than EVERY measured level returns :data:`LORD_BEYOND_GRID`:
+    the caller treats that as unmeasured and refuses, rather than clamping to the deepest row and
+    claiming power at a threshold looser than the tick will spend."""
+    levels = sweep.get("mde_sweep", {}).get("lord_levels") or {}
+    if not levels:
+        return None
+    ok = [(float(v), int(k)) for k, v in levels.items() if float(v) <= float(level) * (1.0 + 1e-12)]
+    if not ok:
+        return LORD_BEYOND_GRID
+    return max(ok)[1]
 
 
 def _pooled_points(sweep: dict, lord_depth: "int | None" = None) -> list[tuple[int, float]]:
@@ -281,7 +311,8 @@ def stamp_substrate_power(panel_T: int, holdout_frac: float, sweep: "dict | Mapp
                           sweep_hash: str,
                           candidate_types: "tuple[str, ...] | None" = None,
                           bars_per_year: float = CURVE_BARS_PER_YEAR,
-                          lord_tests_already: "int | None" = None) -> SubstratePower:
+                          lord_tests_already: "int | None" = None,
+                          live_level: "float | None" = None) -> SubstratePower:
     """Build the :class:`SubstratePower` stamp for a panel of ``panel_T`` bars.
 
     ``bars_per_year`` is the substrate's OWN bar clock (252 = daily, the default, under which this
@@ -316,7 +347,12 @@ def stamp_substrate_power(panel_T: int, holdout_frac: float, sweep: "dict | Mapp
     When a count IS passed but the surface carries no family at that depth, the stamp DEGRADES to the
     fresh reading and says so in ``interp_mode`` (``...:lord_unmeasured``) rather than refusing — the
     fresh reading is exactly the status quo, so degrading is not a regression, but it IS anti-
-    conservative and must never be silent. ``:lord{k}`` marks a real family read at depth ``k``."""
+    conservative and must never be silent. ``:lord{k}`` marks a real family read at depth ``k``.
+
+    ``live_level`` (crucible-v16.0) selects the family row by the LORD++ LEVEL the tick will spend
+    (:func:`lord_depth_for_level`) and takes precedence over ``lord_tests_already``. A level tighter
+    than every measured one reads ``(+inf, 'unmeasured_lord_beyond_grid')`` — refuse; a sweep with no
+    level family degrades to the fresh reading with the same ``:lord_unmeasured`` label."""
     hb = _power_holdout_bars(panel_T, holdout_frac)
     bpy = float(bars_per_year)
     if bpy <= 0.0:
@@ -341,7 +377,18 @@ def stamp_substrate_power(panel_T: int, holdout_frac: float, sweep: "dict | Mapp
         if sw is None:
             worst_mde, worst_mode = math.inf, "unmeasured_candidate_type"
             break
-        if lord_tests_already is None:
+        if live_level is not None:
+            depth = lord_depth_for_level(sw, live_level)
+            if depth == LORD_BEYOND_GRID:
+                mde, mode = math.inf, "unmeasured_lord_beyond_grid"
+            else:
+                mde, mode = (math.inf, "unmeasured_empty") if depth is None else interp_mde(hb, sw, depth)
+                if depth is None or not math.isfinite(mde):
+                    mde, mode = interp_mde(hb, sw)
+                    mode = f"{mode}:lord_unmeasured"
+                else:
+                    mode = f"{mode}:lord{depth}"
+        elif lord_tests_already is None:
             mde, mode = interp_mde(hb, sw)
         else:
             depth = lord_depth_for(sw, lord_tests_already)

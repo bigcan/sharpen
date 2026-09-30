@@ -51,15 +51,15 @@ def test_no_floor_is_the_legacy_behaviour() -> None:
     assert rep.findings[0].accepted
 
 
-def test_floor_is_off_until_the_operator_sets_it() -> None:
-    """Adding the value is a gate-threshold change (and a gates-registry re-registration), so the
-    shipped gates leave it unset: the scout keeps its pre-v15 behaviour until the operator decides."""
+def test_shipped_altdata_gates_set_the_floor() -> None:
+    """crucible-v16.0: the operator decision (delegated 2026-09-30) sets the floor at 0.50 — a series
+    must cover at least half the panel, i.e. begin well before the holdout."""
     import scripts.research.crucible_orchestrator as orch
 
     shipped = Path(__file__).resolve().parents[2] / "configs/crucible_altdata.gates.yaml"
     cfg = yaml.safe_load(shipped.read_text(encoding="utf-8"))
-    assert (cfg.get("altdata") or {}).get("min_bar_coverage") is None
-    assert orch._altdata_min_bar_coverage(shipped) is None
+    assert cfg["altdata"]["min_bar_coverage"] == 0.5
+    assert orch._altdata_min_bar_coverage(shipped) == 0.5
 
 
 def test_orchestrator_reads_the_floor_when_configured(tmp_path: Path) -> None:

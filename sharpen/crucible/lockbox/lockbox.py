@@ -42,10 +42,13 @@ def _epoch_or_none(ts: str | None) -> float | None:
 
 # Verdict vocabulary. INCUBATING is the only non-terminal state; a card is human-gate-eligible iff
 # and only iff its entry is CLEARED. REJECTED is terminal-dead (forward evidence failed the criterion).
+# INCONCLUSIVE (crucible-v16.0, ``sprt`` entries only) is terminal and NOT eligible: the sequential
+# test reached its horizon cap without evidence either way — honest "time could not tell", never a pass.
 STATUS_INCUBATING = "INCUBATING"
 STATUS_CLEARED = "CLEARED"
 STATUS_REJECTED = "REJECTED"
-_TERMINAL = frozenset({STATUS_CLEARED, STATUS_REJECTED})
+STATUS_INCONCLUSIVE = "INCONCLUSIVE"
+_TERMINAL = frozenset({STATUS_CLEARED, STATUS_REJECTED, STATUS_INCONCLUSIVE})
 
 
 @dataclass(frozen=True, slots=True)
@@ -77,10 +80,33 @@ class LockboxEntry:
     verdict_snapshot_hash: str | None = None   # C8-06: the panel snapshot the TERMINAL forward Sharpe used
     n_stalled_passes: int = 0                  # C8-05: passes skipped (degenerate forward_evidence == None)
     n_error_passes: int = 0                    # C8-04: passes that raised (poison-pill on a drifted panel)
+    # crucible-v16.0 — the rest of the pinned criterion (``IncubationCriterion``); the defaults are the
+    # pre-v16 ``fixed`` rule, so every row enrolled before v16 keeps the rule it was enrolled under.
+    test: str = "fixed"
+    max_forward_bars: int = 0
+    block_bars: int = 21
+    calib_bars: int = 504
+    delta_sr_h1: float = 0.30
+    alpha_sprt: float = 0.10
+    beta_sprt: float = 0.20
+    # ... and its SPRT accrual state
+    forward_delta_sr: float | None = None
+    sprt_llr: float | None = None
+    n_blocks: int = 0
 
     @property
     def is_terminal(self) -> bool:
         return self.status in _TERMINAL
+
+    @property
+    def criterion(self) -> IncubationCriterion:
+        """The criterion this entry was enrolled under (CR-2), rebuilt from its pinned columns."""
+        return IncubationCriterion(
+            min_forward_bars=int(self.min_forward_bars), min_forward_sharpe=float(self.min_forward_sharpe),
+            test=str(self.test), max_forward_bars=int(self.max_forward_bars),
+            block_bars=int(self.block_bars), calib_bars=int(self.calib_bars),
+            delta_sr_h1=float(self.delta_sr_h1), alpha=float(self.alpha_sprt),
+            beta=float(self.beta_sprt))
 
     @property
     def eligible_for_human_gate(self) -> bool:
@@ -101,6 +127,8 @@ def advance(entry: LockboxEntry, evidence: ForwardEvidence, tick_ts: str,
     on the then-current, possibly revised, panel)."""
     if entry.is_terminal:
         return entry
+    if entry.test == "sprt":
+        return _advance_sprt(entry, evidence, tick_ts, snapshot_hash)
     reached = evidence.n_forward_bars >= entry.min_forward_bars
     sharpe = evidence.forward_sharpe
     if reached:
@@ -118,11 +146,43 @@ def advance(entry: LockboxEntry, evidence: ForwardEvidence, tick_ts: str,
         last_tick_ts=tick_ts, verdict_tick_ts=verdict_ts, verdict_snapshot_hash=verdict_snap)
 
 
+def _advance_sprt(entry: LockboxEntry, evidence: ForwardEvidence, tick_ts: str,
+                  snapshot_hash: str | None) -> LockboxEntry:
+    """The crucible-v16.0 rule (``test="sprt"``): Wald's SPRT on the forward Sharpe difference.
+
+    Sequential by design, so looking every pass is the procedure, not peeking: the error rates are the
+    boundaries' (α, β), for any stopping time. No verdict before ``min_forward_bars``; CLEARED when the
+    log-likelihood ratio reaches ln((1−β)/α), REJECTED when it falls to ln(β/(1−α)); still undecided at
+    ``max_forward_bars`` ⇒ INCONCLUSIVE. A pass with no calibratable evidence (NaN LLR) keeps incubating,
+    but the cap still ends it."""
+    crit = entry.criterion
+    llr = evidence.sprt_llr
+    status = STATUS_INCUBATING
+    if evidence.n_forward_bars >= entry.min_forward_bars and llr == llr:
+        if llr >= crit.log_upper:
+            status = STATUS_CLEARED
+        elif llr <= crit.log_lower:
+            status = STATUS_REJECTED
+    if status == STATUS_INCUBATING and evidence.n_forward_bars >= entry.max_forward_bars:
+        status = STATUS_INCONCLUSIVE
+    terminal = status != STATUS_INCUBATING
+    return replace(
+        entry, status=status, forward_sharpe=evidence.forward_sharpe,
+        n_forward_bars=evidence.n_forward_bars, forward_start_ts=evidence.forward_start_ts,
+        forward_end_ts=evidence.forward_end_ts, last_tick_ts=tick_ts,
+        verdict_tick_ts=(tick_ts if terminal else None),
+        verdict_snapshot_hash=(snapshot_hash if terminal else entry.verdict_snapshot_hash),
+        forward_delta_sr=(None if evidence.forward_delta_sr != evidence.forward_delta_sr
+                          else float(evidence.forward_delta_sr)),
+        sprt_llr=(None if llr != llr else float(llr)), n_blocks=int(evidence.n_blocks))
+
+
 def updated_card(card: DiscoveryCard, entry: LockboxEntry) -> DiscoveryCard:
     """Reflect a lockbox entry's incubation state onto its DiscoveryCard (verbatim — no re-scoring).
     ``eligible_for_human_gate`` is set ONLY from the entry's CLEARED status (CR-8)."""
     return replace(card, incubation_status=entry.status,
                    incubation_forward_sharpe=entry.forward_sharpe,
+                   incubation_forward_delta_sr=entry.forward_delta_sr,
                    eligible_for_human_gate=entry.eligible_for_human_gate)
 
 
@@ -131,6 +191,23 @@ _COLS = (
     "proposal_ts", "enrolled_tick_ts", "data_snapshot_hash", "min_forward_bars", "min_forward_sharpe",
     "status", "forward_sharpe", "n_forward_bars", "forward_start_ts", "forward_end_ts",
     "last_tick_ts", "verdict_tick_ts", "verdict_snapshot_hash", "n_stalled_passes", "n_error_passes",
+    "test", "max_forward_bars", "block_bars", "calib_bars", "delta_sr_h1", "alpha_sprt", "beta_sprt",
+    "forward_delta_sr", "sprt_llr", "n_blocks",
+)
+
+# crucible-v16.0 columns: (name, DDL). The NOT NULL defaults are the pre-v16 ``fixed`` rule, so a row
+# written before v16 migrates to exactly the criterion it was enrolled under.
+_V16_COLUMNS = (
+    ("test", "TEXT NOT NULL DEFAULT 'fixed'"),
+    ("max_forward_bars", "INTEGER NOT NULL DEFAULT 0"),
+    ("block_bars", "INTEGER NOT NULL DEFAULT 21"),
+    ("calib_bars", "INTEGER NOT NULL DEFAULT 504"),
+    ("delta_sr_h1", "REAL NOT NULL DEFAULT 0.3"),
+    ("alpha_sprt", "REAL NOT NULL DEFAULT 0.1"),
+    ("beta_sprt", "REAL NOT NULL DEFAULT 0.2"),
+    ("forward_delta_sr", "REAL"),
+    ("sprt_llr", "REAL"),
+    ("n_blocks", "INTEGER NOT NULL DEFAULT 0"),
 )
 
 _SCHEMA = """
@@ -155,7 +232,17 @@ CREATE TABLE IF NOT EXISTS lockbox_entries (
     verdict_tick_ts     TEXT,
     verdict_snapshot_hash TEXT,              -- C8-06: snapshot the terminal forward Sharpe used
     n_stalled_passes    INTEGER NOT NULL DEFAULT 0,   -- C8-05
-    n_error_passes      INTEGER NOT NULL DEFAULT 0    -- C8-04
+    n_error_passes      INTEGER NOT NULL DEFAULT 0,   -- C8-04
+    test                TEXT NOT NULL DEFAULT 'fixed',   -- v16.0: pinned rule ('fixed' | 'sprt')
+    max_forward_bars    INTEGER NOT NULL DEFAULT 0,
+    block_bars          INTEGER NOT NULL DEFAULT 21,
+    calib_bars          INTEGER NOT NULL DEFAULT 504,
+    delta_sr_h1         REAL NOT NULL DEFAULT 0.3,
+    alpha_sprt          REAL NOT NULL DEFAULT 0.1,
+    beta_sprt           REAL NOT NULL DEFAULT 0.2,
+    forward_delta_sr    REAL,                            -- v16.0 SPRT accrual
+    sprt_llr            REAL,
+    n_blocks            INTEGER NOT NULL DEFAULT 0
 );
 CREATE INDEX IF NOT EXISTS ix_lockbox_substrate ON lockbox_entries(substrate_id);
 CREATE INDEX IF NOT EXISTS ix_lockbox_status ON lockbox_entries(status);
@@ -183,7 +270,7 @@ class Lockbox:
         existing = {r["name"] for r in self._conn.execute("PRAGMA table_info(lockbox_entries)")}
         for name, ddl in (("verdict_snapshot_hash", "TEXT"),
                           ("n_stalled_passes", "INTEGER NOT NULL DEFAULT 0"),
-                          ("n_error_passes", "INTEGER NOT NULL DEFAULT 0")):
+                          ("n_error_passes", "INTEGER NOT NULL DEFAULT 0"), *_V16_COLUMNS):
             if name not in existing:
                 self._conn.execute(f"ALTER TABLE lockbox_entries ADD COLUMN {name} {ddl}")
         self._conn.commit()
@@ -225,7 +312,11 @@ class Lockbox:
             gates_hash=card.gates_hash, proposal_ts=proposal_ts, enrolled_tick_ts=tick_ts,
             data_snapshot_hash=card.data_snapshot_hash,
             min_forward_bars=int(criterion.min_forward_bars),
-            min_forward_sharpe=float(criterion.min_forward_sharpe))
+            min_forward_sharpe=float(criterion.min_forward_sharpe),
+            test=str(criterion.test), max_forward_bars=int(criterion.max_forward_bars),
+            block_bars=int(criterion.block_bars), calib_bars=int(criterion.calib_bars),
+            delta_sr_h1=float(criterion.delta_sr_h1), alpha_sprt=float(criterion.alpha),
+            beta_sprt=float(criterion.beta))
         self._write(entry)
         return entry
 

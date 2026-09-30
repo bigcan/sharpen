@@ -46,6 +46,7 @@ from .hypothesis import HypothesisAuthor, PreRegisteredSpec, candidate_hash
 if TYPE_CHECKING:
     from ...signals.generation.base_sleeves import SleeveComponents
     from ..corrected_contract import CorrectedConfig
+    from ..orchestrator.fdr import LordSequence
     from ..search_memory import SearchMemoryConfig
 
 log = logging.getLogger("crucible.loop")
@@ -86,6 +87,10 @@ class HypothesisLoopResult:
     # pre-registered specs ledgered NOT_TESTED this pass.
     adjudicated_hashes: frozenset = frozenset()
     n_not_tested: int = 0
+    # v16.0: the sequential LORD++ decisions, in testing order — ``(candidate_hash, level, discovery)``.
+    # The orchestrator replays exactly this sequence on the persistent account. Empty when the tick
+    # used a single ``lord_level`` (or the shipped contract).
+    lord_decisions: tuple = ()
 
 
 def _holdout_entry(report: GenerationReport, formula: str) -> dict | None:
@@ -198,6 +203,7 @@ def run_hypothesis_loop(
     corrected_cfg: "CorrectedConfig | None" = None,
     corrected_gates_hash: str | None = None,
     lord_level: float | None = None,
+    lord_sequence: "LordSequence | None" = None,
     search_memory_cfg: "SearchMemoryConfig | None" = None,
     search_memory_gates_hash: str | None = None,
     substrate_mde: float | None = None,
@@ -214,7 +220,10 @@ def run_hypothesis_loop(
     ``contract`` / ``corrected_cfg`` / ``lord_level`` (crucible-v6.0) select and parameterize the
     decision layer ``evolve`` applies on the embargoed holdout; ``corrected_gates_hash`` is the
     corrected thresholds file's byte hash, pinned into the manifest symmetrically with ``gates_hash``.
-    Defaults reproduce the shipped funnel exactly.
+    Defaults reproduce the shipped funnel exactly. ``lord_sequence`` (crucible-v16.0) replaces
+    ``lord_level`` with per-spec sequential LORD++ levels shared across both candidate types (cross-
+    sectional seeds first, then overlay, each in pre-registration order); its decisions come back in
+    ``HypothesisLoopResult.lord_decisions``.
 
     ``search_memory_cfg`` / ``substrate_mde`` (U4, crucible-v10.0) enable the REJECTION CLASSIFICATION
     that makes ``ledger.killed_families()`` able to fire at all: a rejected candidate is stamped
@@ -268,7 +277,8 @@ def run_hypothesis_loop(
         log.info("mining %d %s seeds (contract=%s)", len(seeds), ct, contract)
         report = evolve(seeds, panel, base_returns, timestamps, cfg, candidate_type=ct,
                         base_components=base_components, contract=contract,
-                        corrected_cfg=corrected_cfg, lord_level=lord_level, **ek)
+                        corrected_cfg=corrected_cfg, lord_level=lord_level,
+                        **({"lord_sequence": lord_sequence} if lord_sequence is not None else {}), **ek)
         reports[ct] = report
         holdout_rejected |= _holdout_rejections(report, ct)
         adjudicated |= _holdout_adjudicated(report, ct)
@@ -435,7 +445,10 @@ def run_hypothesis_loop(
     return HypothesisLoopResult(
         specs=specs, reports=reports, cards=cards, manifest=manifest,
         n_promising=len(cards), dropped=dropped, cohort_cards=cohort_cards,
-        adjudicated_hashes=adjudicated_hashes, n_not_tested=n_not_tested)
+        adjudicated_hashes=adjudicated_hashes, n_not_tested=n_not_tested,
+        lord_decisions=(tuple((candidate_hash(f), float(level), bool(disc))
+                              for _ct, f, level, disc in lord_sequence.decisions)
+                        if lord_sequence is not None else ()))
 
 
 def run_cohort_only(

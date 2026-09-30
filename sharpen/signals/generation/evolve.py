@@ -43,6 +43,7 @@ from .grammar import (
 
 if TYPE_CHECKING:
     from ...crucible.corrected_contract import CorrectedConfig
+    from ...crucible.orchestrator.fdr import LordSequence
     from .base_sleeves import SleeveComponents
 
 log = logging.getLogger("alpha_evolve")
@@ -392,6 +393,7 @@ def evolve(
     lord_level: float | None = None,
     enforce_causality: bool = True,
     search_offspring: "bool | None" = None,
+    lord_sequence: "LordSequence | None" = None,
 ) -> GenerationReport:
     """Evolve DSL alphas on the TRAIN split; re-validate PROMISING survivors on the held-out
     tail. ``base_returns``/``timestamps`` align to the train split's rows.
@@ -432,6 +434,13 @@ def evolve(
     can pass the corrected one (that is the entire point). Recorded verdicts are therefore NOT preserved
     across the switch and must be re-scored, not inherited — see ``version.py``.
 
+    ``lord_sequence`` (crucible-v16.0, corrected contract + ``offspring_policy: prereg_only`` only): test
+    each DECIDED pre-registered seed at its OWN LORD++ level, in pre-registration order, instead of every
+    seed at one ``lord_level`` (the orchestrator used to pass the batch's tightest). The other legs are
+    scored level-free (``lord_level=1.0``), then :meth:`LordSequence.decide` applies the level; the
+    orchestrator replays the recorded sequence on the persistent account. Mutually exclusive with
+    ``lord_level``.
+
     ``enforce_causality`` (audit U6 / RC-8, default ON): truncation-probe every DISTINCT genome
     (:func:`_genome_is_causal`) BEFORE fitness and CULL a leaky one. On a causal DSL nothing fires, so the
     search is byte-identical (a cull still increments ``gen_n_total``, so even a firing leaves the
@@ -450,10 +459,18 @@ def evolve(
         if corrected_cfg is None:
             raise ValueError("contract='corrected' requires corrected_cfg (CorrectedConfig from "
                              "configs/crucible_corrected_contract.gates.yaml)")
+        if lord_sequence is not None:
+            if lord_level is not None:
+                raise ValueError("pass lord_level OR lord_sequence, not both")
+            if corrected_cfg.offspring_policy != "prereg_only":
+                raise ValueError("lord_sequence charges pre-registered specs only; it requires "
+                                 "eligibility.offspring_policy: prereg_only")
+            lord_level = 1.0            # level-free scoring; the sequence applies each spec's level
         if lord_level is None:
             lord_level = fresh_lord_level(corrected_cfg)
-    elif corrected_cfg is not None or lord_level is not None:
-        raise ValueError("corrected_cfg / lord_level are only meaningful with contract='corrected'")
+    elif corrected_cfg is not None or lord_level is not None or lord_sequence is not None:
+        raise ValueError("corrected_cfg / lord_level / lord_sequence are only meaningful with "
+                         "contract='corrected'")
     # v15.0 — THE OFFSPRING SEARCH ONLY RUNS WHEN AN OFFSPRING COULD MATTER. Under the corrected contract
     # with `offspring_policy: prereg_only` (the shipped default) an evolved offspring can never be
     # promoted and charges nothing — it is file-drawer only — and each pre-registered seed's holdout
@@ -516,6 +533,7 @@ def evolve(
     # eligible set under ``prereg_only`` — n_holdout_tested=0 on a run that believed it tested every seed.
     # The orchestrator already passes canonical strings, so its runs are unaffected.
     prereg = {to_formula(p) for p in pop}
+    prereg_order = list(dict.fromkeys(to_formula(p) for p in pop))   # v16.0: the LORD++ testing order
     gen_n_total = 0
     scored: dict[str, Candidate] = {}        # formula -> best Candidate seen (dedup)
     # GP4-02/M1: the cross-search DISPERSION pool — every scored genome's augmented-book per-period
@@ -705,6 +723,7 @@ def evolve(
         if is_overlay else None
     holdout_validation: list[dict] = []
     promising: list[Candidate] = []
+    sequenced: dict[str, tuple] = {}             # v16.0: decided seeds awaiting their LORD++ level
     for c in train_passers:
         try:
             full = _returns_for(c.formula, panel, ctx_full)
@@ -755,7 +774,7 @@ def evolve(
             passed = cr.passes_corrected
             # Same four keys the shipped path emits (the card/manifest layer reads them verbatim),
             # plus the corrected statistic so a Tier-2 reader can see WHY it passed or failed.
-            holdout_validation.append({
+            entry = {
                 "formula": c.formula, "train_delta": train_delta,
                 "holdout_delta": cr.delta_sr, "holdout_passes": passed,
                 "contract": CONTRACT_CORRECTED, "corrected_t": cr.corrected_t,
@@ -764,7 +783,13 @@ def evolve(
                 "cand_usable_frac": cr.cand_usable_frac,
                 "legs": {"t": cr.t_pass, "lord": cr.lord_pass, "uplift": cr.uplift_pass,
                          "fragility": cr.fragility_pass, "collinearity": cr.collinearity_pass,
-                         "exposure": cr.exposure_pass, "degenerate": cr.degenerate_pass}})
+                         "exposure": cr.exposure_pass, "degenerate": cr.degenerate_pass}}
+            holdout_validation.append(entry)
+            if lord_sequence is not None:
+                # v16.0: `passed` is the LEVEL-FREE pass (scored at lord_level=1.0). The LORD++ leg is
+                # applied below, per spec, in pre-registration order.
+                sequenced[c.formula] = (c, entry, float(cr.p_value), bool(passed))
+                continue
         else:
             passed = hv.passes_gate
             holdout_validation.append({
@@ -772,6 +797,25 @@ def evolve(
                 "holdout_delta": hv.delta_sr_oos, "holdout_passes": passed})
         if passed:
             promising.append(c)
+
+    if lord_sequence is not None:
+        # v16.0 — SEQUENTIAL LORD++. Every decided pre-registered seed is tested at its OWN level, in the
+        # order the seeds were pre-registered (fixed before any p-value existed), with discoveries
+        # replenishing the specs after them. See `LordSequence` for why this is LORD++ exactly.
+        assert corrected_cfg is not None
+        for f in prereg_order:
+            if f not in sequenced:
+                continue                                  # not decided: no test, no charge
+            c, entry, p_val, legs_ok = sequenced[f]
+            level, discovery = lord_sequence.decide(candidate_type, f, p_value=p_val,
+                                                    legs_pass=legs_ok,
+                                                    binding=corrected_cfg.fdr_binding)
+            entry["lord_level"] = float(level)
+            entry["legs"]["lord"] = bool((not corrected_cfg.fdr_binding)
+                                         or (np.isfinite(p_val) and p_val <= level))
+            entry["holdout_passes"] = bool(discovery)
+            if discovery:
+                promising.append(c)
 
     # GP7-03: advisory CSCV PBO over the bounded candidate sample (the best-of-N overfit metric
     # the deflated Sharpe doesn't estimate). Advisory only — reported, not a hard gate.
