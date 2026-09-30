@@ -33,6 +33,25 @@ from .proposer import HypothesisProposal, ProposalContext, Proposer
 log = logging.getLogger("crucible.hypothesis")
 
 
+def sign_folded_formula(formula: str, expected_sign: int) -> str:
+    """The formula the funnel will actually TRADE for a proposal declaring ``expected_sign``.
+
+    Every scoring path downstream of the Author — ``evolve`` (both candidate types), the cohort pool, the
+    lockbox's forward evidence, re-admission — consumes the formula STRING alone and trades it as written:
+    a cross-sectional book is long the highest scores, an overlay tilts the book UP when the timing
+    scalar is high, and the corrected contract's test is ONE-SIDED in that direction. ``expected_sign``
+    was stored in the pre-registration and never applied, so a proposal declaring -1 ("a higher value
+    predicts LOWER returns") was scored in the mirror-image direction and could only ever pass if its
+    own registered hypothesis was false. Production evidence (deep audit 2026-09-30): 15 of 53 LLM
+    specs in the taiwan_v2 store declared -1 on an un-negated formula.
+
+    ``-1`` is folded into the formula as a unary negation (one AST node); ``+1`` returns it unchanged,
+    so every +1 proposal — the whole offline library bank — keeps its canonical string and hash."""
+    if int(expected_sign) == -1:
+        return f"-({formula})"
+    return formula
+
+
 def candidate_hash(formula: str) -> str:
     """The ledger dedup key for a genome: 12-hex SHA-256 of the CANONICAL formula string.
 
@@ -109,7 +128,9 @@ class HypothesisAuthor:
                 log.info("drop %s — killed family %r (spec §6)", p.name, p.family)
                 continue
             try:
-                canonical = to_formula(parse(p.formula))     # validate + canonicalize
+                # v15.0: the pre-registered DIRECTION is the tested direction — fold a declared -1
+                # into the formula before it is canonicalized, hashed and locked (see sign_folded_formula).
+                canonical = to_formula(parse(sign_folded_formula(p.formula, p.expected_sign)))
             except Exception as exc:                          # noqa: BLE001 — invalid genome, skip
                 log.warning("drop %s — formula did not parse (%r): %.80s", p.name, exc, p.formula)
                 continue
@@ -137,8 +158,13 @@ class HypothesisAuthor:
                 continue
             seen_here.add(chash)
             sem_seen_here.add(shash)
+            rationale = p.economic_rationale
+            if int(p.expected_sign) == -1:
+                rationale = (f"{rationale} [sign-folded v15.0: declared expected_sign=-1 on "
+                             f"`{p.formula}`; the pre-registered, tested formula is its negation]"
+                             ).strip()
             out.append(PreRegisteredSpec(spec=spec, formula=canonical, candidate_hash=chash,
-                                         economic_rationale=p.economic_rationale,
+                                         economic_rationale=rationale,
                                          proposal_ts=proposal_ts))
         self.last_proposal_stats = {"raw": len(raw), "accepted": len(out),
                                     "dropped": len(raw) - len(out)}
@@ -148,10 +174,17 @@ class HypothesisAuthor:
     @staticmethod
     def _to_spec(p: HypothesisProposal) -> SignalSpec:
         """Build the pre-registration :class:`SignalSpec` from a proposal (validates via __post_init__).
-        ``candidate_type`` (CR-9) is set from the proposal and is EXCLUDED from ``content_hash``."""
+        ``candidate_type`` (CR-9) is set from the proposal and is EXCLUDED from ``content_hash``.
+
+        v15.0: ``expected_sign`` is recorded as +1 — the tested formula is PRE-SIGNED (a declared -1 was
+        folded into it by :func:`sign_folded_formula`), matching the WQ101 library's convention. Keeping
+        -1 here next to a negated formula would make any consumer that multiplies by the spec's sign
+        (the scorecard path does) flip it back. A value outside {-1, +1} still fails validation."""
+        if int(p.expected_sign) not in (-1, 1):
+            raise ValueError(f"expected_sign must be -1 or +1 for a pre-registration; got {p.expected_sign!r}")
         return SignalSpec(
             name=p.name, hypothesis=p.hypothesis, family=p.family,
-            expected_sign=p.expected_sign, candidate_type=p.candidate_type)
+            expected_sign=1, candidate_type=p.candidate_type)
 
     # --- CR-2: lock the hash into the ledger before OOS (write side; still no verdict) -------------
     def preregister(self, specs: list[PreRegisteredSpec], *, run_id: str, crucible_version: str,

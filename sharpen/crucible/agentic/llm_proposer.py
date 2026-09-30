@@ -63,6 +63,14 @@ Formula language (a typed DSL over cross-sectional/time-series operators — the
   terminal (never wrapped in rank — it is a single broadcast series, not cross-sectional), e.g.
   delta(fred:DGS10, 20) or decay_linear(cot:comm_net, 10).
 
+SIGN CONVENTION (binding — the test is one-sided in the declared direction):
+  Every formula is traded as written. A cross_sectional book goes LONG the names with the HIGHEST
+  formula values and SHORT the lowest; an overlay tilts the book UP when the formula is high.
+  expected_sign = +1 means "a higher formula value predicts HIGHER future returns (or a better bar
+  for the book)"; expected_sign = -1 means it predicts LOWER, and the system then trades the NEGATED
+  formula. So a reversal written as rank(delta(close, 5)) must carry expected_sign = -1 (or be written
+  -rank(delta(close, 5)) with expected_sign = +1) — never both negations at once.
+
 Diversity is the point: propose hypotheses that differ in ECONOMIC MECHANISM (carry, momentum,
 mean-reversion, positioning extremes, macro regime shifts, sentiment/attention, fundamental drift,
 liquidity/flow) rather than near-duplicate variants of the same idea with a different window. Name

@@ -164,8 +164,11 @@ def test_ledger_duplicate_deduped_before_compute(tmp_path) -> None:
     chash = candidate_hash("rank(close)")
     ledger.record(TrialRecord(candidate_hash=chash, crucible_version="v", family="101alpha",
                               verdict="LOGGED"))
+    # expected_sign +1: the SAME hypothesis as the ledgered row. (Before v15.0 this fixture declared -1,
+    # which the Author ignored; a -1 declaration now pre-registers the NEGATED formula — the
+    # opposite-direction hypothesis — so it is deliberately not a duplicate. See test_v15_0_sign.py.)
     proposer = RecordingProposer(to_emit=[
-        HypothesisProposal("cs-dup", "h", "101alpha", -1, "cross_sectional", "rank(close)"),
+        HypothesisProposal("cs-dup", "h", "101alpha", 1, "cross_sectional", "rank(close)"),
         HypothesisProposal("cs-new", "h", "101alpha", 1, "cross_sectional", "rank(volume)"),
     ])
     author = HypothesisAuthor(proposer, ledger)

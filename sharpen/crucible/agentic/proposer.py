@@ -34,14 +34,23 @@ _OHLCV_TERMINALS = frozenset(
 # pre-registration record carries a real hypothesis, not "rank of formula 33".
 _CS_SEED_BANK: tuple[tuple[int, str, str, int], ...] = (
     # (WQ101 formula index, kebab name, one-line falsifiable hypothesis, expected_sign)
-    (1, "cs-ret-reversal", "short-horizon cross-sectional return reversal earns a premium", -1),
-    (3, "cs-oc-volume-corr", "open-close vs volume co-movement predicts cross-sectional returns", -1),
-    (4, "cs-low-rank-reversal", "ts-rank of lows mean-reverts across the cross-section", -1),
-    (6, "cs-open-volume-corr", "open/volume correlation is a cross-sectional flow proxy", -1),
+    #
+    # v15.0 — every sign is +1. The WQ101 formulas are PRE-SIGNED (library/alphas101.py: "Every alpha is
+    # the pre-signed score (expected_sign=+1)"; the reversal ones carry their own `-1 *`), and the funnel
+    # trades the formula as written. Five of these eight were labelled -1, describing the direction of the
+    # INNER quantity rather than of the formula — harmless only while the Author ignored the sign. Now
+    # that a declared -1 is folded into the tested formula (hypothesis.sign_folded_formula), keeping those
+    # labels would have silently flipped #1/#3/#4/#6/#53 to the anti-WQ101 direction. With +1 the formula
+    # strings and candidate hashes are unchanged; the recorded pre-registrations of these five said -1
+    # while the test ran +1 (the published direction) — noted in the v15.0 changelog.
+    (1, "cs-ret-reversal", "short-horizon cross-sectional return reversal earns a premium", 1),
+    (3, "cs-oc-volume-corr", "open-close vs volume co-movement predicts cross-sectional returns", 1),
+    (4, "cs-low-rank-reversal", "ts-rank of lows mean-reverts across the cross-section", 1),
+    (6, "cs-open-volume-corr", "open/volume correlation is a cross-sectional flow proxy", 1),
     (9, "cs-1d-momentum", "one-day conditional momentum persists cross-sectionally", 1),
     (12, "cs-volume-delta-rev", "volume-change gates one-day price reversal", 1),
     (33, "cs-open-close-ratio", "the open/close ratio is a cross-sectional reversal signal", 1),
-    (53, "cs-intraday-range", "intraday range position predicts cross-sectional reversal", -1),
+    (53, "cs-intraday-range", "intraday range position predicts cross-sectional reversal", 1),
 )
 
 # ---------------------------------------------------------------------------------------------

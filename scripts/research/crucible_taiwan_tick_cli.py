@@ -51,7 +51,13 @@ sys.path.insert(0, str(ROOT))
 from sharpen.crucible.agentic import llm_proposer as _llm  # noqa: E402
 
 _CLI = shutil.which("claude") or r"~\.local\bin\claude"
-_CHILD_CWD = tempfile.gettempdir()  # neutral dir: no project CLAUDE.md / FinRL auto-memory
+# CRU-2 BY CONSTRUCTION (v15.0). The child used to run in the SHARED system temp dir with its default
+# tool set — Read/Glob/Grep need no permission inside the working directory, and that directory held
+# ~18.5k files from earlier sessions, Crucible ledger scratch included. The proposer was blind only
+# because its prompt said so. It now runs with NO tools (`--tools ""`), NO MCP servers
+# (`--strict-mcp-config` with no `--mcp-config`) and an EMPTY per-call working directory, so a verdict
+# is not reachable from the child even if the model tried.
+_CHILD_SANDBOX_ARGS = ("--tools", "", "--strict-mcp-config")
 
 
 def _extract_json_obj(text: str) -> dict:
@@ -87,11 +93,13 @@ def _make_transport(model: str, timeout: int):
         cmd = [
             _CLI, "-p", "--output-format", "json", "--model", model,
             "--setting-sources", "",     # no user/project/local settings -> no memory hook
+            *_CHILD_SANDBOX_ARGS,        # no tools, no MCP: nothing on disk is reachable (CRU-2)
             "--system-prompt", system,   # ONLY the fixed proposer template
             user + instruction,
         ]
-        proc = subprocess.run(cmd, capture_output=True, text=True, encoding="utf-8",
-                              env=child_env, cwd=_CHILD_CWD, timeout=timeout)
+        with tempfile.TemporaryDirectory(prefix="crucible_proposer_") as child_cwd:   # empty dir
+            proc = subprocess.run(cmd, capture_output=True, text=True, encoding="utf-8",
+                                  env=child_env, cwd=child_cwd, timeout=timeout)
         if proc.returncode != 0:
             raise RuntimeError(f"claude CLI exit {proc.returncode}: {(proc.stderr or '')[:500]}")
         envelope = json.loads(proc.stdout)
@@ -167,12 +175,14 @@ def _assert_blind(model: str, timeout: int = 120) -> str | None:
     cmd = [
         _CLI, "-p", "--output-format", "json", "--model", model,
         "--setting-sources", "",
+        *_CHILD_SANDBOX_ARGS,
         "--system-prompt", "You output only JSON.",
         _BLIND_PROBE,
     ]
     try:
-        proc = subprocess.run(cmd, capture_output=True, text=True, encoding="utf-8",
-                              env=child_env, cwd=_CHILD_CWD, timeout=timeout)
+        with tempfile.TemporaryDirectory(prefix="crucible_probe_") as child_cwd:
+            proc = subprocess.run(cmd, capture_output=True, text=True, encoding="utf-8",
+                                  env=child_env, cwd=child_cwd, timeout=timeout)
         if proc.returncode != 0:
             raise RuntimeError(f"CLI exit {proc.returncode}: {(proc.stderr or '')[:300]}")
         envelope = json.loads(proc.stdout)
@@ -220,8 +230,8 @@ def main() -> int:
     _llm._default_transport = _make_transport(args.model, args.timeout)
     os.environ["ANTHROPIC_API_KEY"] = os.environ.get("ANTHROPIC_API_KEY") or "oauth-via-claude-cli"
 
-    print(f"[driver] transport=claude CLI  model={args.model}  child_cwd={_CHILD_CWD}",
-          file=sys.stderr)
+    print(f"[driver] transport=claude CLI  model={args.model}  child sandbox="
+          f"{' '.join(repr(a) for a in _CHILD_SANDBOX_ARGS)} + empty per-call cwd", file=sys.stderr)
     # M1: runtime moat guard — abort before mining if the child can see project verdicts/memory.
     # It also returns the concrete resolved model id for the L1 provenance stamp.
     resolved = _assert_blind(args.model)
