@@ -50,3 +50,13 @@
 - **CLAUDE.md: APPLIED 2026-09-30 on the operator's explicit instruction** (it is outside the repo's normal edit boundary). The Commands example and the SharpOps section now reflect the required `--stage`, and step 2 notes that run manifests are not implemented. Applied replacement for the Anti-Patterns line "Never promote a strategy to capital (live/paper) … without a Tier-2 deep lifecycle audit":
 
   > **Never promote without the rung's test** (`docs/sharpops_promotion_standard.md`): paper needs the pooled-OOS PSR at α 0.20, the tripwires, an integrity audit and `sharpops_promotion_check.py` exit 0; a prop challenge or live capital also needs a **Tier-2 deep lifecycle audit**. Bar-level PF is a diagnostic, never a gate.
+
+## Validator items (audit item 10, Tier-2 N3): DONE 2026-09-30 (operator instruction)
+
+`scripts/validate_config.py`:
+- **§3.5 multiplicity:** above 50x is now a WARN, not a FAIL. Every §3.5 anchor is leak-era, so the band is unvalidated guidance.
+- **Unread keys** (`hpo_pf_floor`, `wf_pf_floor`, `recent_oos_days`): WARN "declared but NOT ENFORCED" at every stage. A FAIL would break dormant RL configs for keys that never did anything.
+- **Linear-core books, paper-deploy:** a control the linear run path does not consume now FAILs (`check_linear_controls_consumed`). That covers `risk.static_peak: true` (the runner's kill is trailing), `safety.flatten_on_kill_file: false` (it always flattens), the CRIT lockout keys, and `feature_variance_veto` (RL live engine only). A test grep of `sharpen/paper/forward_runner.py` keeps the table in sync both ways.
+- **No deadlock.** For linear books the v2.2 presence rule needs only `crit_triggers_flatten`, and the paper-deploy `static_peak` requirement is waived (a trailing kill is stricter). Removing the false declarations therefore passes.
+- **Effect:** `tailwind_v1_challenge.yaml` now FAILs paper-deploy on exactly those four keys. The config is left unedited: it is the X1-certified config and TAILWIND is BLOCK. The three other linear configs fail paper-deploy only on their pre-existing missing `kill_file`.
+- **Tests:** 15 new, 4/4 mutations killed, 480 regression pass.

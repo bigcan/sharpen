@@ -148,10 +148,12 @@ def test_non_crypto_non_allocator_still_skips():
 
 
 def test_original_allocator_config_fails_hpo_multiplicity():
-    """The exact config that slipped (500k steps / 1260 bars = 397x) must now
-    FAIL the 50x REJECT cliff at --stage hpo."""
+    """The exact config that slipped (500k steps / 1260 bars = 397x) is still FLAGGED at
+    --stage hpo, but as a WARN: the 50x REJECT was demoted on 2026-09-30 because every §3.5
+    calibration anchor is leak-era (Protocol v2 audit §6 item 10). It must not pass silently."""
     r = validate(ALLOCATOR_CFG, "hpo")
-    assert any("REJECT cliff" in f for f in r.failures), r.failures
+    assert not any("budget multiplicity" in f for f in r.failures), r.failures
+    assert any("budget multiplicity" in w and "above 50x" in w for w in r.warnings), r.warnings
 
 
 def test_retry_allocator_config_passes_hpo_in_band():
