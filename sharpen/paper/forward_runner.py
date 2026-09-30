@@ -206,6 +206,9 @@ class ForwardDecision:
     data_sha16: str
     batch_weights: np.ndarray            # (T-1, N): row k fills at the close of union bar k+1
     union: dict = field(repr=False)
+    # Each sleeve's batch weights, alphas and assets over the window of ``batch_weights``, so
+    # ``evaluate`` can attribute the book per sleeve (audit T4-12b).
+    sleeve_batch: dict = field(default_factory=dict, repr=False)
 
 
 def compute_forward_decision(
@@ -241,13 +244,20 @@ def compute_forward_decision(
         cm = monthly_rebal_conviction(bundle[s]["timestamps"], bundle[s]["conviction_ary"])
         conviction[s] = [float(x) for x in cm[len(cm) - SESSIONS_AHEAD - 1 + lead]]
         sleeve_assets[s] = list(bundle[s]["assets"])
+    sleeve_batch = {
+        "weights": {s: np.asarray(detail["sleeve_traj"][s]["weights"], dtype=np.float64)
+                    for s in executor.sleeve_names},
+        "alphas": {s: np.asarray(detail["alphas"][s], dtype=np.float64)
+                   for s in executor.sleeve_names},
+        "assets": sleeve_assets,
+    }
     return ForwardDecision(
         as_of=c.index[-1], fill_session=ahead[0], assets=list(union["assets"]),
         weights=W[-SESSIONS_AHEAD].copy(),
         alphas={s: float(np.asarray(a)[-SESSIONS_AHEAD]) for s, a in detail["alphas"].items()},
         sleeve_conviction=conviction, sleeve_assets=sleeve_assets,
         month_end_fill=tc.is_month_end(ahead[0]), data_sha16=frame_sha16(c, v),
-        batch_weights=W, union=union)
+        batch_weights=W, union=union, sleeve_batch=sleeve_batch)
 
 
 def target_record(decision: ForwardDecision, config: Mapping, *, config_sha16: str = "") -> dict:
@@ -443,7 +453,8 @@ class ForwardRunner:
         record = target_record(decision, self.config, config_sha16=self.config_sha16)
         report = self.step(as_of=decision.as_of, union=decision.union, record=record)
         report["verdict"] = self.evaluate(union=decision.union,
-                                          batch_weights=decision.batch_weights)
+                                          batch_weights=decision.batch_weights,
+                                          sleeve_batch=decision.sleeve_batch)
         report["exit_code"] = exit_code(report)
         return report
 
@@ -622,9 +633,12 @@ class ForwardRunner:
         return self._drift["reports"]
 
     # ---- verdict -----------------------------------------------------------
-    def evaluate(self, *, union: Mapping, batch_weights: np.ndarray) -> dict:
+    def evaluate(self, *, union: Mapping, batch_weights: np.ndarray,
+                 sleeve_batch: Mapping | None = None) -> dict:
         """Score the booked sessions: incremental parity against today's batch
-        recomputation, then the pre-registered ``paper_soak`` gates."""
+        recomputation, then the pre-registered ``paper_soak`` gates. ``sleeve_batch``
+        (``ForwardDecision.sleeve_batch``) supplies the per-sleeve attribution that the
+        soak's sleeve_attribution check requires; without it that check fails closed."""
         fills = self.fills()
         chain_ok = self.targets.verify()
         if not fills:
@@ -655,6 +669,15 @@ class ForwardRunner:
             missed_rebalances=int(missed), cost_drift_ratio=float(cost_ratio), n_steps=len(fills))
         assets, asset_class = self.harness._asset_meta(window, W_book.shape[1])
         class_pnl, spy = self.harness._attribution(W_book, window["price_ary"], assets, asset_class)
+        # Per-sleeve P&L of the batch the book is parity-checked against. It decomposes the
+        # booked book exactly while incremental parity holds (audit T4-12b).
+        sleeve_pnl = None
+        if sleeve_batch:
+            sleeve_pnl = TwoSleeveExecutor._sleeve_attribution(
+                {s: np.asarray(w)[i0:i1] for s, w in sleeve_batch["weights"].items()},
+                sleeve_batch["assets"],
+                {s: np.asarray(a)[i0:i1] for s, a in sleeve_batch["alphas"].items()},
+                assets, window["price_ary"])
         pv = np.array([fills[0]["pv_before"]] + [f["pv"] for f in fills])
         live = LiveTrajectory(
             weights=W_book, equity_curve=pv, step_returns=r_book,
@@ -664,7 +687,7 @@ class ForwardRunner:
             net_exposure=np.array([f["net"] for f in fills]),
             timestamps=np.asarray(window["timestamps"][1:], dtype=np.int64),
             class_pnl=class_pnl, assets=assets, asset_class=asset_class,
-            initial_capital=float(pv[0]), spy_returns=spy)
+            initial_capital=float(pv[0]), spy_returns=spy, sleeve_pnl=sleeve_pnl)
         try:
             verdict = evaluate_paper_soak_gates(live, parity, self.gates_cfg,
                                                 executor_sleeves=list(self.sleeve_names))

@@ -276,6 +276,19 @@ def test_incremental_parity_is_zero_and_the_run_is_healthy(ran):
     assert last["exit_code"] == fr.EXIT_PASS
 
 
+def test_the_scored_book_carries_per_sleeve_attribution(ran):
+    """Audit T4-12b on the forward path: the runner scores with executor_sleeves, so the book
+    must carry per-sleeve P&L. It comes from the batch the book is parity-checked against, so
+    while parity is exact the sleeves sum to the per-class total."""
+    v = ran["reports"][-1]["verdict"]
+    sleeve_pnl, class_pnl = v["summary"]["sleeve_pnl"], v["summary"]["class_pnl"]
+    assert sleeve_pnl is not None and set(sleeve_pnl) == set(ran["runner"].sleeve_names)
+    assert any(abs(x) > 1e-6 for x in sleeve_pnl.values())
+    assert sum(sleeve_pnl.values()) == pytest.approx(sum(class_pnl.values()), abs=1e-9)
+    chk = v["groups"]["drift"]["checks"]["sleeve_attribution"]
+    assert chk["status"] == "PASS" and chk["basis"] == "sleeve"
+
+
 def test_rerunning_the_same_session_is_idempotent(ran, tmp_path):
     state = tmp_path / "copy"
     shutil.copytree(ran["state"], state)

@@ -211,7 +211,8 @@ def main() -> int:
     t0 = time.time()
     for s in as_ofs:
         runner.step(as_of=s, union=final.union, record=records[s.date().isoformat()])
-    verdict = runner.evaluate(union=final.union, batch_weights=final.batch_weights)
+    verdict = runner.evaluate(union=final.union, batch_weights=final.batch_weights,
+                              sleeve_batch=final.sleeve_batch)
     t_book = time.time() - t0
     fills = runner.fills()
     kill = json.loads((state_dir / "runner_state.json").read_text(encoding="utf-8")).get("killed")
