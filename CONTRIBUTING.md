@@ -53,6 +53,21 @@ See [docs/guides/testing.md](docs/guides/testing.md).
 
 Contributions are made under the [Apache License 2.0](LICENSE), as described in its section 5.
 
+### Sign your commits (DCO)
+
+Every commit in a pull request must carry a `Signed-off-by` line certifying the
+[Developer Certificate of Origin 1.1](https://developercertificate.org/): that you wrote the
+change, or otherwise have the right to submit it under this project's license. Add it with `-s`:
+
+```bash
+git commit -s -m "fix: describe the change"
+```
+
+To sign off commits you already made on your branch: `git rebase --signoff main`, then force-push
+the branch. Pull requests with unsigned commits fail the DCO check and cannot be merged.
+
+The names "Sharpen" and "Crucible" are covered separately by [TRADEMARKS.md](TRADEMARKS.md).
+
 ## Conduct
 
 Participation is covered by the [Code of Conduct](CODE_OF_CONDUCT.md). Security issues go through
