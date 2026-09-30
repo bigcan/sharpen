@@ -547,23 +547,47 @@ def drive_with_conviction(
 # number, preserving the executor's parity-by-construction model.
 
 
+def _month_end_mask(timestamps: np.ndarray) -> np.ndarray:
+    """Boolean mask of the LAST row of each calendar (year, month) in ``timestamps`` (epoch s,
+    cast to int64 exactly as :func:`_monthly_held` always has). "Last" is the largest ROW INDEX
+    carrying that month — order-independent, i.e. the same set ``groupby(month).max()`` returns —
+    so a window's final row is flagged even when its month is only partly covered (the behaviour
+    ``tests/paper/test_decision_lead.py`` pins as pre-existing).
+
+    Pure numpy (``datetime64[M]`` month keys + ``np.unique`` on the reversed axis). The previous
+    pandas ``to_period('M')`` + ``groupby`` boxed one ``Period`` object per row and was the single
+    largest cost in a Crucible mining tick (measured 2026-09-30: 400 s of a 1,365 s profiled
+    synthetic tick, 74 M ``Period._box_func`` calls). Both produce proleptic-Gregorian UTC months,
+    so the flagged rows are identical."""
+    ts = np.asarray(timestamps, dtype=np.int64)
+    k = ts.shape[0]
+    is_me = np.zeros(k, dtype=bool)
+    if k == 0:
+        return is_me
+    months = ts.astype("datetime64[s]").astype("datetime64[M]").astype(np.int64)
+    _, first_in_reversed = np.unique(months[::-1], return_index=True)
+    is_me[k - 1 - first_in_reversed] = True
+    return is_me
+
+
 def _monthly_held(values: np.ndarray, timestamps: np.ndarray) -> np.ndarray:
     """Forward-fill ``values`` (shape ``(K, ...)``) from the LAST decision bar of each
     (year, month) — the monthly meta-rebalance hold. ``timestamps`` is the per-row decision
-    stamp (epoch s). Rows before the first month-end keep their own value (warmup)."""
-    ts = np.asarray(timestamps, dtype=np.int64)
+    stamp (epoch s). Rows before the first month-end take row 0's value (warmup) — that is what
+    the code has always done (the old docstring said "keep their own value"; in practice both
+    are the NaN trailing-vol warmup, since no month is longer than ``min_periods``).
+
+    Vectorized as an index forward-fill (``np.maximum.accumulate`` over the month-end rows) —
+    pure element copies, so bit-identical to the former per-row Python loop (pinned by
+    ``tests/envs/test_combiner_vectorized_identity.py`` against a verbatim copy of that loop)."""
     out = np.array(values, dtype=np.float64, copy=True)
-    if len(ts) == 0:
+    k = len(np.asarray(timestamps))
+    if k == 0:
         return out
-    months = pd.to_datetime(ts, unit="s").to_period("M")
-    last_of_month = pd.Series(np.arange(len(ts))).groupby(months.values).max().to_numpy()
-    is_me = np.zeros(len(ts), dtype=bool)
-    is_me[last_of_month] = True
-    held = out[0].copy() if out.ndim > 1 else out[0]
-    for k in range(len(ts)):
-        if is_me[k]:
-            held = out[k].copy() if out.ndim > 1 else out[k]
-        out[k] = held
+    is_me = _month_end_mask(timestamps)
+    src = np.where(is_me, np.arange(k), 0)          # rows before the first month-end -> row 0
+    np.maximum.accumulate(src, out=src)
+    out[:k] = out[src]                              # RHS is a copy, so later rows read unmodified values
     return out
 
 
@@ -654,6 +678,19 @@ def _trailing_mean_abs_corr(
     return out
 
 
+def _stack_rows(per_sleeve: Mapping[str, np.ndarray], names: list[str], k: int) -> np.ndarray:
+    """``(k, len(names))`` float64 matrix of the first ``k`` rows of each sleeve's series — exactly the
+    ``series[s][row]`` values the former per-bar loops read for ``row < k``. A series shorter than
+    ``k`` raises, as the loop's ``series[s][k]`` indexing did."""
+    cols = []
+    for s in names:
+        col = np.asarray(per_sleeve[s], dtype=np.float64)
+        if col.shape[0] < k:
+            raise IndexError(f"sleeve {s!r} series has {col.shape[0]} rows < {k} decision bars")
+        cols.append(col[:k])
+    return np.column_stack(cols)
+
+
 def risk_parity_alphas(
     sleeve_returns: Mapping[str, np.ndarray],
     timestamps: np.ndarray,
@@ -690,20 +727,22 @@ def risk_parity_alphas(
     if monthly_meta:
         sig = {s: _monthly_held(sig[s], timestamps) for s in names}
 
-    alphas = {s: np.full(K, 1.0 / N, dtype=np.float64) for s in names}
-    for k in range(K):
-        sk = np.array([sig[s][k] for s in names], dtype=np.float64)
-        usable = np.isfinite(sk) & (sk > vol_floor)
-        if not usable.all():
-            continue  # warmup / degenerate → equal weights (already set)
+    # Vectorized over bars (was a per-bar Python loop): identical element-wise ops, and the per-row
+    # sum is the same contiguous-axis reduction numpy runs on a 1-D row, so the result is
+    # bit-identical (tests/envs/test_combiner_vectorized_identity.py). Warmup/degenerate rows (any
+    # sleeve σ unusable) keep the equal weight 1/N exactly as before.
+    if N == 0:
+        return {}
+    sk = _stack_rows(sig, names, K)                                                  # (K, N)
+    usable = (np.isfinite(sk) & (sk > vol_floor)).all(axis=1)
+    with np.errstate(divide="ignore", invalid="ignore"):
         inv = 1.0 / sk
         if target_portfolio_vol is None:
-            a = inv / inv.sum()                       # convex, Σα = 1
+            a = inv / inv.sum(axis=1, keepdims=True)                    # convex, Σα = 1
         else:
-            a = (1.0 / N) * float(target_portfolio_vol) * inv  # scale-each-to-target, eq-wt
-        for j, s in enumerate(names):
-            alphas[s][k] = a[j]
-    return alphas
+            a = (1.0 / N) * float(target_portfolio_vol) * inv          # scale-each-to-target, eq-wt
+    a = np.where(usable[:, None], a, 1.0 / N)
+    return {s: a[:, j].copy() for j, s in enumerate(names)}
 
 
 def dynamic_sleeve_alphas(
@@ -820,25 +859,28 @@ def dynamic_sleeve_alphas(
         if lam_r > 0.0:
             rho = {s: _monthly_held(rho[s], timestamps) for s in names}
 
-    alphas = {s: np.full(K, 1.0 / N, dtype=np.float64) for s in names}
     lam = float(tilt_strength)
     c = float(tilt_clip)
-    for k in range(K):
-        sk = np.array([sigma[s][k] for s in names], dtype=np.float64)
-        usable = np.isfinite(sk) & (sk > vol_floor)
-        if not usable.all():
-            continue  # σ warmup / degenerate → equal weights (== prior p), no tilt
+    if N == 0:
+        return {}
+    # Vectorized over bars (was a per-bar Python loop — measured 2026-09-30 as the dominant cost of a
+    # Crucible mining tick, which calls this twice per genome). Every step is the same element-wise
+    # op the loop applied to one row, and the row sum is the same contiguous-axis reduction, so α is
+    # bit-identical (tests/envs/test_combiner_vectorized_identity.py pins it against a verbatim copy
+    # of the loop). σ-warmup / degenerate rows keep the equal weight 1/N (== prior p), no tilt.
+    sk = _stack_rows(sigma, names, K)                                                # (K, N)
+    shk = _stack_rows(shat, names, K)
+    rhk = _stack_rows(rho, names, K)
+    usable = (np.isfinite(sk) & (sk > vol_floor)).all(axis=1)
+    with np.errstate(divide="ignore", invalid="ignore", over="ignore"):
         inv = 1.0 / sk                                  # convex inverse-vol prior (unnormalized)
-        shk = np.array([shat[s][k] for s in names], dtype=np.float64)
         tilt = np.exp(lam * np.clip(shk, -c, c))        # =1 where ŝ=0 (warmup/degenerate/λ=0)
-        rhk = np.array([rho[s][k] for s in names], dtype=np.float64)
         rhk = np.where(np.isfinite(rhk), np.clip(rhk, 0.0, 1.0), 0.0)   # NaN warmup → 0 (neutral)
         redund = np.exp(-lam_r * rhk)                   # ≤1; a sleeve collinear with others is down-weighted
         wk = inv * tilt * redund
-        a = wk / wk.sum()                               # convex, Σα = 1
-        for j, s in enumerate(names):
-            alphas[s][k] = a[j]
-    return alphas
+        a = wk / wk.sum(axis=1, keepdims=True)          # convex, Σα = 1
+    a = np.where(usable[:, None], a, 1.0 / N)
+    return {s: a[:, j].copy() for j, s in enumerate(names)}
 
 
 def combiner_alphas(
