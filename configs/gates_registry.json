@@ -218,9 +218,10 @@
       "reason": "initial registration 2026-09-30 (SharpOps ladder decision item 7): baseline of every gates file as committed; later edits need a re-registration citing a decision"
     },
     "configs/tailwind_v1.gates.yaml": {
-      "sha256": "1fe0a7cc1d602b5128fbdf6ab2bdcbec463e4ac1a7de4a519288c59f1287d3e1",
+      "sha256": "d3089076f40ce76df8ffb5145147c6c3c98f24d4e028b42bf21cc8c964874f0e",
       "registered_on": "2026-09-30",
-      "reason": "initial registration 2026-09-30 (SharpOps ladder decision item 7): baseline of every gates file as committed; later edits need a re-registration citing a decision"
+      "reason": "2026-09-30 operator-approved (chat): Tier-2 N1 DSR method adopted, N12 trial ledger added, dsr_n_trials 24->77 bracket [64,77,96], X1 re-certification BLOCK recorded as the binding record; docs/research/sharpops_ladder_decision_2026-09-30.md",
+      "previous_sha256": "1fe0a7cc1d602b5128fbdf6ab2bdcbec463e4ac1a7de4a519288c59f1287d3e1"
     },
     "configs/tailwind_v1_challenge.gates.yaml": {
       "sha256": "cb00e19d3b38f0759fac344c0e4757ebdc821181252e7d27cf66d0d9a41bcf38",

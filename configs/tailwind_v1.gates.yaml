@@ -62,10 +62,39 @@ gates:
 #   Breadth does NOT raise the honest Sharpe (confirms the 18-ETF was mildly favorably selected);
 #   the wider grid's trial dispersion offsets the extra diversification. Capital stays BLOCKED on
 #   BOTH universes; breadth is not the missing lever.
+# ⭐ 2026-09-30 OPERATOR-APPROVED record update (docs/research/sharpops_ladder_decision_2026-09-30.md):
+#   * DSR METHOD (Tier-2 N1) ADOPTED = the consistent rules: deflate the in-sample executor
+#     Sharpe once; pool = the 18 graded books combined with BAB, financed at the same borrow,
+#     over the certification window; N from the trial ledger below, never an n_eff discount.
+#   * N (Tier-2 N12 / T3-05 / T7-04) = the ledger's full count, 77, bracket [64, 77, 96]; the
+#     old N=24 ("18 + 3" = 21) had lost its derivation. N is a FLOOR (search not enumerated).
+#   * The BINDING record is now `x1_recertification` (the one pre-registered pass, prereg
+#     894fa9d2) = BLOCK. `correct_book_dsr` below is kept as the 2026-07-01 history.
 overfitting:
-  dsr_n_trials: 24                         # 18 momentum-grid books + 3 (3rd-sleeve/combine selection); 18-ETF book
-  dsr_n_trials_bracket: [21, 24, 31]       # un-enumerated search depth (18 momentum-only .. conservative incl. combine)
+  dsr_n_trials: 77                         # = trial_ledger.totals.full (was 24, derivation lost; T3-05)
+  dsr_n_trials_bracket: [64, 77, 96]       # strategy-only / full / full x 1.25 (unenumerated allowance)
   min_dsr: 0.95                            # P(true SR>0 | multiplicity, skew, kurt) must clear 95%
+  dsr_method: consistent_bldp_v1           # R1-R3 above; tailwind_x1_recertification.py implements it
+  x1_recertification:                      # docs/research/tailwind_x1_recertification_2026-09-30.md
+    on: '2026-09-30'
+    basis: executor lead 1, excess of 3m T-bill + 25 bp borrow, 2007-04-30..2026-05-29
+    executor_dsr_by_n: {'64': 0.887, '77': 0.881, '96': 0.874}
+    momentum_engine_dsr_n77: 0.765
+    research_basis_dsr_n77: 0.941          # diagnostic; clears only below N ~ 45
+    p_pass_wilson_lower: {mae_1.0: 0.425, mae_1.4: 0.348}   # declared kills, N10 disjoint walk
+    decision: BLOCK
+  trial_ledger:                            # N12; floors; sources in configs/tailwind_v1_x1.prereg.yaml
+    families:
+      F1_momentum_grid_18etf: {count: 18, date: '2026-06-03'}
+      F2_strengthen_variants_and_grid: {count: 13, date: '2026-06-03'}
+      F3_wide_32etf_books: {count: 20, date: '2026-07-01'}
+      F4_sleeve_candidates: {count: 8, date: '2026-06-12..2026-07-31'}
+      F5_sleeve_combiners: {count: 4, date: '2026-06-18..2026-06-26'}
+      F6_multispeed_blend: {count: 1, date: '2026-08-01'}
+      F7_execution_sizing_forks: {count: 4, date: '2026-08-28..2026-09-29'}
+      F8_dsr_method_variants: {count: 9, date: '2026-07-01..2026-09-29'}
+    totals: {strategy_only: 64, full: 77}
+    survivorship: hand-picked surviving ETF universes (T1-01); not deflated by N
   block_bootstrap_block_days: 21           # ~1-month blocks preserve momentum autocorrelation
   correct_book_dsr:                        # COMPUTED (audit_tailwind_book.py) — the binding block
     book: "momentum + BAB (defensive)"     # NOT momentum + rates-carry (that book is not traded)

@@ -40,7 +40,7 @@
 
 ## Left for the operator (not done by Claude)
 
-- **TAILWIND gates record (Tier-2 N1/N12).** The session's auto-mode safety check refused edits to `configs/tailwind_v1.gates.yaml`, which your original X1 instruction also reserved as operator-only. Nothing there was changed. Proposed edit:
+- **TAILWIND gates record (Tier-2 N1/N12): APPLIED 2026-09-30 on the operator's explicit instruction ("apply the TAILWIND gates record")**, re-registered in `configs/gates_registry.json`. Both TAILWIND configs pass `validate_config --stage wf`. It was first refused by the session's auto-mode safety check, because your original X1 instruction reserved it as operator-only. The edit as applied:
   - set `dsr_n_trials: 77` and `dsr_n_trials_bracket: [64, 77, 96]`;
   - add `dsr_method: consistent_bldp_v1`;
   - add an `x1_recertification` block (executor DSR 0.887 / 0.881 / 0.874; P(pass) Wilson-lower 0.425 / 0.348; decision BLOCK);

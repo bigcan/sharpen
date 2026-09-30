@@ -6,7 +6,7 @@ rates-carry (duration beta, EXCLUDED). Answers the deep-audit's binding question
 (`docs/research/tailwind_v1_deep_lifecycle_audit_2026-07-01.md`, P7-01/P7-06/P11-01/P11-02):
 
   Does the momentum+BAB book clear **Deflated-Sharpe >= 0.95 AND PBO <= 0.5** at the honest
-  pre-registered multiplicity (`tailwind_v1.gates.yaml` overfitting.dsr_n_trials = 24)?
+  pre-registered multiplicity (`tailwind_v1.gates.yaml` overfitting.dsr_n_trials; 24 until 2026-09-30, the trial ledger's 77 since)?
 
 BAB is a CRASH HEDGE, not a return premium (cont-96 convexity re-classification): its
 standalone subperiod Sharpe is crash-concentrated BY DESIGN, so the audit does NOT gate the
