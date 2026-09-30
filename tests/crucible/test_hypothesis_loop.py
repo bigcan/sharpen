@@ -98,8 +98,8 @@ def test_agent_view_exposes_no_score_columns(tmp_path) -> None:
     # ``semantic_hash`` (U4) is a dedup key: a hash of the commutative-canonical AST, derived from the
     # formula text alone. The U4 SCORE columns (rejection_class / implied_mde_at_test) are asserted
     # absent by the _FORBIDDEN check above and by tests/crucible/test_search_memory_u4.py.
-    assert set(TrialLedger.agent_view_columns()) == {"candidate_hash", "semantic_hash",
-                                                     "candidate_type", "family"}
+    assert set(TrialLedger.agent_view_columns()) == {"candidate_hash", "semantic_hash", "stat_hash",
+                                                     "candidate_type", "family"}  # v15.0: stat_hash = 3rd DEDUP key (formula text only)
 
 
 def test_proposal_context_carries_no_scores_even_with_scored_ledger(tmp_path) -> None:

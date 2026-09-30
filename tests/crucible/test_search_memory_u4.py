@@ -215,11 +215,13 @@ def test_readmit_parked_rebuilds_specs_and_refuses_un_preregistered_rows(tmp_pat
             candidate_hash="p1", crucible_version=_V, family="altdata",
             candidate_type="overlay", formula="rank(close)", spec_json='{"spec": 1}',
             economic_rationale="prior", proposal_ts="2026-01-01T00:00:00", verdict="LOGGED",
-            rejection_class=REJECTION_UNDERPOWERED, implied_mde_at_test=3.6))
+            rejection_class=REJECTION_UNDERPOWERED, implied_mde_at_test=3.6,
+            first_seen_run="tick-t-2026-01-01T00:00:00"))    # v15.0: re-admission is substrate-scoped
         led.record(TrialRecord(                              # offspring, NO spec_json ⇒ must be refused
             candidate_hash="o1", crucible_version=_V, family=None,
             candidate_type="cross_sectional", formula="rank(volume)", verdict="LOGGED",
-            rejection_class=REJECTION_UNDERPOWERED, implied_mde_at_test=3.6))
+            rejection_class=REJECTION_UNDERPOWERED, implied_mde_at_test=3.6,
+            first_seen_run="tick-t-2026-01-01T00:00:00"))
 
         power = SubstratePower(panel_T=4000, holdout_bars=1000, holdout_frac=0.25,
                               implied_mde_delta_sr=1.0, interp_mode="grid",
@@ -361,7 +363,9 @@ def test_every_holdout_adjudicated_rejection_carries_a_class(tmp_path: Path) -> 
     cfg, ek = load_generation_config("configs/signal_eval.gates.yaml")
     # Enough search pressure that offspring — which are NOT holdout-eligible under prereg_only —
     # crowd the top of `ranked`, i.e. the production shape in which the two sets came apart.
-    ek = {**ek, "pop_size": 24, "n_generations": 3}
+    # v15.0: force the offspring search — under corrected+prereg_only it is skipped by default, which
+    # would put every pre-registration in the hall of fame and leave the second ledger loop untested.
+    ek = {**ek, "pop_size": 24, "n_generations": 3, "search_offspring": True}
     cc = CorrectedConfig.from_yaml("configs/crucible_corrected_contract.gates.yaml")
     assert cc.offspring_policy == "prereg_only", "fixture must reproduce the production policy"
     sm = SearchMemoryConfig.from_yaml("configs/crucible_search_memory.gates.yaml")
@@ -418,7 +422,9 @@ def test_a_candidate_that_never_reached_the_holdout_stays_unclassified(tmp_path:
     from sharpen.signals.generation.config import load_generation_config
 
     cfg, ek = load_generation_config("configs/signal_eval.gates.yaml")
-    ek = {**ek, "pop_size": 24, "n_generations": 3}
+    # v15.0: force the offspring search — under corrected+prereg_only it is skipped by default, which
+    # would put every pre-registration in the hall of fame and leave the second ledger loop untested.
+    ek = {**ek, "pop_size": 24, "n_generations": 3, "search_offspring": True}
     cc = CorrectedConfig.from_yaml("configs/crucible_corrected_contract.gates.yaml")
     sm = SearchMemoryConfig.from_yaml("configs/crucible_search_memory.gates.yaml")
     panel = cal._noise_panel(1000, 12, seed=5, n_feature_slots=4)

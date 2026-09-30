@@ -135,10 +135,17 @@ def _render_context(context: ProposalContext) -> str:
     slot bar COUNTS, and a rotating entropy token."""
     slots = set(context.feature_slots())
     ohlcv = [t for t in context.available_terminals if t not in slots]
-    lines = [
-        f"Available OHLCV/derived terminals: {', '.join(ohlcv) or '(none)'}",
-        f"Available non-OHLCV feature slots (overlay-eligible only): {', '.join(sorted(slots)) or '(none)'}",
-    ]
+    per_name = slots & set(context.per_name_slots)
+    lines = [f"Available OHLCV/derived terminals: {', '.join(ohlcv) or '(none)'}"]
+    if per_name:
+        lines.append("Available BROADCAST feature slots (one value per bar; overlay-eligible only): "
+                     f"{', '.join(sorted(slots - per_name)) or '(none)'}")
+        lines.append("Available PER-NAME feature slots (a value per name per bar; eligible for a "
+                     "cross_sectional formula inside rank(...), or as an overlay on their "
+                     f"cross-sectional average): {', '.join(sorted(per_name))}")
+    else:
+        lines.append(f"Available non-OHLCV feature slots (overlay-eligible only): "
+                     f"{', '.join(sorted(slots)) or '(none)'}")
     if context.feature_slot_bars:
         depth = ", ".join(f"{name}({bars})" for name, bars in context.feature_slot_bars)
         lines.append("Feature-slot history depth (bars available per slot; prefer deeper slots — they "
@@ -266,7 +273,14 @@ class LlmProposer:
             return []
 
         out: list[HypothesisProposal] = []
+        if not isinstance(raw_items, list):               # v15.0: a dict/int payload used to raise
+            logger.warning("LlmProposer: proposals payload is %s, not a list — proposing nothing",
+                           type(raw_items).__name__)
+            return []
         for item in raw_items[: context.max_proposals]:
+            if not isinstance(item, dict):
+                logger.warning("LlmProposer: dropping non-object proposal %r", item)
+                continue
             try:
                 if any(f not in item for f in _REQUIRED_FIELDS):
                     raise KeyError("missing required field")

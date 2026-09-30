@@ -618,7 +618,18 @@ class OrchestratorStore:
             "SELECT state_json FROM fdr_state WHERE substrate_id = ?", (substrate_id,)).fetchone()
         if row is None:
             return OnlineFDR(alpha=alpha, w0=w0, alpha_floor=alpha_floor)
-        return OnlineFDR.from_json(json.loads(row["state_json"]))
+        acct = OnlineFDR.from_json(json.loads(row["state_json"]))
+        # v15.0: a persisted account keeps the (alpha, W0) it was opened with — the LORD++ guarantee is
+        # for ONE stream, so it must not silently switch. But an edit to the configured values must not
+        # pass unnoticed either (it changes the YAML hash, not the live account).
+        want_w0 = alpha / 2.0 if w0 is None else float(w0)
+        if abs(acct.alpha - float(alpha)) > 1e-12 or abs(float(acct.w0) - want_w0) > 1e-12:
+            import logging as _logging
+            _logging.getLogger("crucible.orchestrator").warning(
+                "substrate %s: persisted LORD++ account (alpha=%g, w0=%g) differs from the configured "
+                "(alpha=%g, w0=%g) — the persisted stream is kept; open a new account to change it",
+                substrate_id, acct.alpha, acct.w0, float(alpha), want_w0)
+        return acct
 
     def save_fdr(self, substrate_id: str, fdr: OnlineFDR) -> None:
         self._conn.execute(

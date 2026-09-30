@@ -95,9 +95,10 @@ def evaluate_signal(sig: "Signal", panel: Panel, gates: Gates,
                        max_ohlc_violations=gates.max_ohlc_violations)
     gross = cap = rob = orth = cpcv = None
     if hy.passed:
-        ns, es, ph = sig.spec.neutralization, sig.spec.expected_sign, gates.primary_horizon
+        ns = tuple(dict.fromkeys((*sig.spec.neutralization, *gates.neutralization)))
+        es, ph = sig.spec.expected_sign, gates.primary_horizon
         mn = gates.min_names_per_day
-        scores = compute_scores(sig, panel, ns)  # neutralize ONCE; reuse across tiers
+        scores = compute_scores(sig, panel, ns, winsor_pct=gates.winsor_pct)  # neutralize ONCE
         gross = tier1_gross_power(sig, panel, gates.horizons, primary_horizon=ph,
                                   neutralization=ns, expected_sign=es, scores=scores,
                                   min_names=mn)

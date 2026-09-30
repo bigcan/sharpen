@@ -528,7 +528,11 @@ def _build_substrate(args, cfg, ek, meta, sweep, sweep_hash) -> tuple[Substrate,
                     cohort_mc_kwargs=cohort_mc, cohort_gates_hash=cohort_ghash,
                     contract=args.contract, corrected_cfg=corrected_cfg,
                     corrected_gates_hash=corrected_ghash,
-                    search_memory_cfg=sm_cfg, search_memory_gates_hash=sm_ghash)
+                    search_memory_cfg=sm_cfg, search_memory_gates_hash=sm_ghash,
+                    # v15.0: the binding account's (alpha, W0) come from the corrected contract's own
+                    # `online_fdr` block — declared there, previously never read (code defaults ran).
+                    **({"fdr_alpha": corrected_cfg.fdr_alpha, "fdr_w0": corrected_cfg.fdr_w0}
+                       if corrected_cfg is not None else {}))
     return sub, catalog
 
 
@@ -705,6 +709,10 @@ def main() -> int:
                          "oversample x --max-proposals candidates before ranking. 1 = rank only what "
                          "would have been mined anyway (a pure reorder, no extra search).")
     ap.add_argument("--max-candidates", type=int, default=256, help="per-tick candidate cap (CR-7)")
+    ap.add_argument("--offspring-search", choices=("auto", "on", "off"), default="auto",
+                    help="evolved-offspring GP search: auto (default) = skip it exactly when offspring "
+                         "cannot be promoted (corrected contract + prereg_only; every pre-registered "
+                         "verdict is unchanged), on/off = force (crucible-v15.0)")
     ap.add_argument("--start-ts", default=None,
                     help="ISO timestamp base for reproduce/explicit replay only (CR-2/CR-8); nights step "
                          "+1d but are CAPPED at wall-clock now (never future-dated). DEFAULT (omitted): "
@@ -769,6 +777,9 @@ def main() -> int:
         return 1
 
     cfg, ek = load_generation_config(args.config)
+    # v15.0: `auto` lets evolve skip the offspring GP search exactly when no offspring can be promoted
+    # (corrected contract + offspring_policy prereg_only) — pre-registered verdicts are identical.
+    ek["search_offspring"] = {"auto": None, "on": True, "off": False}[args.offspring_search]
     meta = load_generation_meta(args.config)
     if not meta["enabled"] and not args.force:
         log.warning("generation.enabled is false in %s — no-op. Pass --force to run anyway.",

@@ -328,14 +328,20 @@ class RankedProposer:
         self.inner = inner
         self.ranker = ranker
         self.oversample = int(oversample)
+        # v15.0: whether the LAST batch was actually ranked. The ranker degrades a failed call to the
+        # identity order (fail-closed), but model_id — which the manifest stamps as agent_model_id —
+        # still claimed a Jev-ranked batch.
+        self.last_rank_ok: bool | None = None
 
     @property
     def model_id(self) -> str:
-        return f"ranked[{self.inner.model_id}]+{self.ranker.model_id}+os{self.oversample}"
+        base = f"ranked[{self.inner.model_id}]+{self.ranker.model_id}+os{self.oversample}"
+        return base + ("+identity-fallback" if self.last_rank_ok is False else "")
 
     def propose(self, context: ProposalContext) -> list[HypothesisProposal]:
         wide = dataclasses.replace(
             context, max_proposals=context.max_proposals * self.oversample)
         pool = self.inner.propose(wide)
         ranked = self.ranker.rank(pool, context)
+        self.last_rank_ok = bool(self.ranker.last_scores) or not pool
         return ranked[: context.max_proposals]

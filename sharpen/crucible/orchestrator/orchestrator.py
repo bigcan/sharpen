@@ -49,7 +49,7 @@ from ..lockbox.lockbox import (
 )
 from ..version import CRUCIBLE_VERSION, gates_hash
 from ...signals.features import Panel
-from ...signals.generation.grammar import available_terminals
+from ...signals.generation.grammar import available_terminals, per_name_slots
 from ...signals.spec import SignalSpec
 from .budget import TickBudget
 from .burst import route_burst
@@ -345,7 +345,8 @@ def _process_substrate(
         terminals, asset_classes=prepared.asset_classes, panel_n=prepared.panel.N,
         feature_slot_bars=_feature_slot_bars(prepared.panel),
         mechanism_nonce=_mechanism_nonce(tick_ts),
-        killed_scope=f"tick-{sub.substrate_id}-")
+        killed_scope=f"tick-{sub.substrate_id}-",
+        per_name_slots=per_name_slots(prepared.panel))
     fresh_specs = author.propose(context, proposal_ts=tick_ts)
     # --- U4 power-aware RE-ADMISSION: candidates parked as UNDERPOWERED whose original test ran at a
     # materially worse MDE than this substrate now has. Injected on the SCORER side (the orchestrator is
@@ -569,7 +570,8 @@ def _readmit_parked(sub: Substrate, prepared: PreparedSubstrate, author: Hypothe
     if cfg is None or not cfg.enabled or prepared.power is None:
         return []
     rows = sub.ledger.readmissible(current_mde=prepared.power.implied_mde_delta_sr, cfg=cfg,
-                                   limit=int(sub.max_readmissions))
+                                   limit=int(sub.max_readmissions),
+                                   run_prefix=f"tick-{sub.substrate_id}-")      # v15.0: this substrate
     out: list[PreRegisteredSpec] = []
     for r in rows:
         if not r["spec_json"]:
@@ -602,6 +604,9 @@ def _readmit_parked(sub: Substrate, prepared: PreparedSubstrate, author: Hypothe
         log.info("substrate %s: RE-ADMITTED %d parked candidates at MDE %.3f (min ratio %.2f)",
                  sub.substrate_id, len(out), prepared.power.implied_mde_delta_sr,
                  cfg.readmit_min_mde_ratio)
+        # v15.0: the attempt consumes the re-admission (see TrialLedger.mark_readmitted).
+        sub.ledger.mark_readmitted([pr.candidate_hash for pr in out],
+                                   prepared.power.implied_mde_delta_sr)
     return out
 
 

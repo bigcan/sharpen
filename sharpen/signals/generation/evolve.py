@@ -121,6 +121,8 @@ class GenerationReport:
     # part of the shipped contract's own decision rule, so these are adjudicated (charged, ledgered
     # SCORED_NOT_SELECTED) — unlike the corrected contract, whose train step is not a decision stage.
     train_rejected: list[str] = field(default_factory=list)
+    # v15.0 — whether the offspring GP search ran (False ⇒ only the seeds were scored; see ``evolve``).
+    offspring_searched: bool = True
 
 
 def _candidate_returns(formula: str, panel: Panel, *, hold_horizon: int, cost_bps: float,
@@ -389,6 +391,7 @@ def evolve(
     corrected_cfg: "CorrectedConfig | None" = None,
     lord_level: float | None = None,
     enforce_causality: bool = True,
+    search_offspring: "bool | None" = None,
 ) -> GenerationReport:
     """Evolve DSL alphas on the TRAIN split; re-validate PROMISING survivors on the held-out
     tail. ``base_returns``/``timestamps`` align to the train split's rows.
@@ -451,6 +454,18 @@ def evolve(
             lord_level = fresh_lord_level(corrected_cfg)
     elif corrected_cfg is not None or lord_level is not None:
         raise ValueError("corrected_cfg / lord_level are only meaningful with contract='corrected'")
+    # v15.0 — THE OFFSPRING SEARCH ONLY RUNS WHEN AN OFFSPRING COULD MATTER. Under the corrected contract
+    # with `offspring_policy: prereg_only` (the shipped default) an evolved offspring can never be
+    # promoted and charges nothing — it is file-drawer only — and each pre-registered seed's holdout
+    # decision depends only on (panel, base, its formula, the gates, the LORD++ level), never on what the
+    # search found. Yet the search was ~85% of a mining tick (profiled 2026-09-30: 8,376 genomes scored
+    # for 11 pre-registrations). `None` (auto) therefore scores the seeds only in exactly that case — every
+    # pre-registered verdict is identical, only the hall of fame / file drawer shrink to the seeds — and
+    # runs the full search otherwise (the shipped contract, or `offspring_policy: all`, where offspring
+    # ARE candidates). `True`/`False` force it either way.
+    if search_offspring is None:
+        search_offspring = not (is_corrected and corrected_cfg is not None
+                                and corrected_cfg.offspring_policy == "prereg_only")
     rng = np.random.default_rng(rng_seed)
     train, hold = _split(panel, holdout_frac, holdout_embargo)
     n_train = train.T
@@ -571,6 +586,13 @@ def evolve(
         if exempt:
             return Candidate(formula, _INFEASIBLE, res,
                              "pre-registered beyond search bounds (turnover/size): tested, never bred")
+        if not res.not_degenerate:
+            # v15.0: a degenerate-vol genome (F14-4 floor — e.g. a crossover that spliced a zero into a
+            # coefficient slot) can pass no gate, and its train "uplift" is the combiner's all-sleeve
+            # equal-weight fallback, not the genome (see fitness.augmented_book). The audit measured
+            # such genomes taking 2-4 of the 6 elite slots in 2 of 3 synthetic searches. Kept as a
+            # scored result (a pre-registration still reaches the holdout), never bred.
+            return Candidate(formula, _INFEASIBLE, res, "degenerate-vol (F14-4): scored, never bred")
         return Candidate(formula, res.fitness, res)
 
     for _gen in range(n_generations):
@@ -579,6 +601,8 @@ def evolve(
             f = to_formula(node)
             if f not in scored:
                 scored[f] = score(f, gen_n_eff)
+        if not search_offspring:
+            break                                         # v15.0: seeds scored; no offspring to breed
         ranked = sorted(scored.values(), key=lambda c: c.fitness, reverse=True)
         n_elite = max(2, int(pop_size * elite_frac))
         elites = [parse(c.formula) for c in ranked[:n_elite] if np.isfinite(c.fitness)]
@@ -720,6 +744,13 @@ def evolve(
             holdout_validation.append({"formula": c.formula, "holdout": "degenerate statistic",
                                        "contract": CONTRACT_CORRECTED, "n_bars": cr.n_bars})
             continue
+        if is_corrected and not (cr.cand_usable_frac > 0.0):
+            # v15.0: NEVER IN THE BOOK, NO DECISION. A candidate the combiner could not size on any
+            # evaluated bar (zero or sub-floor trailing vol throughout) leaves the augmented book equal
+            # to the base book, so z = 0 exactly by construction — no test was formed, only charged.
+            holdout_validation.append({"formula": c.formula, "holdout": "never sized (not in the book)",
+                                       "contract": CONTRACT_CORRECTED, "n_bars": cr.n_bars})
+            continue
         if is_corrected:
             passed = cr.passes_corrected
             # Same four keys the shipped path emits (the card/manifest layer reads them verbatim),
@@ -786,4 +817,4 @@ def evolve(
         gen_n_total=gen_n_total, gen_n_eff=final_n_eff,
         holdout_validation=holdout_validation, promising=promising, pbo=pbo,
         contract=contract, n_holdout_tested=len(decided), not_tested=not_tested,
-        train_rejected=train_rejected)
+        train_rejected=train_rejected, offspring_searched=bool(search_offspring))

@@ -224,3 +224,42 @@ def test_multi_night_tick_stamps_are_distinct() -> None:
     assert len(set(_tick_timestamps(None, 4))) == 4
     now = datetime.now(timezone.utc)
     assert len(set(_tick_timestamps((now - timedelta(days=1)).isoformat(), 5))) == 5
+
+
+# ------------------------------------------------------------------ U4 re-admission hygiene -------
+def _parked(led: TrialLedger, h: str, run: str, verdict: str = "SCORED_NOT_SELECTED") -> None:
+    from sharpen.crucible.ledger import TrialRecord
+    from sharpen.crucible.search_memory import REJECTION_UNDERPOWERED
+    led.record(TrialRecord(candidate_hash=h, crucible_version="t", family="altdata",
+                           candidate_type="overlay", formula=f"delta(macro:{h}, 20)",
+                           spec_json='{"spec": 1}', first_seen_run=run, verdict=verdict,
+                           rejection_class=REJECTION_UNDERPOWERED, implied_mde_at_test=3.0))
+
+
+def _sm_cfg():
+    from sharpen.crucible.search_memory import SearchMemoryConfig
+    return SearchMemoryConfig(enabled=True, decisive_mde_multiple=1.0, readmit_min_mde_ratio=1.25,
+                              semantic_dedup=True)
+
+
+def test_readmission_is_scoped_to_the_substrate(tmp_path) -> None:
+    led = TrialLedger(tmp_path / "l.db")
+    _parked(led, "a1", "tick-A-2026-01-01")
+    _parked(led, "b1", "tick-B-2026-01-01")
+    got = led.readmissible(current_mde=1.0, cfg=_sm_cfg(), run_prefix="tick-A-")
+    assert [r["candidate_hash"] for r in got] == ["a1"]
+
+
+def test_a_settled_row_is_never_readmitted(tmp_path) -> None:
+    led = TrialLedger(tmp_path / "l.db")
+    _parked(led, "p1", "tick-A-x", verdict="PROMISING")      # passed its re-test, class kept
+    assert led.readmissible(current_mde=1.0, cfg=_sm_cfg(), run_prefix="tick-A-") == []
+
+
+def test_a_readmission_is_consumed_by_the_attempt(tmp_path) -> None:
+    led = TrialLedger(tmp_path / "l.db")
+    _parked(led, "c1", "tick-A-x")
+    assert led.readmissible(current_mde=1.0, cfg=_sm_cfg(), run_prefix="tick-A-")
+    led.mark_readmitted(["c1"], 1.0)                          # re-test ran at MDE 1.0, no decision
+    assert led.readmissible(current_mde=1.0, cfg=_sm_cfg(), run_prefix="tick-A-") == []
+    assert led.readmissible(current_mde=0.7, cfg=_sm_cfg(), run_prefix="tick-A-")   # more power again

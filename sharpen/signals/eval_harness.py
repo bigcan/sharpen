@@ -22,8 +22,6 @@ from scipy.stats import rankdata, spearmanr
 from sharpen.crypto.eval.statistics import (
     deflated_sharpe_ratio,
     excess_kurtosis,
-    min_track_record_length,
-    probabilistic_sharpe_ratio,
     sharpe_ratio,
     skewness,
 )
@@ -89,7 +87,14 @@ def assert_causal(
     lo = max(1, panel.T // 4)
     if lo >= panel.T:
         return True, "panel too short to probe"
-    probes = sorted({int(x) for x in rng.integers(lo, panel.T, size=n_probes)})
+    # v15.0 — the probes used to come only from [T/4, T), so a leak confined to the WARM-UP (e.g. a
+    # trailing window back-filled with future values) was never probed: a 252-day momentum with .bfill()
+    # on its warm-up passed 0/60 times and turned a pure random walk into IC-IR +0.073. A quarter of the
+    # probes (at least one, when there is room) now fall in [1, T/4); the rest keep the old range.
+    n_early = max(1, n_probes // 4) if lo > 1 else 0
+    late = rng.integers(lo, panel.T, size=max(1, n_probes - n_early))
+    early = rng.integers(1, lo, size=n_early) if n_early else np.empty(0, dtype=np.int64)
+    probes = sorted({int(x) for x in late} | {int(x) for x in early})
     for t in probes:
         try:
             trunc = np.asarray(sig.compute(panel.truncated(t)), dtype=np.float64)
@@ -117,7 +122,13 @@ def tier0_hygiene(
 ) -> HygieneResult:
     """Gate a (signal, panel) pair: causal + OHLC-clean + sufficient coverage."""
     reasons: list[str] = []
-    causal, cmsg = assert_causal(sig, panel)
+    # v15.0 — 32 probes (was assert_causal's default 8), seeded from the signal's own content hash
+    # instead of 0 for every signal. A leak firing on a few rows (e.g. month-ends only) was caught 30% of
+    # the time with 8 probes and 80% with 32, and a fixed seed probed the SAME rows for every signal, so a
+    # pattern that missed them missed them everywhere. Per signal, not per genome: the cost is small.
+    spec = getattr(sig, "spec", None)
+    seed = int(spec.content_hash()[:8], 16) if spec is not None else 0
+    causal, cmsg = assert_causal(sig, panel, n_probes=32, seed=seed)
     if not causal:
         reasons.append(cmsg)
     v = ohlc_violations(panel)
@@ -396,9 +407,10 @@ def tier4_deflation(primary_results: dict[str, GrossPower],
             skew=skewness(series.tolist()),
             excess_kurt=excess_kurtosis(series.tolist()), n_trials=n_dsr,
             periods_per_year=1) if n_trials >= 2 else None)
-        psr = float(probabilistic_sharpe_ratio(series, sr_benchmark=0.0, periods_per_year=1))
-        mintrl = float(min_track_record_length(series, sr_benchmark=0.0, prob=0.95,
-                                               periods_per_year=1))
+        # v15.0: PSR / MinTRL at the HAC EFFECTIVE count, like the t-stat and the DSR (v14.0). On
+        # overlapping h-day labels the raw count put P(PSR >= 0.95) at 0.24 (h=5) / 0.31 (h=21) under
+        # the null (nominal 0.05) and understated MinTRL ~3.3x / ~13.5x. Report-only fields.
+        psr, mintrl = _psr_mintrl_hac(series, g.primary_horizon)
         q_bhy = float(qs_bhy[i])
         hlz_pass = bool(np.isfinite(hp.ic_tstat) and hp.ic_tstat >= hlz_t_min
                         and np.isfinite(q_bhy) and q_bhy <= q_max)
@@ -426,6 +438,32 @@ def tier4_deflation(primary_results: dict[str, GrossPower],
 
 # ----------------------------------------------------- Tier 2/3/5 helpers ----
 
+def _psr_mintrl_hac(series: np.ndarray, horizon: int, *, prob: float = 0.95) -> tuple[float, float]:
+    """PSR (vs a zero benchmark) and MinTRL in RAW days, both at the HAC effective count of an
+    ``horizon``-day overlapping daily IC series (Bailey & Lopez de Prado 2012, the bracket
+    ``B = 1 - g1*SR + (g2+2)/4*SR^2`` of ``statistics.probabilistic_sharpe_ratio``, with ``T-1`` replaced
+    by ``n_eff-1``). MinTRL is computed in effective observations and converted back to days by the
+    observed days-per-effective-observation ratio."""
+    from statistics import NormalDist
+
+    s = np.asarray(series, dtype=np.float64)
+    s = s[np.isfinite(s)]
+    n = s.size
+    if n < 3 or s.std(ddof=1) <= 0:
+        return 0.0, float("inf")
+    sr = float(s.mean() / s.std(ddof=1))
+    g1, g2 = skewness(s.tolist()), excess_kurtosis(s.tolist())
+    b = 1.0 - g1 * sr + (g2 + 2.0) / 4.0 * sr * sr
+    if not np.isfinite(b) or b <= 0:
+        return float("nan"), float("nan")
+    n_eff = float(hac_effective_n(s, max(0, int(horizon) - 1)))
+    psr = float(NormalDist().cdf(sr * np.sqrt(max(n_eff - 1.0, 1.0)) / np.sqrt(b)))
+    if sr <= 0:
+        return psr, float("inf")
+    mintrl_eff = 1.0 + b * (NormalDist().inv_cdf(prob) / sr) ** 2
+    return psr, float(mintrl_eff * (n / max(n_eff, 1.0)))
+
+
 def _ls_weights(eff_row: np.ndarray, active_row: np.ndarray, *, min_names: int = 10) -> np.ndarray:
     """Dollar-neutral, gross-normalized rank long-short weights for one day."""
     w = np.zeros(eff_row.shape[0])
@@ -449,12 +487,15 @@ def _ann_sharpe(returns: np.ndarray, periods_per_year: float) -> float:
     return float(sharpe_ratio(returns, periods_per_year=1) * (periods_per_year ** 0.5))
 
 
-def compute_scores(sig: "Signal", panel: Panel, neutralization: tuple[str, ...]) -> np.ndarray:
+def compute_scores(sig: "Signal", panel: Panel, neutralization: tuple[str, ...], *,
+                   winsor_pct: tuple[float, float] = (0.01, 0.99)) -> np.ndarray:
     """Raw signal -> neutralized cross-sectional scores. Computed ONCE per signal in
     ``evaluate_signal`` and reused across T1/T2/T3/T5 (neutralize is the per-day-lstsq
-    hot path; recomputing it per tier was the dominant cost after vectorizing IC)."""
+    hot path; recomputing it per tier was the dominant cost after vectorizing IC).
+    ``winsor_pct`` (v15.0) carries the gates' declared winsorization quantiles."""
     raw = np.asarray(sig.compute(panel), dtype=np.float64)
-    return neutralize(raw, panel, steps=neutralization) if neutralization else raw
+    return (neutralize(raw, panel, steps=neutralization, winsor_pct=winsor_pct)
+            if neutralization else raw)
 
 
 def _neutralized_eff(sig: "Signal", panel: Panel, neutralization: tuple[str, ...],

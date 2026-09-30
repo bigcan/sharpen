@@ -156,6 +156,31 @@ def test_nan_statistic_is_not_a_holdout_decision(calib, corr, monkeypatch) -> No
     assert all("holdout_passes" not in hv for hv in rep.holdout_validation)
 
 
+_ZERO = "(close * 0)"        # the shape a crossover leaves when it splices a zero into a coefficient slot
+
+
+def test_candidate_never_in_the_book_is_not_a_holdout_decision(calib, corr) -> None:
+    """A stream the combiner cannot size on any holdout bar leaves the augmented book EQUAL to the base
+    book: z = 0 exactly, p = 0.5 — recorded (and charged) as a holdout rejection before v15.0."""
+    dead = to_formula(parse(_ZERO))
+    live = to_formula(parse(FORMULAS[4]))
+    rep = _run_xs(calib, corr, [dead, live])
+    assert rep.n_holdout_tested == 1
+    assert [d["formula"] for d in rep.not_tested] == [dead]
+    assert "never sized" in rep.not_tested[0]["reason"]
+    assert not any("holdout_passes" in hv for hv in rep.holdout_validation if hv["formula"] == dead)
+
+
+def test_degenerate_genome_is_scored_but_never_bred(calib, corr) -> None:
+    """Its train "uplift" is the combiner's equal-weight fallback, not the genome (+0.33 on this
+    substrate), so it used to rank among the elites; it keeps its result but never breeds."""
+    dead = to_formula(parse(_ZERO))
+    rep = _run_xs(calib, corr, [dead, to_formula(parse(FORMULAS[4]))])
+    cand = next(c for c in rep.hall_of_fame if c.formula == dead)
+    assert cand.result is not None and not cand.result.not_degenerate
+    assert cand.fitness == float("-inf")
+
+
 # ------------------------------------------------------------------ exposure (market-beta) alignment
 def test_market_series_is_forward_aligned_with_book_returns() -> None:
     panel, _, _ = _substrate(t=700, n=12, seed=99)
@@ -250,3 +275,29 @@ def test_assert_causal_with_precomputed_full_is_the_same_check() -> None:
     leaky = Leaky()
     ok, _ = assert_causal(leaky, panel, full=leaky.compute(panel))
     assert not ok
+
+
+# ------------------------------------------------------------------ offspring search skip (v15.0)
+def test_skipping_the_offspring_search_leaves_every_prereg_decision_identical(calib, corr) -> None:
+    """Under corrected + prereg_only an offspring can never be promoted, so the search is skipped by
+    default (auto). The pre-registered seeds' holdout decisions — statistic, p-value, legs — must be
+    bit-identical to a run that did search."""
+    seeds = [to_formula(parse(FORMULAS[i])) for i in (3, 4, 6, 12)]
+    searched = _run_xs(calib, corr, seeds, n_generations=3, pop_size=12, search_offspring=True)
+    auto = _run_xs(calib, corr, seeds, n_generations=3, pop_size=12)
+    assert searched.offspring_searched and not auto.offspring_searched
+    assert {c.formula for c in auto.hall_of_fame} <= set(seeds)          # file drawer = the seeds
+    assert auto.gen_n_total == len(seeds) < searched.gen_n_total
+    key = lambda r: sorted((hv["formula"], repr(hv)) for hv in r.holdout_validation  # noqa: E731
+                           if hv["formula"] in seeds)
+    assert key(auto) == key(searched)
+    assert auto.n_holdout_tested == searched.n_holdout_tested == len(seeds)
+
+
+def test_shipped_contract_still_searches_by_default(calib) -> None:
+    panel, base, ts = _substrate()
+    ek = dict(calib.ek)
+    ek.update(pop_size=8, n_generations=2, ls_min_names=4, rng_seed=11)
+    rep = ev.evolve([to_formula(parse(FORMULAS[4]))], panel, base, ts, calib.fit_cfg,
+                    candidate_type="cross_sectional", contract=ev.CONTRACT_SHIPPED, **ek)
+    assert rep.offspring_searched and rep.gen_n_total > 1

@@ -381,14 +381,24 @@ def run_hypothesis_loop(
     # (cohort_prov stays {} → the cohort manifest fields keep their empty defaults). The provenance is
     # PINNED into the reproduce contract (not the non-gated `extra`) because cohort verdicts + the MC
     # p-value are decision-bearing. Caps at PROMISING (Tier-2 for capital). ------------------------
-    cohort_cards, cohort_prov = _evaluate_cohort_gate(
-        pool=(cohort_pool if cohort_pool is not None
-              else [(pr.candidate_hash, pr.formula, pr.spec.candidate_type) for pr in specs]),
-        panel=panel, base_returns=base_returns, timestamps=timestamps, cfg=cfg, ek=ek,
-        run_id=run_id, crucible_version=crucible_version, gates_hash=gates_hash,
-        proposal_ts=proposal_ts, data_snapshot_hash=data_snapshot_hash, cohort_cfg=cohort_cfg,
-        cohort_mc_kwargs=cohort_mc_kwargs, cohort_gates_hash=cohort_gates_hash,
-        base_components=base_components)
+    # v15.0: the cohort gate runs AFTER every per-candidate verdict above is committed to the ledger,
+    # but the online-FDR charges for those verdicts happen in the CALLER once this function returns. An
+    # exception here used to abort the tick in that window: verdicts written, LORD++ never charged, and
+    # the specs then deduped forever (a crash after tests ran left them uncharged — anti-conservative).
+    # The cohort is an optional, separate adjudication, so its failure is logged and the tick proceeds.
+    try:
+        cohort_cards, cohort_prov = _evaluate_cohort_gate(
+            pool=(cohort_pool if cohort_pool is not None
+                  else [(pr.candidate_hash, pr.formula, pr.spec.candidate_type) for pr in specs]),
+            panel=panel, base_returns=base_returns, timestamps=timestamps, cfg=cfg, ek=ek,
+            run_id=run_id, crucible_version=crucible_version, gates_hash=gates_hash,
+            proposal_ts=proposal_ts, data_snapshot_hash=data_snapshot_hash, cohort_cfg=cohort_cfg,
+            cohort_mc_kwargs=cohort_mc_kwargs, cohort_gates_hash=cohort_gates_hash,
+            base_components=base_components)
+    except Exception:                                  # noqa: BLE001 — see comment above
+        log.exception("cohort gate FAILED — no cohort verdict this tick; per-candidate verdicts stand "
+                      "and are charged normally")
+        cohort_cards, cohort_prov = [], {}
 
     n_after = ledger.count()
     manifest = RunManifest(
@@ -406,7 +416,10 @@ def run_hypothesis_loop(
         corrected_gates_hash=(corrected_gates_hash if contract == CONTRACT_CORRECTED else None),
         # U4: pin the search-memory gates ONLY when the search memory is actually active, so a run with
         # U4 detached keeps its pre-v10.0 manifest bytes (same rule as corrected_gates_hash above).
-        search_memory_gates_hash=(search_memory_gates_hash if search_memory_cfg is not None else None))
+        search_memory_gates_hash=(search_memory_gates_hash if search_memory_cfg is not None else None),
+        # v15.0: whether each candidate type's offspring GP search ran — part of what reproduce must
+        # re-derive (it sets the surfaced/file-drawer set), not decision-bearing for pre-registrations.
+        extra={"offspring_searched": {ct: bool(r.offspring_searched) for ct, r in reports.items()}})
 
     adjudicated_hashes = frozenset(
         pr.candidate_hash for pr in specs if (pr.spec.candidate_type, pr.formula) in adjudicated)
