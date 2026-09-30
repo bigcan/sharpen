@@ -52,10 +52,12 @@ gates:
 # 3rd-sleeve selection). Not consumed by validate_config or the paper soak.
 #
 # CORRECT-BOOK RESULT (R1, 2026-07-01, docs/research/tailwind_v1_R1_dsr_pbo_2026-07-01.md):
-#   18-ETF momentum+BAB: honest DSR(N=24) = 0.896 < 0.95 (curated basis 0.974); PBO = 0.0009.
+#   18-ETF momentum+BAB: honest DSR(N=24) = 0.896 < 0.95 (curated basis 0.974); PBO = 0.0009
+#   (⚠ RESTATED 2026-09-30, N9: a mean-metric artifact; the Sharpe-metric PBO is 0.5902).
 #   The swing factor is ENTIRELY the momentum sleeve's honest Sharpe (curated 0.601 clears,
 #   Fable-honest 0.389 fails); BAB is a clean uncorrelated diversifier that cannot lift a
-#   return-DSR alone. PBO≈0 ⇒ the momentum selection is NOT overfit.
+#   return-DSR alone. [RETRACTED 2026-09-30 (N9): "PBO≈0 ⇒ NOT overfit" read a gross-exposure
+#   artifact. On Sharpe, PBO 0.5902 > 0.50: no evidence the grid selection generalizes.]
 # BREADTH NO-GO (2026-07-01, docs/research/tailwind_v1_breadth_expansion_2026-07-01.md):
 #   Fable review item 2 tested — the FROZEN signal on a 32-instrument liquid cross-asset
 #   universe gives momentum Sharpe 0.563 (< 18-ETF 0.601) and combined DSR(N=23) = 0.920 < 0.95.
@@ -96,14 +98,56 @@ overfitting:
     totals: {strategy_only: 64, full: 77}
     survivorship: hand-picked surviving ETF universes (T1-01); not deflated by N
   block_bootstrap_block_days: 21           # ~1-month blocks preserve momentum autocorrelation
-  correct_book_dsr:                        # COMPUTED (audit_tailwind_book.py) — the binding block
+  correct_book_dsr:                        # 2026-07-01 HISTORY (the binding record is x1_recertification)
     book: "momentum + BAB (defensive)"     # NOT momentum + rates-carry (that book is not traded)
     honest_dsr_n24: 0.896                   # Fable-honest momentum haircut (0.389) → BLOCK
     curated_dsr_n24: 0.974                  # curated momentum (0.601) → clears; band-dependent
-    pbo_cscv: 0.0009                        # selection NOT overfit (max 0.50)
+    # ⚠ NOT EVIDENCE (Tier-2 N9 / T3-02): a MEAN-metric CSCV on books of unequal leverage; the
+    # most-levered book wins IS on scale alone. The restated Sharpe-metric PBO is below.
+    pbo_cscv_mean_metric_artifact: 0.0009
+    pbo_cscv_sharpe: 0.5902                 # RESTATED 2026-09-30 (N9): Sharpe metric, warm-up stripped to
+                                            # 2007-04-30, 18-book grid; > 0.50 = FAIL (padded 0.4915)
+    deployed_below_oos_median_frac: 0.0268  # the deployed book itself lands below the OOS median in 2.7%
+    wide_32etf_pbo_sharpe: 0.2863           # breadth grid restated (its "pbo 0.0" was the same artifact)
     wide_32etf_dsr_n23: 0.920               # breadth test — still BLOCK
     enforcing_script: scripts/research/audit_tailwind_book.py
     decision: BLOCK_multiplicity           # capital BLOCKED at honest multiplicity
+
+# ============================================================================
+# AUDIT-BOOK THRESHOLDS — read by scripts/research/audit_tailwind_book.py (Tier-2 N14)
+# ============================================================================
+# Moved out of the script unchanged on 2026-09-30 ("grep finds no numeric gate literal in the
+# enforcing scripts"). A missing key raises; there is no in-code default. Values unchanged: any
+# value change is an operator decision.
+audit_book:
+  bab_leak_gap_max: 0.10                   # |same-day - causal| BAB Sharpe; above => leak finding
+  bab_leak_gap_s1: 0.15                    # above this the leak finding is S1
+  max_corr_mom_bab_subperiod: 0.40         # worst-subperiod corr(momentum, BAB)
+  oos_start: '2018-01-01'                  # start of the combined-book OOS read
+  min_oos_sharpe: 0.30                     # combined OOS Sharpe floor
+  min_positive_subperiods: 3               # of the 4 subperiods
+  min_sharpe_harsh_cost: 0.40              # combined Sharpe at harsh 10 bp
+  legacy_honest_haircut_sharpe: 0.389      # the external out-of-universe figure (rejected method, N1)
+  dsr_s1_below: 0.50                       # a DSR below this is an S1 finding
+  subperiods_source: {file: configs/tailwind_v1_stage4.gates.yaml, key: stage4_recent_oos.subperiods}
+  pbo:
+    max_pbo: 0.50                          # P(IS-best below OOS median); above => selection overfit
+    n_splits: 16
+    metric: sharpe                         # leverage-invariant (N9); "mean" was the artifact
+    strip_warmup: deployed_live            # from the deployed book's first live day = the research active
+                                           # start X1 certifies on (N9; reproduces the Tier-2's 0.5902)
+
+# Recorded reference values the recompute scripts reproduce or quote (N14: out of the code).
+# Each carries the N it was recorded at, so a change of dsr_n_trials cannot break reproduction.
+recorded_references:
+  n_trials: 24                             # the N every value below was recorded at
+  research_honest_dsr: 0.896
+  research_curated_dsr: 0.9744
+  executor_dsr_prefix_lead0: 0.871
+  wide_32etf_momentum_sharpe: 0.563        # breadth_expansion.json
+  repro_tol: 0.002
+  executor_vol_per_unit_max_gross: 0.0334  # docs/research/tailwind_sizing_reconciliation_2026-08-01.md
+  momentum_18etf_net_sharpe: 0.601         # results/xsec_momentum/results.json (breadth baseline)
 
 # ============================================================================
 # PAPER-SOAK GATES — PRE-REGISTERED (commitment device; frozen while outcome unknown)

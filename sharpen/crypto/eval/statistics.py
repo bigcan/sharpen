@@ -296,7 +296,23 @@ def deflated_sharpe_ratio(
     }
 
 
-def probability_of_backtest_overfitting(perf, *, n_splits: int = 16) -> dict | None:
+def strip_leading_warmup(perf):
+    """Drop the leading rows before EVERY config is live: the latest, over columns, of each
+    column's first finite non-zero row. Zero-padded warm-ups are not performance, and CSCV
+    blocks drawn from them rank configs on how long they sat flat (TAILWIND Tier-2 T3-02).
+    Returns ``(trimmed, n_dropped)``; raises if some column never goes live."""
+    import numpy as np
+
+    M = np.asarray(perf, dtype=np.float64)
+    live = np.isfinite(M) & (M != 0.0)
+    if not live.any(axis=0).all():
+        raise ValueError("a config is never live (all zero / non-finite)")
+    r0 = int(live.argmax(axis=0).max())
+    return M[r0:], r0
+
+
+def probability_of_backtest_overfitting(perf, *, n_splits: int = 16, metric: str = "mean",
+                                        track: int | None = None) -> dict | None:
     """Combinatorially-Symmetric Cross-Validation **Probability of Backtest Overfitting** (PBO,
     Bailey, Borwein, López de Prado & Zhu 2017) — the canonical best-of-N selection-overfit control
     that the deflated Sharpe does NOT estimate: P(the IN-SAMPLE-best config underperforms the
@@ -311,35 +327,66 @@ def probability_of_backtest_overfitting(perf, *, n_splits: int = 16) -> dict | N
     ``λ = ln(ω/(1−ω))``. ``PBO = mean(λ < 0)`` — the fraction of splits where the IS-winner lands
     BELOW the OOS median. A higher-is-better mean-performance metric per block (separable, fast).
 
-    Returns ``{"pbo", "n_combos", "n_strategies", "logit_mean"}`` or ``None`` when degenerate
-    (``N<2``, ``n_splits<2`` or odd, ``T<n_splits``, or no usable split). ``pbo → 0.5`` for a
-    skill-free population (the IS-winner is random OOS); ``pbo → 0`` when a genuinely-superior config
-    is consistently best IS and OOS.
+    Returns ``{"pbo", "n_combos", "n_strategies", "logit_mean", "metric"}`` or ``None`` when
+    degenerate (``N<2``, ``n_splits<2`` or odd, ``T<n_splits``, or no usable split). ``pbo → 0.5``
+    for a skill-free population (the IS-winner is random OOS); ``pbo → 0`` when a genuinely-superior
+    config is consistently best IS and OOS.
+
+    ``metric``: ``"mean"`` (default; unchanged, so Crucible verdicts are byte-stable under CRU-1)
+    ranks by the mean return, which is NOT leverage-invariant: on books of unequal vol the most
+    levered wins IS on scale alone (TAILWIND's recorded PBO 0.0009 was that artifact, Tier-2 T3-02).
+    ``"sharpe"`` ranks by the Sharpe ratio of the pooled IS (resp. OOS) rows, computed from per-block
+    sufficient statistics, so scaling any config by c > 0 leaves the PBO unchanged. Use it for any
+    grid of books whose leverage differs.
+
+    ``track``: a column index (e.g. the deployed config). Adds ``tracked_below_median_frac``, the
+    fraction of splits in which THAT config lands below the OOS median, and ``tracked_is_best_frac``.
     """
     import numpy as np
     from itertools import combinations
 
+    if metric not in ("mean", "sharpe"):
+        raise ValueError(f"metric must be 'mean' or 'sharpe', got {metric!r}")
     M = np.asarray(perf, dtype=np.float64)
     if M.ndim != 2:
         raise ValueError("perf must be a (T, N) matrix")
     T, N = M.shape
     if N < 2 or n_splits < 2 or n_splits % 2 != 0 or T < n_splits:
         return None
+    if track is not None and not 0 <= track < N:
+        raise ValueError(f"track={track} outside [0, {N})")
     bounds = np.linspace(0, T, n_splits + 1).astype(int)
     block_perf = np.full((n_splits, N), np.nan, dtype=np.float64)   # per-block per-config mean
+    blk_n = np.zeros((n_splits, N))                                 # sufficient stats (sharpe)
+    blk_s = np.zeros((n_splits, N))
+    blk_q = np.zeros((n_splits, N))
     for i in range(n_splits):
         blk = M[bounds[i]:bounds[i + 1]]
         with np.errstate(invalid="ignore"):
             block_perf[i] = np.nanmean(blk, axis=0) if blk.size else np.nan
+        fin = np.isfinite(blk)
+        z = np.where(fin, blk, 0.0)
+        blk_n[i], blk_s[i], blk_q[i] = fin.sum(axis=0), z.sum(axis=0), (z * z).sum(axis=0)
+
+    def _agg(mask):
+        if metric == "mean":
+            with np.errstate(invalid="ignore"):
+                return np.nanmean(block_perf[mask], axis=0)
+        n, s, q = blk_n[mask].sum(axis=0), blk_s[mask].sum(axis=0), blk_q[mask].sum(axis=0)
+        with np.errstate(invalid="ignore", divide="ignore"):
+            mu = s / n
+            var = (q - n * mu * mu) / (n - 1)
+            sr = mu / np.sqrt(var)
+        return np.where((n > 1) & (var > 0), sr, np.nan)
 
     logits: list[float] = []
     below = 0
+    t_below = t_best = 0
     for combo in combinations(range(n_splits), n_splits // 2):
         is_mask = np.zeros(n_splits, dtype=bool)
         is_mask[list(combo)] = True
-        with np.errstate(invalid="ignore"):
-            r_is = np.nanmean(block_perf[is_mask], axis=0)
-            r_oos = np.nanmean(block_perf[~is_mask], axis=0)
+        r_is = _agg(is_mask)
+        r_oos = _agg(~is_mask)
         finite_oos = np.isfinite(r_oos)
         if not np.isfinite(r_is).any() or int(finite_oos.sum()) < 2:
             continue
@@ -354,14 +401,23 @@ def probability_of_backtest_overfitting(perf, *, n_splits: int = 16) -> dict | N
         logits.append(lam)
         if lam < 0.0:
             below += 1
+        if track is not None and finite_oos[track]:
+            t_rank = float((r_oos[finite_oos] < r_oos[track]).sum())
+            t_below += int((t_rank + 1.0) / (n_fin + 1.0) < 0.5)
+            t_best += int(n_star == track)
     if not logits:
         return None
-    return {
+    out = {
         "pbo": float(below / len(logits)),
         "n_combos": int(len(logits)),
         "n_strategies": int(N),
         "logit_mean": float(sum(logits) / len(logits)),
+        "metric": metric,
     }
+    if track is not None:
+        out["tracked_below_median_frac"] = float(t_below / len(logits))
+        out["tracked_is_best_frac"] = float(t_best / len(logits))
+    return out
 
 
 def block_bootstrap_sharpe_ci(

@@ -90,10 +90,23 @@ from sharpen.signals._ic import effective_n_trials  # noqa: E402
 ANN = 252                       # == xsec_momentum_falsification.ANN (asserted in _m)
 GATES = ROOT / "configs" / "tailwind_v1.gates.yaml"
 CHALLENGE_CFG = ROOT / "configs" / "tailwind_v1_challenge.yaml"
-EXTERNAL_HAIRCUT = 0.389        # the value audit_tailwind_book.py:178 hard-codes
-REPO_BREADTH_SHARPE = 0.563     # breadth_expansion.json: wide-32 momentum pooled Sharpe
-RECORDED = {"research_honest": 0.896, "research_curated": 0.9744, "executor": 0.871}
-REPRO_TOL = 0.002
+
+
+
+@functools.cache
+def REF() -> dict:
+    """Recorded references and the legacy haircut, from the gates file (Tier-2 N14: no literal
+    in code). Each recorded DSR carries the N it was recorded at (`n_trials`), so the
+    reproduction rows run at THAT N even after `overfitting.dsr_n_trials` moved (24 -> 77)."""
+    g = _yaml.safe_load(GATES.read_text(encoding="utf-8"))
+    r = g["recorded_references"]
+    return {"n_trials": int(r["n_trials"]),
+            "external_haircut": float(g["audit_book"]["legacy_honest_haircut_sharpe"]),
+            "repo_breadth_sharpe": float(r["wide_32etf_momentum_sharpe"]),
+            "recorded": {"research_honest": float(r["research_honest_dsr"]),
+                         "research_curated": float(r["research_curated_dsr"]),
+                         "executor": float(r["executor_dsr_prefix_lead0"])},
+            "repro_tol": float(r["repro_tol"])}
 GAMMA_E = 0.5772156649015329
 BORROW_BPS = (0.0, 25.0, 50.0)  # 0 = Tier-2 T-bill-only row; 25 = declared; 50 = 2026-09-18 check
 
@@ -250,11 +263,13 @@ def research_basis(n_decl: int, ns: list[int]) -> tuple[dict, dict]:
         cal_report[name] = {"n_star": round(c["n_star"], 1), "sigma_cs_x_e(N)/true_null_max": {
             f"N={n:.4g}": round(estimator_ratio(c, n), 3) for n in (n_pool, n_decl, neff, n_scaled)}}
 
-    hair_389 = _haircut(m_al, d_al, EXTERNAL_HAIRCUT)
+    ref = REF()
+    n_rec = ref["n_trials"]                                   # recorded rows: the recorded N
+    hair_389 = _haircut(m_al, d_al, ref["external_haircut"])
     v = {
-        "V0a_recorded_honest": _dsr(hair_389, pool_mom, n_decl),
-        "V0b_recorded_curated": _dsr(combined, pool_mom, n_decl),
-        "V1_haircut563_only": _dsr(_haircut(m_al, d_al, REPO_BREADTH_SHARPE), pool_mom, n_decl),
+        "V0a_recorded_honest": _dsr(hair_389, pool_mom, n_rec),
+        "V0b_recorded_curated": _dsr(combined, pool_mom, n_rec),
+        "V1_haircut563_only": _dsr(_haircut(m_al, d_al, ref["repo_breadth_sharpe"]), pool_mom, n_rec),
         "V1_haircut389_psr_no_deflation": {"psr": _psr(hair_389),
                                             "observed_sr_ann": round(mom.sharpe(hair_389), 4)},
         "PRIMARY_R1_R2_declaredN": _dsr(combined, pool_comb, n_decl),
@@ -336,7 +351,7 @@ def executor_basis(n_decl: int, ns: list[int], rb: dict) -> dict:
         pp = ter.recompute_p_pass(exec_net)
         out[label] = {
             "execution_stamp": execution_stamp(c_cfg),
-            "E0_recorded_method": _dsr(exec_net, rb["pool_mom"], n_decl),
+            "E0_recorded_method": _dsr(exec_net, rb["pool_mom"], REF()["n_trials"]),
             "PRIMARY_matched_pool_declaredN": _dsr(exec_net, rb["pool_comb"], n_decl),
             "PRIMARY_bracket": {str(n): _dsr(exec_net, rb["pool_comb"], n) for n in ns},
             "REJECTED_fail_open": {"pool_scaled_by_executor_ratio":
@@ -440,11 +455,11 @@ def main() -> dict:
     _, curve_manifest = _cash_curve()
 
     repro = {
-        "research_honest": (rv["V0a_recorded_honest"]["dsr"], RECORDED["research_honest"]),
-        "research_curated": (rv["V0b_recorded_curated"]["dsr"], RECORDED["research_curated"]),
-        "executor": (ev["prefix_lead0"]["E0_recorded_method"]["dsr"], RECORDED["executor"]),
+        "research_honest": (rv["V0a_recorded_honest"]["dsr"], REF()["recorded"]["research_honest"]),
+        "research_curated": (rv["V0b_recorded_curated"]["dsr"], REF()["recorded"]["research_curated"]),
+        "executor": (ev["prefix_lead0"]["E0_recorded_method"]["dsr"], REF()["recorded"]["executor"]),
     }
-    repro_ok = {k: abs(a - b) <= REPRO_TOL for k, (a, b) in repro.items()}
+    repro_ok = {k: abs(a - b) <= REF()["repro_tol"] for k, (a, b) in repro.items()}
     r_br = [d["dsr"] for d in rv["PRIMARY_bracket"].values()]
     pre, fix = ev["prefix_lead0"], ev["fixed_lead1"]
     e_br = [d["dsr"] for d in fix["PRIMARY_bracket"].values()]

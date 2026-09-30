@@ -35,6 +35,7 @@ import json
 import logging
 import os
 import sys
+from pathlib import Path
 from typing import Optional
 
 import pandas as pd
@@ -50,10 +51,19 @@ logging.basicConfig(
 logger = logging.getLogger("ftmo_compliance")
 
 # ---------------------------------------------------------------------------
-# Compliance thresholds
+# Compliance thresholds: from a gates file, never in code (Tier-2 N14). The one file that
+# declares both is the Stage-4 gates file SharpOps names for this report.
 # ---------------------------------------------------------------------------
-MIN_ACTIVE_DAYS = 4
-MAX_SINGLE_DAY_SHARE = 0.50
+DEFAULT_GATES = Path(__file__).resolve().parents[1] / "configs" / "tailwind_v1_stage4.gates.yaml"
+
+
+def load_thresholds(gates_path: Path = DEFAULT_GATES) -> tuple[int, float]:
+    """``(min_active_days, max_single_day_share)`` from ``stage4_recent_oos.compliance``.
+    Fails closed: a missing file or key raises."""
+    import yaml
+
+    c = yaml.safe_load(Path(gates_path).read_text(encoding="utf-8"))["stage4_recent_oos"]["compliance"]
+    return int(c["ftmo_min_active_days"]), float(c["ftmo_max_day_share"])
 
 # ---------------------------------------------------------------------------
 # Column-name tolerance
@@ -243,14 +253,14 @@ def compute_consistency(daily_profit: dict) -> tuple[Optional[float], Optional[s
     return float(share), winning_day
 
 
-def build_report(df: pd.DataFrame) -> dict:
+def build_report(df: pd.DataFrame, *, min_active_days: int, max_single_day_share: float) -> dict:
     active_days, daily_profit, mode = compute_active_days_and_daily_pnl(df)
     share, winning_day = compute_consistency(daily_profit)
 
-    min_days_ok = active_days >= MIN_ACTIVE_DAYS
+    min_days_ok = active_days >= min_active_days
     # If consistency is undefined (no positive profit), treat as FAIL for a
     # prop-firm challenge (strategy must be net-positive to pass Phase 1).
-    consistency_ok = share is not None and share <= MAX_SINGLE_DAY_SHARE
+    consistency_ok = share is not None and share <= max_single_day_share
 
     # np.float → python float for json safety
     total_profit = float(sum(daily_profit.values())) if daily_profit else 0.0
@@ -258,12 +268,12 @@ def build_report(df: pd.DataFrame) -> dict:
     return {
         "mode": mode,
         "active_days": active_days,
-        "min_active_days_required": MIN_ACTIVE_DAYS,
+        "min_active_days_required": min_active_days,
         "min_days_ok": bool(min_days_ok),
         "daily_profit": daily_profit,
         "total_profit": total_profit,
         "max_single_day_share": share,
-        "max_single_day_threshold": MAX_SINGLE_DAY_SHARE,
+        "max_single_day_threshold": max_single_day_share,
         "winning_day": winning_day,
         "consistency_ok": bool(consistency_ok),
         "overall_pass": bool(min_days_ok and consistency_ok),
@@ -285,7 +295,10 @@ def main() -> int:
         type=str,
         help="Local parquet or CSV with trade log / equity curve",
     )
+    parser.add_argument("--gates", type=Path, default=DEFAULT_GATES,
+                        help="gates file with stage4_recent_oos.compliance thresholds")
     args = parser.parse_args()
+    min_days, max_share = load_thresholds(args.gates)
 
     try:
         if args.artifact_path:
@@ -298,7 +311,7 @@ def main() -> int:
         return 1
 
     try:
-        report = build_report(df)
+        report = build_report(df, min_active_days=min_days, max_single_day_share=max_share)
     except Exception as e:
         logger.error("Failed to compute report: %s", e)
         print(json.dumps({"error": str(e), "overall_pass": False}, indent=2))

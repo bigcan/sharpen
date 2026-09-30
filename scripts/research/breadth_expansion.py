@@ -94,7 +94,18 @@ def _combined_dsr_pbo(n_trials, min_dsr, block_days, bracket_N, label):
     books = mom.build_books(*(lambda c: (c, c.pct_change(), c["SPY"].pct_change()))(
         mom.get_prices()[[t for t in mom.ALL_TICKERS if t in mom.get_prices().columns]]))
     grid_df = pd.DataFrame({b: bk["_net_standard"] for b, bk in books.items()}).dropna(how="any")
-    pbo = probability_of_backtest_overfitting(grid_df.to_numpy(dtype=float), n_splits=16)
+    # Tier-2 N9 / N14: Sharpe metric, deployed-book warm-up strip, thresholds from the gates file
+    # (the "pbo 0.0" this used to record was the same mean-metric gross-exposure artifact).
+    PB = _yaml.safe_load((ROOT / "configs" / "tailwind_v1.gates.yaml").read_text(
+        encoding="utf-8"))["audit_book"]["pbo"]
+    if PB["strip_warmup"] not in ("deployed_live", "none"):
+        raise ValueError(f"breadth_expansion supports strip_warmup deployed_live|none, got {PB['strip_warmup']!r}")
+    perf = grid_df.to_numpy(dtype=float)
+    deployed = list(grid_df.columns).index("TSMOM_pooled_monthly")
+    r0 = int((perf[:, deployed] != 0).argmax()) if PB["strip_warmup"] == "deployed_live" else 0
+    pbo = probability_of_backtest_overfitting(perf[r0:], n_splits=int(PB["n_splits"]),
+                                              metric=str(PB["metric"]), track=deployed)
+    max_pbo = float(PB["max_pbo"])
 
     return {
         "label": label,
@@ -115,7 +126,10 @@ def _combined_dsr_pbo(n_trials, min_dsr, block_days, bracket_N, label):
                                  {k: (round(v, 4) if isinstance(v, float) else v)
                                   for k, v in boot.items()}),
         "pbo": (None if pbo is None else round(float(pbo["pbo"]), 4)),
-        "pbo_pass": bool(pbo is not None and pbo["pbo"] <= 0.50),
+        "pbo_metric": str(PB["metric"]), "pbo_strip_warmup": str(PB["strip_warmup"]),
+        "deployed_below_oos_median_frac": (None if pbo is None else round(pbo["tracked_below_median_frac"], 4)),
+        "max_pbo": max_pbo,
+        "pbo_pass": bool(pbo is not None and pbo["pbo"] <= max_pbo),
     }
 
 
@@ -148,7 +162,9 @@ def main():
         "verdict": {},
     }
     # Verdict: did breadth RAISE the honest momentum Sharpe, and does the combined clear DSR?
-    raised = wide["momentum_pooled_net_sharpe"] >= 0.601
+    base_sr = float(_yaml.safe_load((ROOT / "configs" / "tailwind_v1.gates.yaml").read_text(
+        encoding="utf-8"))["recorded_references"]["momentum_18etf_net_sharpe"])      # N14
+    raised = wide["momentum_pooled_net_sharpe"] >= base_sr
     payload["verdict"] = {
         "breadth_raised_momentum_sharpe": bool(raised),
         "wide_momentum_sharpe": wide["momentum_pooled_net_sharpe"],
@@ -178,7 +194,7 @@ def main():
     print(f"  combined Sharpe: {wide['combined_sharpe']}   OOS-2018: {wide['combined_oos_2018']}")
     print(f"  DSR(N={n_trials_wide}) = {wide['dsr_at_n_trials']}  (min {min_dsr})  "
           f"bracket {wide['dsr_bracket']}")
-    print(f"  PBO = {wide['pbo']}  (max 0.50)")
+    print(f"  PBO = {wide['pbo']}  (max {wide['max_pbo']}, {wide['pbo_metric']})")
     print("-" * 78)
     v = payload["verdict"]
     print(f"breadth raised momentum Sharpe? {v['breadth_raised_momentum_sharpe']}")

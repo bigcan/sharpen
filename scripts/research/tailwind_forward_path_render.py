@@ -476,7 +476,7 @@ def main() -> dict:
     risk = gates["paper_soak"]["risk"]
     hard = cg["firm_hard_limits"]
 
-    target_vol = float(cg["sizing"]["effective_vol_ann"])          # 0.15
+    target_vol = float(cg["sizing"]["effective_vol_ann"])          # 0.10 (v2)
     dd_kill = float(risk["max_drawdown_kill_pct"]) / 100.0          # 0.08
     daily_halt = float(risk["daily_loss_halt_pct"]) / 100.0         # 0.04
     max_gross_gate = float(risk["max_gross_exposure"])              # 4.7
@@ -485,7 +485,7 @@ def main() -> dict:
     target_step1 = float(hard["profit_target_step1_pct"]) / 100.0   # 0.10
     min_days = int(hard["min_trading_days"])
     daily_budget = float(cg["daily_breach_budget"])                 # 0.10
-    p_pass_expected = float(cg["p_pass_expected"]["ftmo_step1"])    # 0.711
+    p_pass_expected = float(cg["p_pass_expected"]["ftmo_step1"])    # 0.746 (v2)
     min_p_pass = float(cg["min_p_pass_step1"])                      # 0.65
 
     # Render thresholds — all from the gates file, none authored here.
@@ -543,14 +543,16 @@ def main() -> dict:
     declared_mult = float(cfg["prop_firm"]["vol_multiplier"])
     implied_vol = native_vol * declared_mult
     needed_mult = target_vol / native_vol
+    a2_tol = float(fpr["a2_vol_tolerance"])        # N14: from the gates file; missing -> KeyError
     out["checks"]["A2_vol_multiplier_consistency"] = {
         "declared_vol_multiplier": declared_mult,
         "declared_effective_vol_ann": target_vol,
         "book_native_ann_vol": round(native_vol, 4),
         "implied_vol_at_declared_multiplier": round(implied_vol, 4),
         "multiplier_needed_for_declared_vol": round(needed_mult, 3),
-        "consistent": bool(abs(implied_vol - target_vol) < 0.005),
-        "pass": bool(abs(implied_vol - target_vol) < 0.005),
+        "consistent": bool(abs(implied_vol - target_vol) < a2_tol),
+        "pass": bool(abs(implied_vol - target_vol) < a2_tol),
+        "tolerance": a2_tol,
         "note": (
             "The simulator normalised the book to 10% vol FIRST, so its '1.5x' meant 1.5 x 10% = "
             "15%. The config instead claims the 1.5x is realised by scaling env levers on the "
@@ -568,7 +570,11 @@ def main() -> dict:
     out["checks"]["B_rendered_path"] = {
         "full_sample_vol_targeting": stats_full,
         "causal_trailing_vol_targeting": stats_causal,
-        "vol_matches_15pct": bool(abs(stats_full["realised_ann_vol_pct"] - 15.0) < 0.1),
+        # Was a hardcoded 15% (the rejected v1 sizing): compare with the DECLARED target vol,
+        # tolerance from the gates file (N14). Descriptive; the check is not gated.
+        "vol_matches_target": bool(abs(stats_full["realised_ann_vol_pct"] - target_vol * 100)
+                                   < float(fpr["render_vol_tolerance_pp"])),
+        "target_vol_pct": round(target_vol * 100, 2),
         "full_path_max_dd_inside_internal_kill": bool(dd_ok),
         "pass": True,   # descriptive; the binding read is check C
         "gated": False,
@@ -579,7 +585,8 @@ def main() -> dict:
 
     # ---- CHECK 3: needless-termination (THE gate question) ----
     print("[4/5] rolling the challenge across every historical start date (2 rule sets) ...")
-    policy = SizingPolicy(vol_multiplier=1.0)   # vol already in the series
+    policy = SizingPolicy(vol_multiplier=1.0,   # vol already in the series
+                          intraday_mae_mult=float(cg["intraday_mae_mult"]))   # N14: gates, not a default
     firm_rules = FirmRules(name="FTMO_step1_firm", profit_target=target_step1,
                            max_total_dd=firm_dd, daily_loss_limit=firm_daily,
                            max_days=None, min_trading_days=min_days, dd_mode=hard["dd_mode"])

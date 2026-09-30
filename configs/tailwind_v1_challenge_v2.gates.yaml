@@ -17,7 +17,7 @@
 #   * Own-capital tailwind_v1.gates.yaml BLOCKS on DSR >= 0.95 (honest DSR 0.896 < 0.95).
 #     That is the OWN-CAPITAL bar — it certifies a standalone edge worth your own money.
 #   * For the CHALLENGE, DSR is INFORMATIONAL, not blocking. A real ~0.73-Sharpe,
-#     uncorrelated, PBO~=0 book that sits just under the own-capital DSR bar is still a
+#     uncorrelated book (PBO~=0 RETRACTED 2026-09-30: Sharpe-metric PBO 0.5902) that sits just under the own-capital DSR bar is still a
 #     fit-for-purpose prop vehicle (small-operator reframe). The binding pre-attempt gate
 #     is the simulator P(pass) + a Tier-2 audit + operator go-ahead.
 #   * Unlike own-capital, the CHALLENGE risk kills are NOT uncalibrated placeholders: the
@@ -86,6 +86,8 @@ challenge_pass_gate:
     two_phase_per_attempt: 0.65      # 0.746 x 0.870 = 0.649 (was 0.60 at 1.5x)
   min_p_pass_step1: 0.65             # go/no-go floor. NOTE: 0.746 now clears it by 0.096
                                      # where the 1.5x 0.711 cleared by 0.061.
+  intraday_mae_mult: 1.0             # intraday-MAE proxy for the daily-loss check (N14: was the library
+                                     # default); X1 also reports 1.4 (configs/tailwind_v1_x1.prereg.yaml)
   daily_breach_budget: 0.10          # frontier daily-breach at 1.0x is 0.03 (was 0.090 at
                                      # 1.5x); alarm if a render exceeds this budget
   # Provenance note: the simulator's velotrade_step2 cell peaks with bank=0.05 rather than
@@ -131,6 +133,9 @@ forward_path_render:
   # 10% stays wired: most windows behind it, best P(pass) point estimate, already rendered.
   max_needless_share: 0.05           # >5% of otherwise-winning challenges thrown away ⇒ buffer too tight
   render_horizon_days: 756           # 3y cap per challenge window (no-deadline firms need a finite render)
+  a2_vol_tolerance: 0.005            # |implied - declared| effective vol for check A2 (N14: was in code)
+  render_vol_tolerance_pp: 0.1       # rendered-path vol vs the declared target, in pp (N14: was in code,
+                                     # and compared with a stale 15% target)
   # Effective annualised vol grid for the remedy sweep the derivation names ("else widen, or
   # lower vol to 1.0x"). Scored on max_needless_share + daily_breach_budget + max_gross_exposure.
   vol_frontier_grid: [0.06, 0.08, 0.10, 0.12, 0.15, 0.20]
@@ -211,13 +216,14 @@ paper_soak:
 # OVERFITTING / DSR — INFORMATIONAL in challenge mode (NOT blocking)
 # ============================================================================
 # Recorded for provenance. In CHALLENGE mode a sub-0.95 DSR does NOT block: the prop
-# objective is P(pass), and the honest ~0.73-Sharpe / PBO~=0 book is a valid prop vehicle
+# objective is P(pass), and the honest ~0.73-Sharpe book (PBO~=0 RETRACTED 2026-09-30, N9) is a valid prop vehicle
 # even though it does not clear the own-capital 0.95 DSR bar (R1 + breadth NO-GO both closed
 # the cheap routes to raise it). See configs/tailwind_v1.gates.yaml for the BLOCKING
 # own-capital version enforced by scripts/research/audit_tailwind_book.py.
 overfitting_informational:
   honest_dsr_n24: 0.896              # < 0.95: blocks OWN-CAPITAL, not the challenge
-  pbo_cscv: 0.0009                   # selection NOT overfit
+  pbo_cscv_mean_metric_artifact: 0.0009   # NOT evidence (N9 / T3-02): mean-metric gross-exposure artifact
+  pbo_cscv_sharpe: 0.5902            # restated 2026-09-30 (configs/tailwind_v1.gates.yaml); > 0.50
   note: "DSR is the own-capital gate; the challenge gate is challenge_pass_gate.min_p_pass_step1."
 
 provenance:

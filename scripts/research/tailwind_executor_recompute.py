@@ -82,6 +82,11 @@ CHALLENGE_CFG = ROOT / "configs" / "tailwind_v1_challenge.yaml"
 OWN_CAPITAL_GATES = ROOT / "configs" / "tailwind_v1.gates.yaml"
 
 
+def _refs() -> dict:
+    """Recorded references (Tier-2 N14: no literal in code). A missing key raises."""
+    return _yaml.safe_load(OWN_CAPITAL_GATES.read_text(encoding="utf-8"))["recorded_references"]
+
+
 def sh(s: pd.Series) -> float:
     return round(mom.sharpe(s.dropna()), 3)
 
@@ -154,7 +159,7 @@ def recompute_dsr(exec_net: pd.Series) -> dict:
         "min_dsr": min_dsr,
         "pass": dsr_pass,
         "research_basis_for_comparison": {
-            "honest_dsr_n24": 0.896,
+            "honest_dsr_n24": float(_refs()["research_honest_dsr"]),
             "source": "results/tailwind_v1/audit_tailwind.json (F_deflated_sharpe)",
         },
         "note": ("Same 18-book momentum selection surface + n_trials as the research-basis "
@@ -193,7 +198,8 @@ def recompute_p_pass(exec_net: pd.Series) -> dict:
     max_needless = float(fpr["max_needless_share"])
     max_days = int(fpr["render_horizon_days"])
 
-    policy = SizingPolicy(vol_multiplier=1.0)  # already sized -- no rescale
+    policy = SizingPolicy(vol_multiplier=1.0,  # already sized -- no rescale
+                          intraday_mae_mult=float(cg["intraday_mae_mult"]))   # N14: gates, not a default
     firm_rules = FirmRules(name="FTMO_step1_firm", profit_target=target_step1,
                            max_total_dd=firm_dd, daily_loss_limit=firm_daily,
                            max_days=None, min_trading_days=min_days, dd_mode=hard["dd_mode"])
@@ -263,7 +269,8 @@ def main() -> dict:
             "sharpe": round(mom.sharpe(exec_net), 4),
             "max_dd_pct": round(max_dd * 100, 2),
             "predicted_vol_pct_from_sizing_reconciliation": round(
-                0.0334 * float(cfg["env"]["max_gross_exposure"]) * 100, 2),
+                float(_refs()["executor_vol_per_unit_max_gross"])
+                * float(cfg["env"]["max_gross_exposure"]) * 100, 2),
             "env_levers": {k: cfg["env"][k] for k in
                           ("target_vol_asset", "lev_cap", "max_gross_exposure",
                            "taker_fee", "slippage_base_bps", "slippage_impact_bps")},
@@ -287,7 +294,7 @@ def main() -> dict:
         "p_pass_challenge_gate_pass": pp_pass,
         "dsr_executor_vs_research": {
             "executor": out["dsr_executor_path"]["dsr_at_pre_registered_N"],
-            "research_honest": 0.896,
+            "research_honest": float(_refs()["research_honest_dsr"]),
         },
         "p_pass_executor_vs_research": {
             "executor_disjoint": out["p_pass_executor_path"]["p_pass_disjoint_windows"],
@@ -313,7 +320,7 @@ def main() -> dict:
     d = out["dsr_executor_path"]
     print(f"DSR(N={d['n_trials_pre_registered']}) executor = {d['dsr_at_pre_registered_N']}  "
           f"(min {d['min_dsr']})  -> {'PASS' if d['pass'] else 'FAIL'}   "
-          f"[research-basis honest DSR = 0.896]")
+          f"[research-basis honest DSR = {_refs()['research_honest_dsr']}]")
     p = out["p_pass_executor_path"]
     print(f"P(pass) executor disjoint = {p['p_pass_disjoint_windows']}  "
           f"(n={p['n_disjoint_challenges']}, gate {p['min_p_pass_gate']})  "

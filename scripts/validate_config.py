@@ -601,7 +601,7 @@ def check_hpo(cfg: dict, r: ValidationResult) -> None:
             r.fail(f"hpo.{key} missing — HPO budget must be declared (SharpOps §4)")
 
     # Training-health hard-fail thresholds expected in gates
-    gates = cfg.get("gates", {})
+    gates = _load_ensemble_gates_overlay(cfg)   # inline + ensemble.gates_file (T7-P09)
     health_keys = ("entropy_floor", "q_div_max", "action_sat_max")
     missing = [k for k in health_keys if k not in gates]
     if missing:
@@ -968,6 +968,10 @@ def check_drift_safemode_gates(cfg: dict, r: ValidationResult) -> None:
     See the SharpOps v2.2 drift/safe-mode decision note.
     """
     prop_firm = _is_prop_firm(cfg)
+    # INLINE on purpose: the live engine (live_engine.py:123-124, :286) and the forward runner
+    # (forward_runner.py:574, :594) read config["gates"] INLINE; an ensemble.gates_file key is
+    # invisible to them, so the overlay here would PASS a control the runtime lacks (T7-P09
+    # applies only to checks whose consumers merge the overlay: hpo, l1-multiseed, wf).
     gates = cfg.get("gates", {}) or {}
     drift_gates = gates.get("drift") or {}
     safe_gates = gates.get("safe_mode") or {}
@@ -1072,7 +1076,7 @@ def check_drift_safemode_gates(cfg: dict, r: ValidationResult) -> None:
 
 
 def check_l1_multiseed(cfg: dict, r: ValidationResult) -> None:
-    gates = cfg.get("gates", {})
+    gates = _load_ensemble_gates_overlay(cfg)   # inline + ensemble.gates_file (T7-P09)
     seeds = gates.get("l1_seeds", 5)
     if seeds < 3:
         r.fail(f"gates.l1_seeds={seeds} — must be >=3 (SharpOps §4 stage 2)")
@@ -1115,7 +1119,10 @@ def _load_ensemble_gates_overlay(cfg: dict) -> dict:
         return gates
     gates_path = Path(gates_file)
     if not gates_path.is_absolute():
-        gates_path = Path.cwd() / gates_path
+        # cwd first (unchanged behaviour), then the repo root (Tier-2 T7-P09): cwd-only silently
+        # dropped the overlay whenever the validator ran from any other directory.
+        cwd_path = Path.cwd() / gates_path
+        gates_path = cwd_path if cwd_path.exists() else Path(__file__).resolve().parents[1] / gates_path
     if not gates_path.exists():
         return gates
     try:
@@ -1528,7 +1535,7 @@ def _check_stress_gate_keys(gates: dict, r: ValidationResult) -> None:
 
 
 def check_wf(cfg: dict, r: ValidationResult) -> None:
-    gates = cfg.get("gates", {})
+    gates = _load_ensemble_gates_overlay(cfg)   # inline + ensemble.gates_file (T7-P09)
     if gates.get("wf_windows", 4) < 4:
         r.fail("gates.wf_windows < 4 (SharpOps §4 stage 3)")
     # X3 stress gate keys live in the standalone <ws>_ensemble.gates.yaml overlay
@@ -2058,6 +2065,10 @@ def check_v23_agreement_decay_gates(cfg: dict, r: ValidationResult) -> None:
     if rule not in _CONSENSUS_RULES:
         return  # non-consensus rule → tracker is no-op; gates are advisory
 
+    # INLINE on purpose: the live engine (live_engine.py:123-124, :286) and the forward runner
+    # (forward_runner.py:574, :594) read config["gates"] INLINE; an ensemble.gates_file key is
+    # invisible to them, so the overlay here would PASS a control the runtime lacks (T7-P09
+    # applies only to checks whose consumers merge the overlay: hpo, l1-multiseed, wf).
     gates = cfg.get("gates", {}) or {}
     drift_gates = gates.get("drift") or {}
 
@@ -2128,6 +2139,10 @@ def check_retrain_gate(cfg: dict, r: ValidationResult) -> None:
     prop_firm = _is_prop_firm(cfg)
 
     # --- gates.retrain.cost_drift_* (consumed by the live CostDriftTracker) ---
+    # INLINE on purpose: the live engine (live_engine.py:123-124, :286) and the forward runner
+    # (forward_runner.py:574, :594) read config["gates"] INLINE; an ensemble.gates_file key is
+    # invisible to them, so the overlay here would PASS a control the runtime lacks (T7-P09
+    # applies only to checks whose consumers merge the overlay: hpo, l1-multiseed, wf).
     retrain_gates = (cfg.get("gates", {}) or {}).get("retrain") or {}
     if not retrain_gates:
         if prop_firm:
