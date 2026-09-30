@@ -99,6 +99,8 @@ def _altdata_max_slot_corr(path: "str | Path | None") -> float | None:
         cfg = yaml.safe_load(fh) or {}
     v = (cfg.get("altdata") or {}).get("max_slot_corr")
     return None if v is None else float(v)
+
+
 def _altdata_min_bar_coverage(path: "str | Path | None") -> float | None:
     """Read ``altdata.min_bar_coverage`` (v15.0) from the alt-data ingest gates — same rules as
     :func:`_altdata_max_slot_corr` (missing file/key ⇒ ``None`` ⇒ no floor)."""

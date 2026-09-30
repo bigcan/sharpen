@@ -60,7 +60,7 @@ synthetic tick. Every fix ships with tripwire tests that were run against the pr
 | 17 | MEDIUM | Per-name data only ever pre-registered as overlays | Cross-sectional templates for (T,N) slots; LLM told which slots are per-name | `test_v15_0_proposer` |
 | 18 | MEDIUM | Tier-0 tripwire never probed the warm-up; fixed seed; 8 probes | A quarter of probes in [1, T/4); 32 probes seeded per signal in the scorecard | `test_funnel_v15` |
 | 19 | MEDIUM | Bootstrap p could be 0 (BH/BHY q = 0 at any m); PSR/MinTRL on raw N | Add-one p; HAC effective N | `test_funnel_v15` |
-| 20 | MEDIUM | Scout had no coverage floor | `altdata.min_bar_coverage: 0.50` | `test_v15_0_scout` |
+| 20 | MEDIUM | Scout had no coverage floor: FRED's ~3-year ICE window, TAIFEX's 3-4 days and a cold T86 store became slots, each spawning LORD++-charged specs | Floor wired (`altdata.min_bar_coverage`), OFF until the operator sets it (see below) | `test_v15_0_scout` |
 | 21 | MEDIUM | Reproduce did not pin the decision function; FDR alpha/W0 declared but unconsumed; `--nights` stamps collided | Pins added; YAML wired + drift warning; distinct stamps | `test_v15_0_robustness`, `test_v15_0_fixes` |
 | 22 | MEDIUM | Governance Tier-2 command could not run (invalid scope, RL pillars) | Survivor pillars C1-C7, valid scope, context | `test_governance` |
 | 23 | MEDIUM | GP bred from degenerate-vol genomes: their train uplift is the combiner's EW-fallback artifact (+0.33 on the synthetic substrate); they took 2-4 of the 6 elite slots in 2 of 3 searches | Scored (a pre-registration still reaches the holdout), never bred | `test_generation_evolve_v15` |
@@ -98,6 +98,10 @@ synthetic tick. Every fix ships with tripwire tests that were run against the pr
   definitely-untested pre-registrations and the LORD++ phantom charges; `--apply-reopen` /
   `--apply-fdr-refund` repair them (backups written). On `results/crucible_orchestrator/real`: 40 rows,
   us_equity 98 phantoms. The declared-(-1) LLM specs need no repair — their folded formulas hash anew.
+* **Scout coverage floor.** Set `altdata.min_bar_coverage` in `configs/crucible_altdata.gates.yaml` (proposed
+  0.50: a series must exist for at least half the panel, i.e. before the holdout starts) and re-register the
+  file (`python scripts/sharpops_gate_registry.py --register configs/crucible_altdata.gates.yaml --reason ...`).
+  Unset, the scout keeps its pre-v15 behaviour.
 * **Shared ledgers.** The ledger's primary key is the formula, so a formula tested on one substrate cannot
   be tested on another in the same store; run one `--out` per substrate.
 * **Execution convention.** Every book enters at the close the signal reads; a one-bar lag halves the
@@ -120,7 +124,7 @@ verdict and no routing; degenerate genomes are no longer bred).
 ## CRU-1 / CRU-2
 
 No frozen gates file changed (signal_eval `519158fa1450`, taiwan_signal_eval `22a18172be1a`,
-taiwan_smallcap_altdata `0ccf6dd584f0`); the only gates edit is a new key in the unfrozen
-`crucible_altdata.gates.yaml`. The agent view gains one column, `stat_hash` — a hash of the formula text and
+taiwan_smallcap_altdata `0ccf6dd584f0`), and no gates file changed at all: every entry in
+`configs/gates_registry.json` still matches. The agent view gains one column, `stat_hash` — a hash of the formula text and
 its declared type, no score. MAJOR bump: v15.0 changes which hypotheses are tested, the gate's degenerate
 handling, two data inputs and the LORD++ accounting.

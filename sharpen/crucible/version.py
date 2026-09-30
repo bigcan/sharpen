@@ -786,9 +786,10 @@ from pathlib import Path
 #     bootstrap p; PSR/MinTRL at the HAC effective count; the Tier-0 tripwire probes the warm-up (32
 #     probes, seeded per signal, in the scorecard).
 #   * ROBUSTNESS. us_equity cache loads again (pre-rename pickles); T86 / TAIFEX stores stop losing
-#     history; scout coverage floor (altdata.min_bar_coverage); reproduce pins the decision function;
-#     distinct --nights stamps; the claude -p proposer is sandboxed (no tools, no MCP, empty cwd); the
-#     governance Tier-2 command is runnable (survivor pillars C1-C7).
+#     history; scout coverage floor wired (altdata.min_bar_coverage — off until the operator sets it);
+#     reproduce pins the decision function; distinct --nights stamps; the claude -p proposer is
+#     sandboxed (no tools, no MCP, empty cwd); the governance Tier-2 command is runnable (survivor
+#     pillars C1-C7).
 #   * EFFICIENCY (verdict-preserving). Vectorized combiner (bit-identical); the offspring GP search is
 #     skipped when no offspring can be promoted (every pre-registered decision bit-identical; manifest
 #     extra.offspring_searched records it; synthetic tick 550 s -> 31 s, 178 s with the search on);

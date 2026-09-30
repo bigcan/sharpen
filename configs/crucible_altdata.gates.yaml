@@ -32,15 +32,3 @@ altdata:
   # vs 0.020 differenced), so a level-based rule would reject distinct-but-trending series — the
   # over-rejection direction, which silently costs breadth.
   max_slot_corr: 0.90
-  # Minimum share of the bar calendar a series must cover (bars on/after its FIRST public release)
-  # to become a feature slot (crucible-v15.0). `null` = no floor (pre-v15 behaviour).
-  #
-  # WHY (deep audit 2026-09-30): the scout rejected only an EMPTY series, so it accepted
-  # BAMLH0A0HYM2 with ~3 years of history on the 2007-2026 us_equity clock (FRED now serves only
-  # recent ICE data), TAIFEX with 3-4 days, and a cold T86 store with ~90 days. Each accepted slot
-  # spawns one pre-registered spec per overlay template and EVERY spec charges a LORD++ test, so a
-  # near-empty series spends online-FDR wealth on tests with almost no power and takes
-  # max_proposals slots from series with real history. 0.50 = the series must exist for at least
-  # half the panel, i.e. well before the holdout (the last 25%) begins. Governs which hypotheses
-  # EXIST; no verdict function reads it.
-  min_bar_coverage: 0.50
