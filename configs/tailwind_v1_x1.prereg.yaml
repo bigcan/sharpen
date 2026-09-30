@@ -1,0 +1,175 @@
+# ============================================================================
+# TAILWIND-v1 — X1 re-certification PRE-REGISTRATION (Tier-2 2026-09-29, roadmap X1)
+# ============================================================================
+# Consumed by scripts/research/tailwind_x1_recertification.py. Explained in
+# docs/research/tailwind_x1_preregistration_2026-09-29.md.
+#
+# FROZEN before the pass. The pass runs ONCE, with exactly these settings. The script refuses
+# `--mode certify` unless `status: registered`, `operator_signoff` is filled, and this file
+# is committed and clean.
+#
+# THRESHOLDS ARE NOT AUTHORED HERE. Each gate names the gates file and key it reads, so this
+# file cannot drift from the gates files (CLAUDE.md: no numeric gate outside a gates file).
+# This file holds the METHOD: window, N rule, pool, estimand, kills, MAE and the ledger.
+strategy: tailwind-v1
+roadmap_item: X1
+drafted_on: '2026-09-29'
+status: registered                 # draft -> registered (only after the operator signs off)
+operator_signoff:
+  by: operator (decisions delegated to Claude in chat, "make the best decisions for me")
+  on: '2026-09-30'
+  decisions:
+    a: adopt the consistent-DSR rules R1-R3 (in-sample once; matched financed pool; ledger N, no n_eff)
+    b: primary N = ledger full count 77; bracket [64, 77, 96] must all clear; N=24 and n* diagnostic
+    c: borrow 25 bp primary; 0 and 50 bp sensitivity
+    d: declared terminal kills (8% static DD / 4% daily) gate; firm-only diagnostic
+    e: disjoint walk, TIMEOUTs censored (N10), Wilson lower at MAE 1.0 AND 1.4
+    M1: kept as a declared limitation (X1 specifies the challenge_simulator MAE semantics)
+    M2: gate unchanged; horizon-cap-TIMEOUT-as-fail P(pass) and Wilson lower reported as a diagnostic
+
+# ---------------------------------------------------------------------------------------
+# DATA PINS (N6). sha256 of each file. A mismatch aborts before any number is computed.
+# ---------------------------------------------------------------------------------------
+pins:
+  results/tailwind_v1/ohlcv_daily.parquet: 00d7a7a4c602d097a9d23761999e55d7543a7bc9060822ffbc920523f2e24e06
+  results/xsec_momentum/prices_daily.parquet: 285e43eae0b698816c572afd70937fc40701b66df0e14bad7b1b8c4e1a5fbf06
+  results/tailwind_v1/prices_wide_daily.parquet: 3b973bfa1528de3212d5447e0cf6c4a1cebe122988c1fcfcf844d48391932ed9
+  results/carry_falsification/yahoo_curve.parquet: fba844af8741119fc1e4777e607cd9fcde3516ddc467a1a9e2ad4d5149ad2227
+manifest_content_sha256_16: cbdca6fc55773b87   # results/tailwind_v1/ohlcv_daily.manifest.json (reconstructed 2026-09-29)
+snapshot_dir: results/_snapshots/tailwind_x1_2026-09-29T2246
+
+# ---------------------------------------------------------------------------------------
+# BASIS
+# ---------------------------------------------------------------------------------------
+basis:
+  config: configs/tailwind_v1_challenge.yaml     # the book X2 proved forward-realizable
+  decision_lead_bars: 1                           # asserted equal to the config's value
+  momentum_engine_drop_sleeves: [defensive]       # momentum-engine run = same config minus BAB
+window:                                           # N6: [research active start, research_cutoff]
+  start: '2007-04-30'                             # first non-zero day of the research book (verified in-run)
+  end: '2026-05-29'                               # last bar of the frozen research panel (verified in-run)
+
+financing:
+  model: tbill                                    # asserted equal to the config's block
+  tenor: 3m
+  day_count: 360
+  borrow_bps_primary: 25                          # decision (c)
+  borrow_bps_sensitivity: [0, 50]                 # reported, not gating
+
+# ---------------------------------------------------------------------------------------
+# DSR (decisions a, b)
+# ---------------------------------------------------------------------------------------
+dsr:
+  min_dsr_source: {file: configs/tailwind_v1.gates.yaml, key: overfitting.min_dsr}
+  rules:
+    R1: deflate the in-sample executor Sharpe once; no haircut, no second deflation
+    R2: pool = the 18 graded momentum books, each risk-parity-combined with BAB, every leg
+        financed on its own held weights at the SAME borrow as the observed series; pool
+        Sharpes measured over the certification window
+    R3: N from the trial ledger below; never discounted by n_eff
+  n_primary: ledger_full_count                    # = ledger.totals.full (77)
+  n_bracket: [64, 77, 96]                          # strategy-only / full / full x 1.25 (unenumerated allowance)
+  n_diagnostic: [24]                               # the legacy declared N, reported only
+  n_star: diagnostic                               # null_max_calibration on the pool's window correlation
+  pass_rule: DSR >= min_dsr at EVERY N in n_bracket
+
+momentum_engine:                                  # reported beside the combined DSR; not gating
+  observed: executor run with momentum_engine_drop_sleeves removed, same financing
+  pool: the 18 graded momentum books, financed, momentum-only, over the window
+  n_rule: same as dsr
+
+# ---------------------------------------------------------------------------------------
+# P(pass) (decisions d, e; N10 hygiene)
+# ---------------------------------------------------------------------------------------
+p_pass:
+  min_p_pass_source: {file: configs/tailwind_v1_challenge_v2.gates.yaml, key: challenge_pass_gate.min_p_pass_step1}
+  kills_source: {file: configs/tailwind_v1_challenge_v2.gates.yaml, keys: [paper_soak.risk.max_drawdown_kill_pct, paper_soak.risk.daily_loss_halt_pct]}
+  firm_source: {file: configs/tailwind_v1_challenge_v2.gates.yaml, key: challenge_pass_gate.firm_hard_limits}
+  horizon_source: {file: configs/tailwind_v1_challenge_v2.gates.yaml, key: forward_path_render.render_horizon_days}
+  series: executor excess returns at borrow_bps_primary, over the window, no rescale
+  gate_policy: declared_kills            # decision (d): kills terminal; firm-only is a diagnostic
+  estimator: disjoint_walk               # start at window start; next window starts the session after resolution
+  cursor: gate_run                       # the walk advances on the run being scored (firm-only walks its own)
+  censoring: right_censor_timeouts       # horizon-cap and data-end TIMEOUTs leave the denominator; counts reported
+  intraday_mae_mult: [1.0, 1.4]          # decision (e): passed to challenge_simulator.SizingPolicy
+  mae_scope: daily-loss check only (challenge_simulator semantics); the DD floor is close-based
+  interval: wilson                       # two-sided 95%, z from NormalDist
+  confidence: 0.95
+  binding_statistic: wilson_lower
+  pass_rule: wilson_lower >= min_p_pass at EVERY intraday_mae_mult
+  daily_breach: same walk; reported against the budget below (not gating)
+  daily_breach_budget_source: {file: configs/tailwind_v1_challenge_v2.gates.yaml, key: challenge_pass_gate.daily_breach_budget}
+
+# ---------------------------------------------------------------------------------------
+# EXECUTOR-BASIS RENDER AND STAGE-4 (reported, not gating for X1)
+# ---------------------------------------------------------------------------------------
+render:
+  series: executor excess returns at borrow_bps_primary, over the window
+  checks: [path_stats, needless_termination, daily_breach, gross_exposure]
+  needless_estimator: the N10 walk led by the firm rules with the kills paired on each slice
+                      (share = firm passes the kills end / firm passes), at each intraday_mae_mult
+  daily_breach_estimator: the declared-kills walk (same estimator as P(pass))
+  needless_source: {file: configs/tailwind_v1_challenge_v2.gates.yaml, key: forward_path_render.max_needless_share}
+  gross_sources: [{file: configs/tailwind_v1_challenge_v2.gates.yaml, key: paper_soak.risk.max_gross_exposure},
+                  {file: configs/tailwind_v1_challenge.yaml, key: env.max_gross_exposure}]
+  vol_frontier: not_run                  # sizing is frozen; re-sizing on the result would be tuning
+stage4:
+  gates: configs/tailwind_v1_stage4.gates.yaml     # cutoff, buckets, power floor, subperiods
+  series: executor excess returns at borrow_bps_primary, FULL cache span (OOS = after the cutoff)
+  deploy_gating: false
+
+# ---------------------------------------------------------------------------------------
+# VERDICT
+# ---------------------------------------------------------------------------------------
+verdict:
+  PASS: dsr.pass_rule AND p_pass.pass_rule
+  BLOCK: otherwise
+  exit_codes: {PASS: 0, REVIEW: 3, BLOCK: 1, FAIL: 1}   # N3 map
+  REVIEW: PASS on both gates, but a declared integrity warning is present (curve manifest WARN
+          or executor-path code changed between the pre-registration commit and the pass)
+  FAIL: a pin, lineage or integrity check failed; no verdict is read
+
+# ---------------------------------------------------------------------------------------
+# TRIAL LEDGER (N12 draft; T3-05, T7-04). Counts are FLOORS: each is the number of
+# selection-relevant variants that artifact evaluated on this research programme.
+# ---------------------------------------------------------------------------------------
+ledger:
+  families:
+    - {id: F1, what: 18-ETF momentum grid (graded books), count: 18, date: '2026-06-03',
+       source: scripts/research/xsec_momentum_falsification.py (graded_book_sharpes)}
+    - {id: F2, what: strengthen pass (3 signal variants + combined core, 9-cell lookback x vol-window grid), count: 13,
+       date: '2026-06-03', source: results/xsec_momentum/strengthen/strengthen_results.json}
+    - {id: F3, what: wide 32-ETF universe (graded books), count: 20, date: '2026-07-01',
+       source: results/tailwind_v1/breadth_expansion.json (n_momentum_books_graded)}
+    - {id: F4, what: sleeve candidates (rates carry, value, XLG, BAB, commodity carry, commodity/country/crypto TSMOM),
+       count: 8, date: '2026-06-12..2026-07-31',
+       source: carry_falsification, value_falsification, xlg_sleeve_robustness, eval_defensive_sleeve,
+               eval_commodity_carry_sleeve, commodity_tsmom_sleeve, country_tsmom_sleeve, crypto_tsmom_sleeve}
+    - {id: F5, what: sleeve combiners (static RP, sleeve momentum, drawdown control, dynamic tilt), count: 4,
+       date: '2026-06-18..2026-06-26', source: sleeve_timing_falsification, run_combiner_selection}
+    - {id: F6, what: multi-speed TSMOM blend, count: 1, date: '2026-08-01', source: multispeed_tsmom_eval}
+    - {id: F7, what: execution and sizing forks (decision lead 0/1, label vs holdings orders, vol targeting, gross cap),
+       count: 4, date: '2026-08-28..2026-09-29', source: tailwind_sizing_null_lab, tailwind_dsr_consistent, Tier-2 T4-03}
+    - {id: F8, what: DSR-method variants (recorded honest/curated, haircuts 0.389/0.563, PSR-only, n_eff x3, matched pool, excess pool),
+       count: 9, date: '2026-07-01..2026-09-29', source: audit_tailwind_book, tailwind_dsr_consistent}
+  totals:
+    strategy_only: 64      # F1-F6
+    full: 77               # F1-F8
+  not_counted:
+    - analytical sleeve extensions in results/portfolio_frontier/frontier.json (no backtest; closed-form)
+    - sensitivity reads that selected nothing (delayed fills d+1..d+4, MAE, borrow levels)
+  survivorship: the 18-ETF and 32-ETF universes are hand-picked, surviving ETFs (Tier-2 T1-01);
+                universe hindsight is not deflated by this N
+
+# ---------------------------------------------------------------------------------------
+# MEASURED BEFORE REGISTRATION (disclosed; none is the registered estimand)
+# ---------------------------------------------------------------------------------------
+measured_before_registration:
+  - {when: '2026-09-29 (orientation)', what: executor lead-1 declared financing, full span, N=24, full-span pool,
+     result: 'SR 0.5059, DSR 0.9186 (N18-31: 0.911-0.927), P(pass) 0.600 = 15/25 (old firm-only estimator)'}
+  - {when: '2026-09-29 (orientation)', what: same, trimmed to the window, N=24, full-span pool,
+     result: 'SR 0.5197, DSR 0.920 (N18-31: 0.913-0.928)'}
+  - {when: '2026-09-29 (orientation)', what: T-bill only, full span, N=24, result: 'SR 0.5264, DSR 0.933, P(pass) 0.619 = 13/21'}
+  - {when: '2026-09-29 (orientation)', what: executor momentum-only, declared financing, window, result: 'SR 0.502 (no DSR computed)'}
+  - {when: '2026-09-29 (machinery check)', what: 'blinded end-to-end run_pass on this prereg: stdout/stderr captured and discarded',
+     result: 'completion and key structure only; no statistic was printed or read'}
