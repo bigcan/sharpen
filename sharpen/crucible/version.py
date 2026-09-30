@@ -750,7 +750,48 @@ from pathlib import Path
 #     per substrate by the orchestrator.
 # Tripwires: tests/crucible/test_v14_0_fixes.py, tests/signals/test_v14_0_stats_fixes.py (each
 # mutation-checked: reverting the fix fails its test).
-CRUCIBLE_VERSION = "crucible-v14.0"
+#
+#   * A PRE-REGISTRATION IS TESTED, NOT SCREENED — the fifth instance of a cheap screen stricter than the
+#     gate. Search bounds (24 nodes; turnover > 2x soft cap) culled pre-registered seeds before fitness
+#     (40/100 WQ101 formulas incl. curated #9; the us_equity H=2 seeds at 88-168 turnover/yr), which were
+#     then ledgered SCORED_NOT_SELECTED and CHARGED a LORD++ test (2026-08-10 us_equity: 107 charged, 16
+#     adjudicated). Seeds are now exempt under the corrected contract (never bred); a pre-registration with
+#     no holdout decision is NOT_TESTED and charged nothing; n_holdout_tested counts decisions; the
+#     eligible set is matched on canonical strings. v12.0's stated cause (an uplift cull) was wrong.
+#   * THE PRE-REGISTERED DIRECTION IS THE TESTED DIRECTION. expected_sign was never applied (15/53 LLM
+#     specs in taiwan_v2 were scored mirrored); the Author folds -1 into the traded formula; the curated
+#     WQ101 seeds are relabelled +1 (the library's pre-signed convention; their hashes are unchanged).
+#   * THE BINDING GATE'S DEGENERATE CHANNELS. The combiner's all-sleeve equal-weight fallback let an
+#     unusable candidate turn the augmented book into EW(base) vs IV(base) — a constant stream scored
+#     z 2.7-15.6. fitness.augmented_book (the candidate joins only where the combiner can size it), a
+#     degenerate-vol leg, NaN statistic = no decision, and full-timeline scoring (eval_from) so the
+#     combiner enters the holdout warm. The market-beta leg is forward-aligned (it measured 0.03 on a 0.54
+#     book). A candidate never sized on any holdout bar (z = 0 by construction) is no decision either,
+#     and a degenerate-vol genome is never bred (it took 2-4 of the 6 elite slots in 2 of 3 synthetic
+#     searches on the fallback artifact alone). The calibration harness scores exactly as production.
+#   * LEAK-2 DATA. COT releases pinned to the actual CFTC record for the 2013/2018-19/2025 shutdowns and
+#     the 2023 ION outage, plus ad-hoc federal closures; WALCL Thursday-holiday weeks; FRED period-start
+#     series fail closed; Panel.forward_returns conditions on FORMATION-time membership only.
+#   * ONLINE-FDR / COHORT. Cohort discoveries credit the per-candidate account only at the charged level;
+#     a pending whole-pool cohort runs over the whole pool and alone consumes the trigger; clear_snapshot
+#     keeps the cohort key; U4 re-admission is substrate-scoped, never re-admits a settled row, and is
+#     consumed by the attempt; the corrected contract's online_fdr alpha/W0 are consumed.
+#   * HYPOTHESIS SUPPLY. statistical_hash (a third, CRU-2-safe dedup key: the formula modulo every
+#     transform the scored book is invariant to — rank/scale/affine constants/…); the library proposer
+#     skips registered keys BEFORE its cap (77 extended-bank formulas were unreachable); per-name (T,N)
+#     slots get cross-sectional templates and are named as such to the LLM.
+#   * FUNNEL. Declared neutralization controls (sector, size) and winsor_pct are applied; add-one
+#     bootstrap p; PSR/MinTRL at the HAC effective count; the Tier-0 tripwire probes the warm-up (32
+#     probes, seeded per signal, in the scorecard).
+#   * ROBUSTNESS. us_equity cache loads again (pre-rename pickles); T86 / TAIFEX stores stop losing
+#     history; scout coverage floor (altdata.min_bar_coverage); reproduce pins the decision function;
+#     distinct --nights stamps; the claude -p proposer is sandboxed (no tools, no MCP, empty cwd); the
+#     governance Tier-2 command is runnable (survivor pillars C1-C7).
+#   * EFFICIENCY (verdict-preserving). Vectorized combiner (bit-identical); the offspring GP search is
+#     skipped when no offspring can be promoted (every pre-registered decision bit-identical; manifest
+#     extra.offspring_searched records it); cached base book; one evaluation per genome.
+# Tripwires: tests/**/test_*v15*.py (each defect test mutation-checked against the pre-fix code).
+CRUCIBLE_VERSION = "crucible-v15.0"
 
 # The baseline (pre-gate-repair) system, preserved as a git tag for reproducibility comparisons.
 CRUCIBLE_BASELINE_VERSION = "crucible-v1.0"
