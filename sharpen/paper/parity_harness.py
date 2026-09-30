@@ -253,7 +253,7 @@ class ParityHarness:
         book = PaperState(n_assets=N, initial_capital=self.initial_capital, assets=assets)
 
         weights, equity = [], [self.initial_capital]
-        rets, turns, cumfees, gross, net, stamps = [], [], [], [], [], []
+        rets, turns, cumfees, gross, net, stamps, ngross = [], [], [], [], [], [], []
         for k in range(n_replay):
             prev_price, price_now = price[k], price[k + 1]
             pv_before = book.pv_before(prev_price)
@@ -275,6 +275,7 @@ class ParityHarness:
             turns.append(info["turnover"])
             cumfees.append(book.cumulative_fees)
             gross.append(info["gross_exposure"])
+            ngross.append(info["notional_gross"])
             net.append(info["net_exposure"])
             stamps.append(int(ts[k + 1]))
 
@@ -297,6 +298,7 @@ class ParityHarness:
             initial_capital=self.initial_capital,
             spy_returns=spy_returns,
             coverage_incomplete=coverage_incomplete,
+            notional_gross=np.asarray(ngross, dtype=np.float64),
         )
 
     @staticmethod

@@ -263,6 +263,10 @@ class PortfolioExecutor:
         weights = a_alloc * w_etf
         gross = np.abs(weights).sum(axis=1)
         net = weights.sum(axis=1)
+        # Actual notional gross of the ETF account, scaled by its capital share like the labels.
+        etf_ng = etf.risk_extra["trajectory"].notional_gross
+        notional_gross = (None if etf_ng is None else
+                          a_alloc.ravel() * np.asarray(etf_ng, dtype=np.float64)[idx[alloc_name]])
 
         # 6. cost / turnover series from the ETF account (the cost_drift gate is ETF-level;
         #    VRP costs are inside r_vrp). Turnover scaled by the ETF capital share.
@@ -288,7 +292,8 @@ class PortfolioExecutor:
             cumulative_fees=etf_fees, gross_exposure=gross, net_exposure=net,
             timestamps=common, class_pnl=class_pnl, assets=list(self.union_assets),
             asset_class=dict(self.asset_class), initial_capital=self.initial_capital,
-            spy_returns=spy_common, sleeve_pnl=sleeve_pnl, coverage_incomplete=False)
+            spy_returns=spy_common, sleeve_pnl=sleeve_pnl, coverage_incomplete=False,
+            notional_gross=notional_gross)
         # Per-sleeve aligned return streams + α paths — consumed by the step-5
         # diversification gate (corr(vrp, etf)) and the verdict digest (attached
         # dynamically, mirroring how TwoSleeveExecutor attaches sleeve_pnl).

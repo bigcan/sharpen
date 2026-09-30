@@ -176,7 +176,9 @@ def evaluate_paper_soak_gates(
     risk_checks = {
         "max_drawdown_pct": _check(live.max_drawdown_pct(), risk["max_drawdown_kill_pct"],
                                    "<=", unit="%"),
-        "max_gross_exposure": _check(live.max_gross_exposure(), risk["max_gross_exposure"], "<="),
+        # Actual notional when the path records it (audit T4-12a); ``basis`` says which.
+        "max_gross_exposure": {**_check(live.max_gross_exposure(), risk["max_gross_exposure"],
+                                         "<="), "basis": live.gross_basis},
         # worst single-day loss magnitude must stay under the halt threshold.
         "daily_loss_pct": _check(abs(min(live.min_daily_return_pct(), 0.0)),
                                  risk["daily_loss_halt_pct"], "<=", unit="%"),
@@ -379,6 +381,7 @@ def evaluate_paper_soak_gates(
             if len(live.equity_curve) > 1 else 0.0,
             "max_drawdown_pct": live.max_drawdown_pct(),
             "max_gross_exposure": live.max_gross_exposure(),
+            "gross_basis": live.gross_basis,
             "weight_l1_drift_max": parity.weight_l1_drift_max,
             "daily_return_te_bps_max": parity.daily_return_te_bps_max,
             "cost_drift_ratio": parity.cost_drift_ratio,
@@ -474,7 +477,7 @@ class PaperMetrics:
             for name, desc in {
                 "equity": "Paper book equity (USD)",
                 "drawdown_pct": "Drawdown from peak (%)",
-                "gross_exposure": "Gross exposure (sum|w|)",
+                "gross_exposure": "Gross exposure (actual notional / equity; labels if absent)",
                 "daily_return_pct": "Latest daily return (%)",
                 "weight_l1_drift": "Parity: sum|w_live - w_sim| (max over window)",
                 "daily_return_te_bps": "Parity: |live-sim| daily return TE (bps, max)",

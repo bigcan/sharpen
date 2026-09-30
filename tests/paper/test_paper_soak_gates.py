@@ -430,3 +430,18 @@ def test_without_executor_sleeves_the_sleeve_pnl_keys_are_checked(gates_cfg):
     live.sleeve_pnl = {"momentum": 0.4, "vrp": float("inf")}
     _, chk = _sleeve_check(live, None, gates_cfg)
     assert chk["status"] == FAIL and chk["basis"] == "sleeve" and chk["missing"] == ["vrp"]
+
+
+def test_gross_kill_reads_actual_notional_not_labels(gates_cfg):
+    """Audit T4-12a: labels are capped by construction, so a book whose held notional drifts
+    past the kill must trip it even while its labels sit below."""
+    thr = float(gates_cfg["paper_soak"]["risk"]["max_gross_exposure"])
+    live = make_live(_benign_returns(), gross=thr - 0.5)
+    v = evaluate_paper_soak_gates(live, clean_parity(), gates_cfg)
+    chk = v["groups"]["risk"]["checks"]["max_gross_exposure"]
+    assert chk["status"] == PASS and chk["basis"] == "label"
+    live.notional_gross = np.full(live.n_steps, thr + 0.1)
+    v = evaluate_paper_soak_gates(live, clean_parity(), gates_cfg)
+    chk = v["groups"]["risk"]["checks"]["max_gross_exposure"]
+    assert chk["status"] == FAIL and chk["basis"] == "notional"
+    assert v["overall_status"] == FAIL and v["summary"]["gross_basis"] == "notional"
