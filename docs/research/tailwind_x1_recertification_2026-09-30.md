@@ -5,6 +5,10 @@
 **Provenance.**
 - One pass, run as registered. Pre-registration `da21c684`: `configs/tailwind_v1_x1.prereg.yaml` and `docs/research/tailwind_x1_preregistration_2026-09-29.md`.
 - The run was at HEAD `da21c684`, with no executor-path code changed or uncommitted.
+- **SHA mapping (rebase before push, 2026-09-30).** Both X1 commits were replayed onto origin's tip, which added the other session's T4-10 crypto-env commits `d74fd6d7` and `d965e1e9`.
+  - Pre-registration `da21c684` became **`894fa9d2`**; result `e583e1b9` became **`a55cd2f0`**. The X1 files are byte-identical.
+  - The artifact's lineage still says `da21c684`, the code it actually ran on.
+  - The only executor-path file those commits touch is `sharpen/envs/multi_asset_allocator_env.py`, and only in a docstring, so the result holds on the pushed tree.
 - All four data pins and the manifest hash matched, and the offline guard held.
 - Artifact: `results/tailwind_v1/x1_recertification_2026-09-30.json`.
 
