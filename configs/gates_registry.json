@@ -96,6 +96,11 @@
       "registered_on": "2026-09-30",
       "reason": "initial registration 2026-09-30 (SharpOps ladder decision item 7): baseline of every gates file as committed; later edits need a re-registration citing a decision"
     },
+    "configs/data_integrity.gates.yaml": {
+      "sha256": "c2e71ac8fcc51a849b72aa09dcab92c0177443c4f2264aedff7c8a4a15e5741c",
+      "registered_on": "2026-09-30",
+      "reason": "2026-09-30 new (operator: 'do N8 and N13'): TAILWIND Tier-2 N8 close-aware panel integrity gate; calibrated so the 3 real 18-ETF caches PASS and all 8 T1-02 injections FAIL"
+    },
     "configs/execution_overlay.gates.yaml": {
       "sha256": "2bb1aebd2dbe397c483f2201921c623474248ab75dcb043b57b3180029eb8ce1",
       "registered_on": "2026-09-30",

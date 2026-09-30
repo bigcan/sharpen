@@ -239,6 +239,8 @@ def _excess(book: dict, rets: pd.DataFrame, cash: pd.Series,
 def research_basis(n_decl: int, ns: list[int]) -> tuple[dict, dict]:
     atb, pf, mom = _m()
     close, rets, bench, _ = atb._mom_frame()
+    from sharpen.data.panel_integrity import require_ok
+    require_ok(close, "research panel", universe="tailwind_18etf")         # N8
     books = mom.build_books(close, rets, bench)
     mom_only = {b: bk["_net_standard"].dropna() for b, bk in books.items()}
     def_net = atb.build_defensive_net()

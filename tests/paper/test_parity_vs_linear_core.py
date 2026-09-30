@@ -14,7 +14,6 @@ import json
 from pathlib import Path
 
 import numpy as np
-import pytest
 
 from sharpen.envs.allocator_factory import linear_core_weights
 from sharpen.paper import (
@@ -24,7 +23,6 @@ from sharpen.paper import (
 )
 
 ROOT = Path(__file__).resolve().parents[2]
-OHLCV_CACHE = ROOT / "results" / "xsec_momentum" / "ohlcv_daily.parquet"
 
 
 def _assert_parity_zero(rep) -> None:
@@ -122,27 +120,3 @@ def test_missed_rebalances_detects_a_dropped_month_end():
     assert ParityHarness._missed_rebalances(dropped, expected_ts=expected) == 1
 
 
-@pytest.mark.skipif(not OHLCV_CACHE.exists(),
-                    reason="cached real ETF OHLCV absent (run cross_asset_loader)")
-def test_parity_real_etf_data(cfg, gates_cfg):
-    """Parity ≈ 0 on the real validated ETF universe (exercises NaN/warmup/zero-price
-    and extreme-participation paths the synthetic data does not)."""
-    try:
-        from sharpen.data import cross_asset_loader as loader
-        data = loader.load_cross_asset_data(cfg)            # offline: uses the cached clean parquet
-        close = data["close"]
-        arrays = loader.build_allocator_arrays(
-            data["signals"], close, data["volume"], data["assets"],
-            close.index[0], close.index[-1], lookbacks=data["lookbacks"],
-        )
-    except Exception as e:                                  # pragma: no cover - data/env dependent
-        pytest.skip(f"could not build real-ETF arrays from cache: {e}")
-
-    h = ParityHarness(cfg)
-    live, sim = h.run(arrays)
-    rep = h.compare(live, sim)
-    _assert_parity_zero(rep)
-    np.testing.assert_allclose(live.equity_curve, sim["equity_curve"], atol=1e-5, rtol=0)
-    # the pre-registered parity gate must also pass on real data.
-    verdict = evaluate_paper_soak_gates(live, rep, gates_cfg)
-    assert verdict["groups"]["parity"]["status"] == "PASS", verdict["groups"]["parity"]

@@ -46,6 +46,7 @@ import numpy as np
 import pandas as pd
 
 from sharpen.data import financing as fin
+from sharpen.data import panel_integrity as pint
 from sharpen.data import treasury_curve_loader as tcl
 from sharpen.features import cross_asset_signals as cas
 from sharpen.features import defensive_signals as dfs
@@ -133,6 +134,7 @@ def fetch_ohlcv_wide(
         wide = raw[field] if multi else raw[[field]].rename(columns={field: assets[0]})
         wide = wide.reindex(columns=assets).sort_index()
         out[name] = wide
+    pint.assert_index_ok(out["close"].index, "fetch_ohlcv_wide")   # N8: unique + increasing
     return out
 
 
@@ -268,6 +270,23 @@ def _clip_window(wide: dict, start: str, end: str | None) -> dict:
     return out
 
 
+def payload_hash16(long: pd.DataFrame) -> str:
+    """The manifest's ``content_sha256_16``: sha256 of the cleaned long frame's pandas hash."""
+    return hashlib.sha256(pd.util.hash_pandas_object(long, index=True).values.tobytes()).hexdigest()[:16]
+
+
+def _verify_payload_hash(long: pd.DataFrame, manifest: Mapping, where: str) -> None:
+    """T1-14: the content hash was written but never checked on a cache hit, so a cache edited
+    in place (or overwritten by a refetch) was served as the certified one. A manifest without a
+    hash is refused too; there is nothing to certify against."""
+    want = manifest.get("content_sha256_16")
+    if not want:
+        raise ValueError(f"{where}: manifest carries no content_sha256_16; refusing an unverifiable cache")
+    got = payload_hash16(long)
+    if got != want:
+        raise ValueError(f"{where}: cache content hash {got} != manifest {want} (edited or overwritten)")
+
+
 def read_cached_ohlcv(cache_dir: str | Path, assets: Sequence[str]) -> tuple[dict[str, pd.DataFrame], dict]:
     """The cleaned OHLCV panel a cache already holds, READ-ONLY: never fetches, never writes.
 
@@ -286,9 +305,11 @@ def read_cached_ohlcv(cache_dir: str | Path, assets: Sequence[str]) -> tuple[dic
     if missing:
         raise ValueError(f"cache {cache_dir} lacks {missing}; read-only, so nothing is fetched")
     long = pd.read_parquet(clean_path)
+    _verify_payload_hash(long, manifest, f"read_cached_ohlcv({cache_dir})")   # T1-14
     long["date"] = pd.to_datetime(long["date"])
     wide = {c: long.pivot(index="date", columns="ticker", values=c)
             .reindex(columns=list(assets)).sort_index() for c in _OHLCV}
+    pint.assert_index_ok(wide["close"].index, "read_cached_ohlcv")    # N8
     return wide, manifest
 
 
@@ -340,9 +361,11 @@ def fetch_and_clean(
             log.info("cross_asset_loader: using cached clean OHLCV (%s, window=%s..%s)",
                      clean_path, manifest.get("start"), manifest.get("date_max"))
             long = pd.read_parquet(clean_path)
+            _verify_payload_hash(long, manifest, f"fetch_and_clean cache hit ({cache_dir})")   # T1-14
             long["date"] = pd.to_datetime(long["date"])
             wide = {c: long.pivot(index="date", columns="ticker", values=c)
                     .reindex(columns=list(assets)).sort_index() for c in _OHLCV}
+            pint.assert_index_ok(wide["close"].index, "fetch_and_clean (cache hit)")   # N8
             return _clip_window(wide, start, end), manifest
         log.info("cross_asset_loader: cache stale (assets_ok=%s fresh_ok=%s scan_ok=%s "
                  "start_ok=%s, cached_window=%s..%s, requested=%s..%s) → refetching",
@@ -369,9 +392,12 @@ def fetch_and_clean(
         status = "WARN"
     else:
         status = "PASS"
-    payload_hash = hashlib.sha256(
-        pd.util.hash_pandas_object(long, index=True).values.tobytes(),
-    ).hexdigest()[:16]
+    # N8: the close-aware integrity gate on the freshly cleaned closes. A single incident FAILs
+    # the manifest (DATA-CLEAN alone PASSed every T1-02 corruption).
+    integrity = pint.check_close_panel(wide["close"])
+    if integrity["status"] != "PASS":
+        status = "FAIL"
+    payload_hash = payload_hash16(long)
     manifest = {
         "stage": "data-prep",
         "status": status,
@@ -394,6 +420,10 @@ def fetch_and_clean(
             "stale_pnl_fail_threshold": stale_pnl_fail_threshold,
         },
         "per_ticker": clean_report,
+        "integrity": {"status": integrity["status"], "n_incidents": integrity["n_incidents"],
+                      "incidents": integrity["incidents"][:20],
+                      "suspect_prints_diagnostic": integrity["suspect_prints_diagnostic"][:10],
+                      "gates": "configs/data_integrity.gates.yaml"},
         "raw_cache": str(raw_path),
         "clean_cache": str(clean_path),
         "content_sha256_16": payload_hash,

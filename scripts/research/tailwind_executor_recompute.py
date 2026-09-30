@@ -73,6 +73,7 @@ from sharpen.data.cross_asset_loader import (  # noqa: E402
     build_two_sleeve_arrays,
     load_two_sleeve_data,
 )
+from sharpen.data.panel_integrity import PanelIntegrityError, require_ok  # noqa: E402
 from sharpen.envs.allocator_factory import execution_stamp  # noqa: E402
 from sharpen.paper import TwoSleeveExecutor  # noqa: E402
 from sharpen.prop.challenge_simulator import FirmRules, SizingPolicy  # noqa: E402
@@ -99,6 +100,10 @@ def build_executor_series(cfg: dict) -> tuple[pd.Series, dict, dict]:
     ``MultiAssetAllocatorEnv`` + ``PaperState`` apply, not an approximation of them."""
     data = load_two_sleeve_data(cfg, force_refetch=False, require_fresh=False)
     close = data["close"]
+    # N8: a capital script reads the manifest status and gates its panel before computing.
+    if (data.get("manifest") or {}).get("status") != "PASS":
+        raise PanelIntegrityError(f"executor cache manifest status {(data.get('manifest') or {}).get('status')!r}")
+    require_ok(close, "executor panel", universe="tailwind_18etf")
     bundle = build_two_sleeve_arrays(data, close.index[0], close.index[-1])
 
     ex = TwoSleeveExecutor(cfg)

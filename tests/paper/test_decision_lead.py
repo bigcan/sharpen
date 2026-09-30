@@ -236,6 +236,31 @@ def _two_sleeve_bundle(T: int = 400, n: int = 4, seed: int = 11) -> dict:
 
 
 @pytest.mark.parametrize("lead", [0, 1])
+def test_alpha_switches_exactly_on_every_warmed_rebalance_step_with_varying_vol(lead):
+    """EQUALITY, not a subset (Tier-2 T7-17). With varying vol the combined weights re-scale
+    every bar by design, so the alignment claim that can be pinned exactly is the risk-parity
+    alpha: once its trailing window is warm it switches on EVERY rebalance fill step and on no
+    other step (a missed month-end or an off-calendar switch both fail)."""
+    cfg = yaml.safe_load((ROOT / "configs" / "tailwind_v1.yaml").read_text(encoding="utf-8"))
+    cfg.setdefault("execution", {})["decision_lead_bars"] = lead
+    cfg["env"]["min_trade_pct"] = 0.0
+    bundle = _two_sleeve_bundle()
+    rng = np.random.default_rng(3)
+    T, n = bundle["union"]["price_ary"].shape
+    for s in ("momentum", "defensive"):
+        bundle[s]["vol_ary"] = 0.10 * np.exp(0.3 * np.cumsum(rng.normal(0, 0.05, (T, n)), axis=0))
+    _, detail = TwoSleeveExecutor(cfg).sim_oracle(bundle)
+    A = np.column_stack([np.asarray(v) for v in detail["alphas"].values()])
+    changed = set((np.flatnonzero(np.abs(np.diff(A, axis=0)).sum(axis=1) > 1e-12) + 1).tolist())
+    changed.discard(A.shape[0] - 1)                          # the final (unconfirmed) bar, as above
+    me = _month_end_idx(bundle["union"]["timestamps"])[:-1]
+    rebalance_steps = {int(d) - 1 for d in me} if lead == 1 else {int(d) for d in me}
+    assert len(changed) >= 10, "the alpha barely moved: the equality would be vacuous"
+    warmed = {r for r in rebalance_steps if r >= min(changed)}
+    assert changed == warmed, (sorted(changed ^ warmed)[:6])
+
+
+@pytest.mark.parametrize("lead", [0, 1])
 def test_combined_weights_change_only_on_the_rebalance_fill_step(lead):
     cfg = yaml.safe_load((ROOT / "configs" / "tailwind_v1.yaml").read_text(encoding="utf-8"))
     cfg.setdefault("execution", {})["decision_lead_bars"] = lead
