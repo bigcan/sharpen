@@ -693,24 +693,26 @@ class FundingArbEnv(gym.Env):
         self.spot_notionals[flipped] = abs_new[flipped] * portfolio_value
         self.perp_notionals[flipped] = abs_new[flipped] * portfolio_value
 
-        # Increased position
+        # Increased position: each leg books its share-weighted VWAP, as
+        # CryptoPerpEnv._update_entry_prices, so notional / entry_price stays the leg's share
+        # count. The notional-weighted arithmetic mean over-states the entry whenever the fill
+        # prices differ (arithmetic >= harmonic mean): each leg held fewer shares than it
+        # bought, under-stating its funding, borrow and delta notional (T4-10).
         increased = ~closed & ~from_flat & ~flipped & (abs_new > abs_old)
         if increased.any():
             added = np.abs(delta_weights[increased]) * portfolio_value
             old_spot_n = self.spot_notionals[increased]
             new_spot_n = old_spot_n + added
-            self.spot_entry_prices[increased] = (
-                self.spot_entry_prices[increased] * old_spot_n
-                + spot_price[increased] * added
-            ) / (new_spot_n + 1e-10)
+            spot_shares = (old_spot_n / (self.spot_entry_prices[increased] + 1e-10)
+                           + added / (spot_price[increased] + 1e-10))
+            self.spot_entry_prices[increased] = new_spot_n / (spot_shares + 1e-10)
             self.spot_notionals[increased] = new_spot_n
 
             old_perp_n = self.perp_notionals[increased]
             new_perp_n = old_perp_n + added
-            self.perp_entry_prices[increased] = (
-                self.perp_entry_prices[increased] * old_perp_n
-                + perp_price[increased] * added
-            ) / (new_perp_n + 1e-10)
+            perp_shares = (old_perp_n / (self.perp_entry_prices[increased] + 1e-10)
+                           + added / (perp_price[increased] + 1e-10))
+            self.perp_entry_prices[increased] = new_perp_n / (perp_shares + 1e-10)
             self.perp_notionals[increased] = new_perp_n
 
         # Reduced position
