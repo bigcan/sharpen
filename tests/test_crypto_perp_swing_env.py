@@ -690,8 +690,10 @@ class TestHaltWhileHolding:
     Pre-fix `_realize_pnl` saw close=0 on inactive bars and computed
     price_change = 0/entry - 1 = -1, blasting -entry_notional through equity.
     Patch consumes handler.active to freeze halted holdings: target=position
-    (delta=0), eff_close = entry_price (zero PnL across halt), bars_in_position
-    counter paused, hard constraints skipped.
+    (delta=0), eff_close = the asset's last active close (zero PnL change across the
+    halt, unrealized PnL kept), bars_in_position counter paused, hard constraints
+    skipped. S531 first marked the halt at entry_price, which erased the holding's
+    unrealized PnL for the halt; see test_halt_marks_a_holding_at_its_last_close_not_its_entry.
     """
 
     def _advance_to_slot(self, env: CryptoPerpSwingEnv, target_slot: int):
@@ -753,7 +755,7 @@ class TestHaltWhileHolding:
             )
             # Margin unchanged: BTC/SOL flat → no funding/fees from them either.
             assert env.margin_balance == pytest.approx(margin_at_open, rel=1e-9)
-            # Equity unchanged: PnL contribution from ETH = 0 (eff_close=entry_price).
+            # Equity unchanged: ETH is marked at its last active close (1260 == entry here).
             assert env.equity == pytest.approx(equity_at_open, rel=1e-9)
 
         # Reactivation at slot 166: ETH close = 1000+100+166 = 1266.
@@ -772,6 +774,46 @@ class TestHaltWhileHolding:
 
         # bars_in_position now increments on the active bar.
         assert env._bars_in_position[1] == eth_bars_at_open + 1
+
+    def test_halt_marks_a_holding_at_its_last_close_not_its_entry(self):
+        """Open ETH at slot 150 (1250) and hold to slot 160 (1260): +400 unrealized on
+        $50k. Through the halt (161-165) the book must stay marked at 1260, keeping the
+        +400; on reactivation (166) it reprices at 1266.
+
+        `test_position_frozen_across_halt_bars` opens on slot 160, the last active bar, where
+        entry == last close, so it cannot tell the two marks apart. The pre-fix env marked a
+        halted holding at its ENTRY price: equity fell by exactly the 400 at the first halt
+        bar and got it back on reactivation, a spurious -400 / +400 pair in the reward.
+        """
+        full = _full_grid(300)
+        eth_grid = full[:161] + full[166:]
+        env = _real_handler_env(eth_grid, full, episode_length=300)
+        env.reset()
+
+        self._advance_to_slot(env, 150)
+        env.step(np.array([0.0, 0.5, 0.0], dtype=np.float32))    # open at slot 150
+        assert env.entry_prices[1] == pytest.approx(1250.0, rel=1e-9)
+        notional = float(env.entry_notionals[1])
+        for _ in range(10):                                     # hold through slot 160
+            env.step(np.array([0.0, 0.5, 0.0], dtype=np.float32))
+        assert env._current_active[1]
+        unrealized_pre_halt = notional * (1260.0 / 1250.0 - 1.0)
+        assert env._calc_unrealized_pnl(env._current_close)[1] == pytest.approx(
+            unrealized_pre_halt, rel=1e-9)
+        assert unrealized_pre_halt == pytest.approx(400.0, rel=1e-9)
+        equity_pre_halt = float(env.equity)
+
+        for halt_step in range(5):                              # slots 161-165, no funding hours
+            env.step(np.array([0.0, 0.5, 0.0], dtype=np.float32))
+            assert not env._current_active[1]
+            assert env.equity == pytest.approx(equity_pre_halt, rel=1e-12), (
+                f"halt_step {halt_step}: equity moved by {env.equity - equity_pre_halt:+.2f}"
+            )
+
+        env.step(np.array([0.0, 0.5, 0.0], dtype=np.float32))    # slot 166, close 1266
+        assert env._current_active[1]
+        assert env.equity - equity_pre_halt == pytest.approx(
+            notional * (1266.0 / 1250.0 - 1.0) - unrealized_pre_halt, rel=1e-9)
 
     def test_no_open_during_halt(self):
         """Agent cannot open a position into a halted asset (halted_flat → target=0)."""

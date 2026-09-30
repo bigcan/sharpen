@@ -168,6 +168,8 @@ class CryptoPerpSwingEnv(gym.Env):
         self._prev_close = np.zeros(self.n_assets, dtype=np.float64)
         # Per-asset active mask (S531 F1: carry positions through asset halts).
         self._current_active = np.ones(self.n_assets, dtype=bool)
+        # Last close seen while each asset was active: the mark for a halted holding.
+        self._last_mark = np.zeros(self.n_assets, dtype=np.float64)
 
         # SigBoost V1.1: per-asset crypto features
         self._current_sigboost: np.ndarray | None = (
@@ -223,6 +225,7 @@ class CryptoPerpSwingEnv(gym.Env):
         self._current_atr[:] = 0.0
         self._prev_close[:] = 0.0
         self._current_active[:] = True
+        self._last_mark[:] = 0.0
         if self._current_sigboost is not None:
             self._current_sigboost[:] = 0.0
 
@@ -263,6 +266,7 @@ class CryptoPerpSwingEnv(gym.Env):
                     self._current_active = first["active"].astype(bool)
                 else:
                     self._current_active = self._current_close > 1e-10
+                self._last_mark = np.where(self._current_active, self._current_close, 0.0)
             else:
                 self._current_obs = self._empty_obs()
         else:
@@ -337,11 +341,15 @@ class CryptoPerpSwingEnv(gym.Env):
         deadband_mask = np.abs(delta) < self.deadband_threshold
         target_weights[deadband_mask] = self.positions[deadband_mask]
 
-        # Effective price for PnL: real close where active, entry_price where halted.
-        # Yields zero PnL change across halts (price_ratio = entry/entry - 1 = 0)
-        # and zero funding (funding rate is also zero-filled on inactive slots).
-        eff_close = np.where(self._current_active, self._current_close, self.entry_prices)
-        eff_prev = np.where(prev_active, self._prev_close, self.entry_prices)
+        # Effective price for PnL: real close where active, the asset's LAST ACTIVE close
+        # where halted. Zero PnL change across the halt, and the holding keeps the
+        # unrealized PnL it had going in; funding is zero too (rates are zero-filled on
+        # inactive slots). Marking at entry_price instead erased that PnL for the halt:
+        # a long bought at 1250 and held to 1260 lost its +400 on the first halt bar and
+        # got it back on reactivation. eff_prev reads the mark BEFORE this bar updates it.
+        eff_prev = np.where(prev_active, self._prev_close, self._last_mark)
+        self._last_mark = np.where(self._current_active, self._current_close, self._last_mark)
+        eff_close = self._last_mark.copy()
 
         # 6. Calculate portfolio value BEFORE price move
         unrealized_before = self._calc_unrealized_pnl(eff_prev)
