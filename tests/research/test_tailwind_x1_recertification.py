@@ -227,6 +227,10 @@ def test_every_threshold_resolves_to_a_gates_file(x1, prereg):
             "min_trading_days", "dd_mode"} <= set(firm)
 
 
+def test_dirty_paths_keep_the_first_character(x1):
+    assert x1.dirty_paths(" M sharpen/a.py\n M docs/b.md\n?? c.py\n") == ["sharpen/a.py", "docs/b.md", "c.py"]
+
+
 # ------------------------------------------------------------------------ certify refusals
 def _certify(x1, tmp_path, monkeypatch, prereg_edits: dict, commit, existing: bool = False):
     src = yaml.safe_load((ROOT / "configs" / "tailwind_v1_x1.prereg.yaml").read_text(encoding="utf-8"))

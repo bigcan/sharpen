@@ -211,9 +211,17 @@ def sha256(path: Path) -> str:
     return h.hexdigest()
 
 
-def _git(*args: str) -> str:
-    return subprocess.run(["git", "-C", str(ROOT), *args], capture_output=True, text=True,
-                          check=True).stdout.strip()
+def _git(*args: str, strip: bool = True) -> str:
+    out = subprocess.run(["git", "-C", str(ROOT), *args], capture_output=True, text=True,
+                         check=True).stdout
+    return out.strip() if strip else out
+
+
+def dirty_paths(porcelain: str) -> list[str]:
+    """Paths from `git status --porcelain` (``XY path``). The status columns are positional,
+    so the text must NOT be stripped first: stripping ate the first path's leading character
+    in the 2026-09-30 X1 artifact (``ocs/sharpops.md``)."""
+    return [ln[3:] for ln in porcelain.splitlines() if ln.strip()]
 
 
 def check_pins(prereg: dict) -> dict:
@@ -264,8 +272,7 @@ def offline_guard(prereg: dict):
 
 def lineage(prereg: dict, prereg_commit: str | None) -> dict:
     head = _git("rev-parse", "HEAD")
-    porcelain = _git("status", "--porcelain")
-    dirty = [ln[3:] for ln in porcelain.splitlines() if ln.strip()]
+    dirty = dirty_paths(_git("status", "--porcelain", strip=False))
     dep_changed: list[str] = []
     if prereg_commit:
         dep_changed = [p for p in _git("diff", "--name-only", prereg_commit, "HEAD", "--",
