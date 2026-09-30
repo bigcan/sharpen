@@ -6,7 +6,13 @@ SharpOps is Sharpen's staged pipeline for RL strategies, inspired by RLOps. (For
 > verbatim. Session tags (`S488`, `S553-cont-...`) point into the private R&D log, links to
 > `decision_*.md` and `.agent/` files point at notes that are not published, and "active" workstreams
 > describe the state at the time: none reached capital (see [NEGATIVE_RESULTS](../NEGATIVE_RESULTS.md)).
-> The stage contract itself is what `scripts/validate_config.py` enforces.
+> **What is actually enforced (corrected 2026-09-30).** `scripts/validate_config.py` checks config
+> SHAPE only; it does not enforce the stage contract (Protocol v2 audit 2026-09-29 §4). Promotion
+> decisions follow the short standard `docs/sharpops_promotion_standard.md` (ladder, tripwires,
+> hashed gates, `scripts/sharpops_promotion_check.py`). Bar-level PF gates below are RETIRED as
+> gates (diagnostic only). Sections marked **[NOT ENFORCED]** describe RL machinery that was
+> never implemented; an RL promotion is blocked until they are. The calibration anchors in §3.5
+> and the §4 ensemble evidence are leak-era and void as evidence; §3.5 is unvalidated guidance.
 
 > **Status:** Active. Standardizes the training-to-live workflow across all Sharpen workstreams (GMGP1, SG-1, CMGP1, AlphaSeek, Funding-Arb).
 > **Reference run:** GMGP1 staged approach. **Anti-pattern:** AlphaSeek `k28l6ef8` monolithic 5.7-day run.
@@ -71,6 +77,9 @@ Each stage launches as its own WandB run with naming `<workstream>-stage{N}-<pur
 ---
 
 ## 2. Manifest Schema
+
+> **[NOT ENFORCED]** Nothing writes `<run_id>.manifest.json`, `env_code_sha`, `training_health`
+> or `replay_buffer`, and there is no upstream-PASS check (audit §4 P2/P3). Target spec only.
 
 Every stage writes `<run_id>.manifest.json` to `results/<run_id>/`:
 
@@ -505,6 +514,12 @@ Additive `sensitivity_audit` block alongside the v2.5 `bootstrap` / `legacy_upli
 - **Invariants:** OBSNOISE-1 (ordering repair), OBSNOISE-2 (pre-region byte-identical), OBSNOISE-3 (σ=0 identity → nominal reproduces Stage 3), OBSNOISE-4 (deterministic, causal positional draw — bar `t`'s noise depends only on `(seed, row index)`, never on bars `>t`); Math-promoted MATH-OBS-1..5. Architecture + Math gate (PASS WITH NOTES): the SharpOps v2.7-B observation-noise (Stage 3.5) architecture note. Researcher: `.agent/artifacts/mc_robustness_methods_research.md` §Method #4.
 
 
+### Stage 3 — walk-forward (+ stress)
+> **[NOT ENFORCED as written]** The gate below ("all windows profitable, median Sharpe > 0") is
+> implemented nowhere; `wf_pf_floor` is read by no code. What ran was WF G1 in the per-workstream
+> `*_ensemble_eval.py` scripts. For promotion use the pooled daily net OOS Sharpe
+> (`docs/sharpops_promotion_standard.md` §1, §3).
+
 - K ≥ `gates.wf_windows` (default 4) rolling windows
 - Window split: `train: 12mo, val: 1mo, test: 1mo`, slide by 1mo (workstream may override under `wf.split` in gate config)
 - Stochastic eval rules from stage 2 apply per window
@@ -517,6 +532,9 @@ Additive `sensitivity_audit` block alongside the v2.5 `bootstrap` / `legacy_upli
 - **Execution-failure stress sub-block** (v2.7-C forward-declared, NOT YET SHIPPED): Bernoulli(p) miss-fill DR sweep `p ∈ {0.05, 0.10, 0.20}` × N_seeds=5 per WF window. Researcher Method #3 (re-framed) CONDITIONAL-GO. Slot reserved as `wf_report.json → stress.exec_failure`; gate `gates.stress_exec_failure_pf_floor` (default **0.85**). Pending operator approval after v2.7-A backfill calibration. See `.agent/artifacts/mc_robustness_methods_research.md` §Method #3.
 
 ### Stage 4 — recent-oos (+ compliance filter sub-report)
+> **[NOT ENFORCED for RL]** `recent_oos_days` is read by no code. For promotion the 60-day rule is
+> replaced by the forward betting e-process (`docs/sharpops_promotion_standard.md` §3).
+> `run_full_pipeline.py --stage oos` now evaluates a frozen `--checkpoint` only.
 - Test window: `today − gates.recent_oos_days` (default 60) `→ today − 1d`
 - Hard rule for paper-deploy candidates (closes Q1 2026 blind spot)
 - Gate verdict buckets (per `project_paper_checkpoints_q1_2026_blindspot.md`):

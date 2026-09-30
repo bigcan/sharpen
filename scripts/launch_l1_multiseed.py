@@ -144,7 +144,9 @@ def run_seed(config: Path, slot_pool: "queue.Queue[tuple[str, str]]",
             "--instance", instance,
             "--gpu", gpu,
             "--run_name", run_name,
-            "--extra_args", f"--seed {seed}",
+            # run_full_pipeline REQUIRES --stage (2026-09-30); an override script
+            # (e.g. funding-arb) keeps its own argv.
+            "--extra_args", (f"--seed {seed}" if script else f"--stage l1-multiseed --seed {seed}"),
             # `pkill -f run_full_pipeline.py` in deploy_bare_metal kills peer
             # seeds when several deploys land on the same instance — fatal
             # under 3-per-GPU multiplexing. Each deploy already isolates via

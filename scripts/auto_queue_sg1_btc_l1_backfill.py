@@ -86,7 +86,7 @@ def launch_backfill() -> int:
         f"for SEED in {seeds_str}; do "
         "TORCHINDUCTOR_CACHE_DIR=/tmp/inductor_sg1_btc_backfill_seed$SEED "
         "CUDA_VISIBLE_DEVICES=0 "
-        "nohup /root/miniconda3/bin/python -u scripts/run_full_pipeline.py "
+        "nohup /root/miniconda3/bin/python -u scripts/run_full_pipeline.py --stage l1-multiseed "
         "--config configs/sg1_btc_velotrade_l1_multiseed.yaml "
         "--run_name sg1-btc-velotrade-l1-multiseed-backfill-seed${SEED}_${TS} "
         "--seed $SEED "

@@ -97,7 +97,7 @@ def _launch_solo() -> int:
         "TS=$(date +%Y%m%d_%H%M%S) && "
         f"TORCHINDUCTOR_CACHE_DIR={cache_dir} "
         f"CUDA_VISIBLE_DEVICES={GPU} "
-        "nohup /root/miniconda3/bin/python -u scripts/run_full_pipeline.py "
+        "nohup /root/miniconda3/bin/python -u scripts/run_full_pipeline.py --stage l1-multiseed "
         f"--config {CONFIG_PATH} "
         f"--run_name {RUN_NAME_PREFIX}-seed{SEED}_${{TS}} "
         f"--seed {SEED} "
