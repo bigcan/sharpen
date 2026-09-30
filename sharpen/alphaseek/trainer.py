@@ -94,6 +94,18 @@ class AlphaSeekTrainer:
         self.buffer = None
 
     def train(self, break_step: int) -> dict:
+        """Run :meth:`_train` and restore the caller's global grad mode afterwards.
+
+        ``_train`` toggles ``torch.set_grad_enabled`` (off for rollouts, on for updates) and
+        used to return with gradients globally DISABLED, which silently broke every later
+        torch user in the process (11 agent tests failed only when run after this one)."""
+        prev = torch.is_grad_enabled()
+        try:
+            return self._train(break_step)
+        finally:
+            torch.set_grad_enabled(prev)
+
+    def _train(self, break_step: int) -> dict:
         """Run the full training loop.
 
         Parameters
