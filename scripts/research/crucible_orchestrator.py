@@ -99,6 +99,20 @@ def _altdata_max_slot_corr(path: "str | Path | None") -> float | None:
         cfg = yaml.safe_load(fh) or {}
     v = (cfg.get("altdata") or {}).get("max_slot_corr")
     return None if v is None else float(v)
+def _altdata_min_bar_coverage(path: "str | Path | None") -> float | None:
+    """Read ``altdata.min_bar_coverage`` (v15.0) from the alt-data ingest gates — same rules as
+    :func:`_altdata_max_slot_corr` (missing file/key ⇒ ``None`` ⇒ no floor)."""
+    import yaml
+
+    p = Path(path) if path else DEFAULT_ALTDATA_GATES
+    if not p.exists():
+        return None
+    with open(p, encoding="utf-8") as fh:
+        cfg = yaml.safe_load(fh) or {}
+    v = (cfg.get("altdata") or {}).get("min_bar_coverage")
+    return None if v is None else float(v)
+
+
 DEFAULT_CORRECTED_GATES = ROOT / "configs" / "crucible_corrected_contract.gates.yaml"
 DEFAULT_SEARCH_MEMORY_GATES = ROOT / "configs" / "crucible_search_memory.gates.yaml"
 
@@ -263,7 +277,8 @@ def _build_substrate(args, cfg, ek, meta, sweep, sweep_hash) -> tuple[Substrate,
                 bar_end = args.end or np.datetime_as_string(panel.dates.max(), unit="D")
                 slots = bridge_altdata_feature_slots(
                     bar_dates=panel.dates, start=bar_start, end=bar_end, catalog=catalog,
-                    max_slot_corr=_altdata_max_slot_corr(args.altdata_config))
+                    max_slot_corr=_altdata_max_slot_corr(args.altdata_config),
+                    min_bar_coverage=_altdata_min_bar_coverage(args.altdata_config))
                 if slots:
                     panel = dataclasses.replace(
                         panel, feature_slots={**panel.feature_slots, **slots})
@@ -334,7 +349,8 @@ def _build_substrate(args, cfg, ek, meta, sweep, sweep_hash) -> tuple[Substrate,
                 bar_end = args.end or np.datetime_as_string(panel.dates.max(), unit="D")
                 slots = bridge_altdata_feature_slots(
                     bar_dates=panel.dates, start=bar_start, end=bar_end, catalog=catalog,
-                    connectors=taiwan_connectors(), aliases=TAIWAN_ALTDATA_ALIASES)
+                    connectors=taiwan_connectors(), aliases=TAIWAN_ALTDATA_ALIASES,
+                    min_bar_coverage=_altdata_min_bar_coverage(args.altdata_config))
                 if slots:
                     panel = dataclasses.replace(
                         panel, feature_slots={**panel.feature_slots, **slots})
@@ -372,7 +388,8 @@ def _build_substrate(args, cfg, ek, meta, sweep, sweep_hash) -> tuple[Substrate,
                 conns = taiwan_connectors()           # ONE instance set, shared by both shapes below
                 slots = bridge_altdata_feature_slots(
                     bar_dates=panel.dates, start=args.start, end=bar_end, catalog=catalog,
-                    connectors=conns, aliases=TAIWAN_ALTDATA_ALIASES)
+                    connectors=conns, aliases=TAIWAN_ALTDATA_ALIASES,
+                    min_bar_coverage=_altdata_min_bar_coverage(args.altdata_config))
                 # U3a: the SAME T86 observations, assembled the other way up — one (T,N) matrix per
                 # field, columns aligned to panel.tickers — so a per-name institutional-flow
                 # characteristic is reachable by the CROSS-SECTIONAL search (crucible-v7.1), not only
@@ -416,7 +433,8 @@ def _build_substrate(args, cfg, ek, meta, sweep, sweep_hash) -> tuple[Substrate,
             if not args.no_altdata_slots:
                 bar_end = args.end or np.datetime_as_string(panel.dates.max(), unit="D")
                 slots = bridge_altdata_feature_slots(
-                    bar_dates=panel.dates, start=args.start, end=bar_end, catalog=catalog)
+                    bar_dates=panel.dates, start=args.start, end=bar_end, catalog=catalog,
+                    min_bar_coverage=_altdata_min_bar_coverage(args.altdata_config))
                 if slots:
                     panel = dataclasses.replace(
                         panel, feature_slots={**panel.feature_slots, **slots})

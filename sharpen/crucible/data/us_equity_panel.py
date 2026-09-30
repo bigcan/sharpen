@@ -33,12 +33,12 @@ tripwire below enforces. Run it whenever this builder is touched:
 from __future__ import annotations
 
 import logging
-import pickle
 from pathlib import Path
 
 import numpy as np
 import pandas as pd
 
+from sharpen.utils.compat_pickle import load_compat
 from sharpen.signals.features import Panel
 
 log = logging.getLogger("crucible.us_equity_panel")
@@ -112,7 +112,7 @@ def build_us_equity_panel(top_k: int = DEFAULT_TOP_K, cache: "Path | None" = Non
             f"missing PIT union cache: {src_path} (build via "
             f"scripts/research/crucible_us_equity_extend_history.py)")
     with open(src_path, "rb") as fh:
-        src = pickle.load(fh)
+        src = load_compat(fh)            # v15.0: pre-rename caches (finrl_pro_ds.*) load again
 
     close, volume = src.close, src.volume
     adv = _trailing_adv(close, volume)

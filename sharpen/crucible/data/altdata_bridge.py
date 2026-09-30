@@ -120,6 +120,7 @@ def bridge_altdata_feature_slots(
     aliases: dict[tuple[str, str], str] | None = None,
     max_slots_per_source: int | None = None,
     max_slot_corr: float | None = None,
+    min_bar_coverage: float | None = None,
 ) -> dict[str, np.ndarray]:
     """Survey ``connectors``, register accepted series into ``catalog``, and return the PIT-safe
     ``{terminal: (T,) array}`` feature slots for the ACCEPTED series only, joined onto ``bar_dates``.
@@ -143,7 +144,7 @@ def bridge_altdata_feature_slots(
     aliases = ALTDATA_ALIASES if aliases is None else aliases
 
     # 1) survey = the accept filter (quality gate + as-of-join tripwire) + 2) register accepted.
-    scout = DataScout(connectors)
+    scout = DataScout(connectors, min_bar_coverage=min_bar_coverage)   # v15.0 coverage floor
     report = scout.survey(start, end, bar_dates)
     if catalog is not None:
         scout.register_accepted(report, catalog)
