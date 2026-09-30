@@ -122,6 +122,18 @@ class PaperState:
         """Equity = margin + Σ unrealized at ``price``."""
         return self.margin_balance + float(self.unrealized_pnl(price).sum())
 
+    def notional_gross(self, price: np.ndarray, pv: float) -> float:
+        """Actual gross exposure at ``price``: ``sum_i |shares_i * price_i| / pv``, with
+        ``shares_i = entry_notional_i / entry_price_i``, the fixed-notional book's share count.
+        The weight labels say what was targeted; this is what the book holds after price drift
+        (audit T4-12a). +inf when positions sit on no equity, so a kill reading it fails closed."""
+        active = (np.abs(self.positions) > _POS_EPS) & (self.entry_notionals > _NOTIONAL_EPS)
+        held = float((self.entry_notionals[active] * price[active]
+                      / (self.entry_prices[active] + _PRICE_EPS)).sum())
+        if held <= 0.0:
+            return 0.0
+        return held / pv if pv > 1e-12 else float("inf")
+
     def pv_before(self, prev_price: np.ndarray) -> float:
         """``portfolio_value_before`` (env.step): equity at the PRIOR bar's price,
         floored at ``initial_capital·0.001`` — the notional base for this bar's costs."""
@@ -273,6 +285,7 @@ class PaperState:
             "cost": cost,
             "turnover": float(np.abs(delta_weights).sum()),
             "gross_exposure": float(np.abs(self.positions).sum()),
+            "notional_gross": self.notional_gross(price_now, pv),
             "net_exposure": float(self.positions.sum()),
         }
 
@@ -365,6 +378,10 @@ class LiveTrajectory:
     # terminated early on an env circuit-break (PV < 0.1×capital). Parity is then valid only
     # over the covered prefix, never silently treated as a full-coverage soak (P10-03).
     coverage_incomplete: bool = False
+    # (n_steps,) actual notional gross / equity after each step (audit T4-12a). The labels in
+    # ``gross_exposure`` are capped by construction and understate the drifted book. None on
+    # a path that does not record it; the gross kill then falls back to the labels.
+    notional_gross: np.ndarray | None = None
 
     @property
     def n_steps(self) -> int:
@@ -384,7 +401,14 @@ class LiveTrajectory:
         return float(self.step_returns.min() * 100.0) if self.n_steps else 0.0
 
     def max_gross_exposure(self) -> float:
-        return float(self.gross_exposure.max()) if self.n_steps else 0.0
+        """Largest gross exposure: actual notional (``notional_gross``) when the path records
+        it, else the weight labels (``gross_basis`` says which)."""
+        g = self.gross_exposure if self.notional_gross is None else self.notional_gross
+        return float(np.max(g)) if self.n_steps else 0.0
+
+    @property
+    def gross_basis(self) -> str:
+        return "label" if self.notional_gross is None else "notional"
 
     def corr_to_spy(self, window: int | None = None) -> float | None:
         """Correlation of portfolio daily returns to SPY daily returns over the trailing

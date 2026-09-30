@@ -47,6 +47,6 @@
   - add the `trial_ledger` block from `configs/tailwind_v1_x1.prereg.yaml`.
 
   After editing, re-register the file: `python scripts/sharpops_gate_registry.py --register configs/tailwind_v1.gates.yaml --reason "N1/N12 per sharpops_ladder_decision_2026-09-30"`.
-- **CLAUDE.md** is outside the repo's edit boundary (`sharpen/`, `scripts/`, `configs/`, `tests/`, `docs/`). Proposed replacement for the Anti-Patterns line "Never promote a strategy to capital (live/paper) … without a Tier-2 deep lifecycle audit":
+- **CLAUDE.md: APPLIED 2026-09-30 on the operator's explicit instruction** (it is outside the repo's normal edit boundary). The Commands example and the SharpOps section now reflect the required `--stage`, and step 2 notes that run manifests are not implemented. Applied replacement for the Anti-Patterns line "Never promote a strategy to capital (live/paper) … without a Tier-2 deep lifecycle audit":
 
   > **Never promote without the rung's test** (`docs/sharpops_promotion_standard.md`): paper needs the pooled-OOS PSR at α 0.20, the tripwires, an integrity audit and `sharpops_promotion_check.py` exit 0; a prop challenge or live capital also needs a **Tier-2 deep lifecycle audit**. Bar-level PF is a diagnostic, never a gate.

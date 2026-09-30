@@ -546,6 +546,7 @@ class ForwardRunner:
                "cost": float(info["cost"]), "carry": float(info["carry"]),
                "turnover": float(info["turnover"]), "gross": float(info["gross_exposure"]),
                "net": float(info["net_exposure"]),
+               "notional_gross": float(info["notional_gross"]),
                "positions": [float(x) for x in book.positions],
                "cumulative_fees": float(book.cumulative_fees)}
         self._append_fill(out)
@@ -678,6 +679,10 @@ class ForwardRunner:
                 sleeve_batch["assets"],
                 {s: np.asarray(a)[i0:i1] for s, a in sleeve_batch["alphas"].items()},
                 assets, window["price_ary"])
+        # Actual notional gross (audit T4-12a). Fills booked before it was recorded lack it; the
+        # gross kill is then read on the labels, and the verdict says so.
+        ng = ([f["notional_gross"] for f in fills]
+              if all("notional_gross" in f for f in fills) else None)
         pv = np.array([fills[0]["pv_before"]] + [f["pv"] for f in fills])
         live = LiveTrajectory(
             weights=W_book, equity_curve=pv, step_returns=r_book,
@@ -685,6 +690,7 @@ class ForwardRunner:
             cumulative_fees=np.array([f["cumulative_fees"] for f in fills]),
             gross_exposure=np.array([f["gross"] for f in fills]),
             net_exposure=np.array([f["net"] for f in fills]),
+            notional_gross=None if ng is None else np.array(ng, dtype=np.float64),
             timestamps=np.asarray(window["timestamps"][1:], dtype=np.int64),
             class_pnl=class_pnl, assets=assets, asset_class=asset_class,
             initial_capital=float(pv[0]), spy_returns=spy, sleeve_pnl=sleeve_pnl)

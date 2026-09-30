@@ -243,3 +243,22 @@ def test_add_at_a_higher_price_books_the_share_weighted_vwap():
                              pv_before=pv_before)
     assert abs(book.entry_prices[0] - 200.0 / 150.0) < 1e-9
     assert abs(info["portfolio_value"] - 1_100.0) < 1e-6
+
+
+def test_notional_gross_measures_the_drifted_book_not_the_labels():
+    """Audit T4-12a: after the long leg falls 20% against an unchanged short, the book holds
+    800 long and 1,000 short on 800 of equity, 2.25x gross, while the labels still say 2.0x."""
+    price = np.array([[100.0, 100.0], [100.0, 100.0], [80.0, 100.0]])
+    book = PaperState(n_assets=2, initial_capital=1_000.0)
+    eng = SimFillEngine(taker_fee_pct=0.0, slippage_base_bps=0.0, slippage_impact_bps=0.0)
+    for k in range(2):                                # enter at close 1, hold into close 2
+        delta = generate_orders(np.array([1.0, -1.0]), book.positions)
+        pv_before = book.pv_before(price[k])
+        fill = eng.fill(delta_weights=delta, ref_prices=price[k + 1], pv_before=pv_before,
+                        dollar_volume=np.array([1e15, 1e15]))
+        info = book.step_bar(delta_weights=delta, fill=fill, prev_price=price[k],
+                             price_now=price[k + 1], carry_rates=np.zeros(2),
+                             pv_before=pv_before)
+    assert abs(info["portfolio_value"] - 800.0) < 1e-6
+    assert abs(info["gross_exposure"] - 2.0) < 1e-12
+    assert abs(info["notional_gross"] - 2.25) < 1e-9

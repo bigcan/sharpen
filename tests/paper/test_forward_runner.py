@@ -289,6 +289,14 @@ def test_the_scored_book_carries_per_sleeve_attribution(ran):
     assert chk["status"] == "PASS" and chk["basis"] == "sleeve"
 
 
+def test_the_scored_gross_kill_reads_actual_notional(ran):
+    """Audit T4-12a on the forward path: fills record the book's actual notional gross, and
+    the soak's gross kill is read on it."""
+    v = ran["reports"][-1]["verdict"]
+    assert v["groups"]["risk"]["checks"]["max_gross_exposure"]["basis"] == "notional"
+    assert all("notional_gross" in f for f in ran["runner"].fills())
+
+
 def test_rerunning_the_same_session_is_idempotent(ran, tmp_path):
     state = tmp_path / "copy"
     shutil.copytree(ran["state"], state)
