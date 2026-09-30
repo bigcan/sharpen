@@ -62,18 +62,26 @@ class HygieneResult:
 
 
 def assert_causal(
-    sig: "Signal", panel: Panel, *, n_probes: int = 8, atol: float = 1e-9, seed: int = 0
+    sig: "Signal", panel: Panel, *, n_probes: int = 8, atol: float = 1e-9, seed: int = 0,
+    full: "np.ndarray | None" = None,
 ) -> tuple[bool, str]:
     """Truncation-equivalence causality check.
 
     For several probe rows ``t``, verify ``sig.compute(panel.truncated(t))[t]`` matches
     ``sig.compute(panel)[t]`` in both NaN pattern and finite values. Any mismatch (or an
     exception on the truncated panel) means the signal used data stamped > t — a leak.
+
+    ``full`` (optional) is ``sig.compute(panel)`` already evaluated by the caller — the GP search
+    evaluates every genome on its panel anyway, so re-computing it here doubled that cost. Passing it
+    changes nothing about the check (the truncated re-evaluations are what test causality).
     """
-    try:
-        full = np.asarray(sig.compute(panel), dtype=np.float64)
-    except Exception as exc:  # noqa: BLE001 - a signal that crashes is non-evaluable
-        return False, f"compute() raised on full panel: {exc!r}"
+    if full is None:
+        try:
+            full = np.asarray(sig.compute(panel), dtype=np.float64)
+        except Exception as exc:  # noqa: BLE001 - a signal that crashes is non-evaluable
+            return False, f"compute() raised on full panel: {exc!r}"
+    else:
+        full = np.asarray(full, dtype=np.float64)
     if full.shape != (panel.T, panel.N):
         return False, f"compute() returned {full.shape}, expected {(panel.T, panel.N)}"
 

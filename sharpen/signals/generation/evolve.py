@@ -76,7 +76,7 @@ _CAUSALITY_PROBES = 3
 
 
 def _genome_is_causal(formula: str, panel: Panel, *, n_probes: int = _CAUSALITY_PROBES,
-                      seed: int = 0) -> tuple[bool, str]:
+                      seed: int = 0, full: "np.ndarray | None" = None) -> tuple[bool, str]:
     """Truncation-equivalence probe on ONE generated genome: ``eval(truncated(t))[t] == eval(panel)[t]``
     for ``n_probes`` random rows. Delegates to the shipped :func:`eval_harness.assert_causal` rather than
     re-implementing the check (one causality definition in the codebase, per LEAK-2). The genome is
@@ -85,7 +85,7 @@ def _genome_is_causal(formula: str, panel: Panel, *, n_probes: int = _CAUSALITY_
     path needs it."""
     from ..eval_harness import assert_causal
     from .dsl_signal import DslSignal
-    return assert_causal(DslSignal(formula), panel, n_probes=n_probes, seed=seed)
+    return assert_causal(DslSignal(formula), panel, n_probes=n_probes, seed=seed, full=full)
 
 
 @dataclass(frozen=True, slots=True)
@@ -109,32 +109,56 @@ class GenerationReport:
     # adjudicated. `promising=0` out of 0 is vacuous; out of 8 it is evidence. Two sessions running,
     # a zero with an unread denominator cost real analysis time (the cont-152 dedup livelock, then the
     # cont-153 train pre-filter), so the count travels WITH the verdict instead of living in a log line.
+    # v15.0: counts ONLY entries that produced a holdout pass/fail decision. It used to be
+    # ``len(train_passers)``, which also counted candidates whose holdout scoring came back degenerate
+    # or raised — a tick where every holdout call failed reported a non-zero denominator.
     n_holdout_tested: int = 0
+    # v15.0 — every PRE-REGISTERED seed that never received a holdout decision, with the reason
+    # (``[{"formula": canonical, "reason": str}]``). The caller ledgers these as NOT_TESTED and charges
+    # them NO online-FDR wealth: a test that never ran cannot produce a false discovery.
+    not_tested: list[dict] = field(default_factory=list)
+    # v15.0 — SHIPPED contract only: pre-registered seeds its TRAIN-stage gate rejected. That gate is
+    # part of the shipped contract's own decision rule, so these are adjudicated (charged, ledgered
+    # SCORED_NOT_SELECTED) — unlike the corrected contract, whose train step is not a decision stage.
+    train_rejected: list[str] = field(default_factory=list)
 
 
 def _candidate_returns(formula: str, panel: Panel, *, hold_horizon: int, cost_bps: float,
-                       min_names: int) -> tuple[np.ndarray, float] | None:
+                       min_names: int, scores: "np.ndarray | None" = None,
+                       ) -> tuple[np.ndarray, float] | None:
     """Daily-marked dollar-neutral rank-L/S sleeve return for ``formula`` on ``panel``, NET of
     turnover·bps, plus annualized turnover. Weights are rebalanced every ``hold_horizon`` days
     and HELD (marked daily with the 1-day forward return) — the live-book convention, low
-    turnover. Returns None if the score is everywhere NaN (degenerate genome)."""
-    scores = eval_on_panel(formula, panel)
+    turnover. Returns None if the score is everywhere NaN (degenerate genome).
+
+    ``scores`` (optional) is ``eval_on_panel(formula, panel)`` already computed by the caller.
+    The daily marking is vectorized (weights only change on rebalance rows, so they are formed there
+    and held by index); the per-row ``nansum`` is the same contiguous reduction the former per-day
+    loop ran, so the stream is bit-identical (tests/signals/test_generation_evolve_v15.py)."""
+    if scores is None:
+        scores = eval_on_panel(formula, panel)
     if not np.isfinite(scores).any():
         return None
     fwd1 = panel.forward_returns(1)
     T = panel.T
     rets = np.full(T, np.nan)
-    turns: list[float] = []
+    if T < 2:
+        return rets, 0.0
+    rebal = np.arange(0, T - 1, hold_horizon)           # rebalance rows → new target weights
+    W = np.zeros((rebal.size, panel.N))
+    turns = np.empty(rebal.size)
     w = np.zeros(panel.N)
-    for t in range(T - 1):
-        if t % hold_horizon == 0:                       # rebalance day → new target weights
-            w_new = _ls_weights(scores[t], panel.active[t], min_names=min_names)
-            turns.append(float(np.abs(w_new - w).sum()))
-            w = w_new
-        rets[t] = float(np.nansum(w * fwd1[t]) - cost_bps * (turns[-1] if t % hold_horizon == 0
-                                                             and turns else 0.0))
+    for i, t in enumerate(rebal):
+        w_new = _ls_weights(scores[t], panel.active[t], min_names=min_names)
+        turns[i] = float(np.abs(w_new - w).sum())
+        W[i] = w_new
+        w = w_new
+    held = W[np.arange(T - 1) // hold_horizon]          # (T-1, N) weights in force on each row
+    cost = np.zeros(T - 1)
+    cost[rebal] = cost_bps * turns
+    rets[:T - 1] = np.nansum(held * fwd1[:T - 1], axis=1) - cost
     ppy = 252.0 / hold_horizon
-    turnover_ann = float(np.mean(turns) * ppy) if turns else 0.0
+    turnover_ann = float(np.mean(turns) * ppy) if turns.size else 0.0
     return rets, turnover_ann
 
 
@@ -146,6 +170,7 @@ def _overlay_returns(formula: str, panel: Panel, base_book: np.ndarray, *,
                      base_gross: "np.ndarray | None" = None,
                      base_cost: "np.ndarray | None" = None,
                      gross_exposure: "np.ndarray | None" = None,
+                     scores: "np.ndarray | None" = None,
                      ) -> tuple[np.ndarray, float] | None:
     """CR-9 OVERLAY candidate returns: use ``formula`` (a timing signal, typically referencing a
     non-OHLCV feature slot) as a TIME-varying multiplier on the existing combined ``base_book``.
@@ -184,8 +209,10 @@ def _overlay_returns(formula: str, panel: Panel, base_book: np.ndarray, *,
     leveraged book), preserving the 0-PROMISING record (CRU-1).
 
     Returns ``(cand, turnover_ann)`` or None if the timing series is degenerate (all-NaN/constant).
+    ``scores`` (optional) is ``eval_on_panel(formula, panel)`` already computed by the caller.
     """
-    scores = eval_on_panel(formula, panel)
+    if scores is None:
+        scores = eval_on_panel(formula, panel)
     if not np.isfinite(scores).any():
         return None
     with warnings.catch_warnings():                          # all-NaN row → NaN g[t] (handled below)
@@ -316,15 +343,20 @@ def _panel_market_returns(panel: Panel) -> "np.ndarray | None":
     corrected legs — `max_base_corr` compares against the BASE SLEEVES, not the market, so a pure
     beta tilt walks straight through uplift, fragility and collinearity.
 
-    LEAK-2: bar t's market return is realized AT t, the same bar as the candidate's own return, so
-    the regression is contemporaneous — a beta measurement, not a forecast.
+    ALIGNMENT (v15.0 fix). Every candidate and base return in this module is stamped at ``t`` for the
+    ``t → t+1`` move (``_candidate_returns`` marks with ``forward_returns(1)[t]``, base sleeves likewise).
+    This series used to be ``log(close[t]/close[t-1])`` — the PREVIOUS bar's move — so the "beta" was a
+    one-bar lead-lag coefficient: a pure market book measured beta 0.028 against a true 0.54, and the
+    leg (live at 0.30 in ``configs/us_equity_corrected_contract.gates.yaml``) could not fire. It is now
+    the equal-weight mean of the same forward simple returns over the names active at ``t``, so the
+    regression is contemporaneous — a beta measurement, not a forecast (LEAK-2 unaffected: it is only
+    ever regressed against a return stamped at the same ``t``).
     """
     close = getattr(panel, "close", None)
     active = getattr(panel, "active", None)
     if close is None or active is None:
         return None
-    with np.errstate(invalid="ignore", divide="ignore"):
-        r = np.diff(np.log(close), axis=0, prepend=np.nan)
+    r = np.asarray(panel.forward_returns(1), dtype=np.float64)
     r = np.where(np.asarray(active, dtype=bool) & np.isfinite(r), r, np.nan)
     empty = ~np.any(np.isfinite(r), axis=1)
     out = np.full(r.shape[0], np.nan)
@@ -445,19 +477,30 @@ def evolve(
     # base_components, sliced to the same rows) so the overlay-tilt cost is charged correctly.
     ctx_tr = _overlay_ctx(base_tr, _slice_components(base_components, n_train), ts_tr, cfg) \
         if is_overlay else None
+    # The base-only combined book is IDENTICAL for every genome on this split, but combination_fitness
+    # rebuilt it per genome (half of its combiner calls). Computed once here from the SAME float64/str-key
+    # normalization combination_fitness applies, so the cached book is bit-identical.
+    b_base_tr = _combined_book({str(k): np.asarray(v, dtype=np.float64) for k, v in base_tr.items()},
+                               ts_tr, cfg)
 
-    def _returns_for(formula: str, pnl: Panel, ctx: "_OverlayCtx | None"
-                     ) -> tuple[np.ndarray, float] | None:
+    def _returns_for(formula: str, pnl: Panel, ctx: "_OverlayCtx | None",
+                     scores: "np.ndarray | None" = None) -> tuple[np.ndarray, float] | None:
         if is_overlay:
             bb, bg, bc, ge = ctx                                          # type: ignore[misc]
             return _overlay_returns(formula, pnl, bb, cost_bps=cost_bps,
-                                    base_gross=bg, base_cost=bc, gross_exposure=ge)
+                                    base_gross=bg, base_cost=bc, gross_exposure=ge, scores=scores)
         return _candidate_returns(formula, pnl, hold_horizon=hold_horizon,
-                                  cost_bps=cost_bps, min_names=ls_min_names)
+                                  cost_bps=cost_bps, min_names=ls_min_names, scores=scores)
 
     pop = [parse(f) for f in seed_formulas]
     if not pop:
         raise ValueError("seed_formulas must be non-empty (warm-start)")
+    # v15.0: the pre-registration as CANONICAL strings. ``scored`` (below) is keyed by
+    # ``to_formula(parse(f))``; matching the eligible set against the RAW seed strings meant a caller that
+    # passed verbatim formulas (``crucible_calibration.run_e1`` passes ``FORMULAS[i]``) got an EMPTY
+    # eligible set under ``prereg_only`` — n_holdout_tested=0 on a run that believed it tested every seed.
+    # The orchestrator already passes canonical strings, so its runs are unaffected.
+    prereg = {to_formula(p) for p in pop}
     gen_n_total = 0
     scored: dict[str, Candidate] = {}        # formula -> best Candidate seen (dedup)
     # GP4-02/M1: the cross-search DISPERSION pool — every scored genome's augmented-book per-period
@@ -477,32 +520,57 @@ def evolve(
         # TRAIN panel is the right surface — that is the panel this genome is scored on, and the
         # holdout re-score runs the same formula through the same evaluator. Culled BEFORE fitness so a
         # leaky genome can never reach the deflation, the DSR dispersion pool, or the PBO bank.
+        # One full-panel evaluation per genome, reused by the causality probe and the return stream
+        # (both used to evaluate it separately — the second call was pure duplicate work).
+        try:
+            scores = eval_on_panel(formula, train)
+        except Exception as exc:                          # noqa: BLE001 - cull, don't crash a run
+            return Candidate(formula, _INFEASIBLE, None, f"eval raised: {exc!r}")
         if enforce_causality:
-            ok, why = _genome_is_causal(formula, train)
+            ok, why = _genome_is_causal(formula, train, full=scores)
             if not ok:
                 log.warning("genome CULLED by Tier-0 causality probe (%s) — formula=%.120s", why,
                             formula)
                 return Candidate(formula, _INFEASIBLE, None, f"tier0 causality: {why}")
         try:
-            cr = _returns_for(formula, train, ctx_tr)
+            cr = _returns_for(formula, train, ctx_tr, scores=scores)
         except Exception as exc:                          # noqa: BLE001 - cull, don't crash a run
             return Candidate(formula, _INFEASIBLE, None, f"eval raised: {exc!r}")
         if cr is None:
             return Candidate(formula, _INFEASIBLE, None, "degenerate score (all-NaN)")
         cand_ret, turnover_ann = cr
-        if 0 < pbo_max_strategies and len(cand_return_bank) < pbo_max_strategies:
-            cand_return_bank.append(np.asarray(cand_ret, dtype=np.float64))   # PBO sample (GP7-03)
         n_nodes = node_count(parse(formula))
-        if turnover_ann > cfg.turnover_soft_cap * 2.0 or n_nodes > cfg.max_ast_nodes:
+        over_bounds = turnover_ann > cfg.turnover_soft_cap * 2.0 or n_nodes > cfg.max_ast_nodes
+        # v15.0 — SEARCH BOUNDS BIND THE SEARCH, NOT A PRE-REGISTRATION. The size cap (max_ast_nodes) is an
+        # Occam bound on what the GP may BREED and the 2x-soft-cap turnover cull a compute bound on it;
+        # neither is evidence about a hypothesis that was written down before scoring. Applied to seeds
+        # they were the FIFTH instance of this project's recurring shape (a cheap screen stricter than the
+        # gate it protects): 40 of the 100 published WQ101 formulas exceed 24 nodes — including curated
+        # seed #9, which has therefore never been tested on any substrate — and the us_equity H=2 seeds ran
+        # at 88-168 turnover/yr, so the 2026-08-10 extended-bank tick pre-registered 107 specs and the
+        # holdout adjudicated 16, while LORD++ was charged for all 107. Under the corrected contract a
+        # pre-registered seed is therefore scored and sent to the holdout regardless (its turnover is
+        # already priced into its NET return stream), but keeps search fitness -inf so it is never bred —
+        # the GP trajectory is byte-identical. Offspring and the shipped contract are unchanged.
+        exempt = over_bounds and is_corrected and formula in prereg
+        if over_bounds and not exempt:
             return Candidate(formula, _INFEASIBLE, None, "hard-infeasible (turnover/size)")
+        if 0 < pbo_max_strategies and len(cand_return_bank) < pbo_max_strategies:
+            # PBO sample (GP7-03). v15.0: taken AFTER the feasibility cull — a hard-infeasible genome is not
+            # a strategy the search could select, so it must not enter the best-of-N overfit estimate.
+            cand_return_bank.append(np.asarray(cand_ret, dtype=np.float64))
         try:                                              # F3: fitness must not crash the run
             res = combination_fitness(cand_ret, base_tr, ts_tr, cfg, gen_n_eff=gen_n_eff,
-                                      turnover_ann=turnover_ann, n_nodes=n_nodes)
+                                      turnover_ann=turnover_ann, n_nodes=n_nodes,
+                                      base_book=b_base_tr)
         except Exception as exc:                          # noqa: BLE001 - cull, don't crash a run
             log.warning("genome culled — combination_fitness raised %r (formula=%.90s)", exc, formula)
             return Candidate(formula, _INFEASIBLE, None, f"fitness raised: {exc!r}")
         if np.isfinite(res.aug_book_sharpe_pp):
             sharpe_pool.append(float(res.aug_book_sharpe_pp))
+        if exempt:
+            return Candidate(formula, _INFEASIBLE, res,
+                             "pre-registered beyond search bounds (turnover/size): tested, never bred")
         return Candidate(formula, res.fitness, res)
 
     for _gen in range(n_generations):
@@ -565,14 +633,14 @@ def evolve(
             # Cost is negligible: the eligible set is the tick's handful of pre-registered specs, not
             # the search. Offspring are unaffected — they are non-promotable under this policy either
             # way, so the pre-filter has nothing left to decide here.
-            prereg = set(seed_formulas)
-            eligible = [c for c in ranked if c.formula in prereg]
+            eligible = [c for c in ranked if c.formula in prereg]      # canonical match (v15.0)
             train_passers = [c for c in eligible if c.result is not None]
             # The ONE remaining reason a pre-registered spec can fail to reach the holdout: it never
-            # produced a FitnessResult at all (Tier-0 causality cull, degenerate all-NaN score, or
-            # hard-infeasible turnover/size). Those are correctness culls, not evidence, so each is
-            # named individually — a silently-dropped pre-registration is the ambiguity this bump
-            # exists to remove.
+            # produced a FitnessResult at all (Tier-0 causality cull, degenerate all-NaN score, or an
+            # evaluation error). Since v15.0 the turnover/size search bounds no longer apply to seeds
+            # (see `score`). Those are correctness culls, not evidence, so each is named individually —
+            # and recorded in `GenerationReport.not_tested` so the caller neither charges LORD++ for it
+            # nor ledgers it as "scored and lost".
             for c in eligible:
                 if c.result is None:
                     log.warning("prereg_only: pre-registered spec NOT tested — %s (formula=%.120s)",
@@ -604,8 +672,7 @@ def evolve(
     ts_ho = np.asarray(timestamps)[panel.T - n_hold:]
     # EXPOSURE leg (guards.max_market_beta). Inert wherever that threshold is null — see
     # _panel_market_returns for why it exists and why it moves no existing verdict.
-    _mkt_full = _panel_market_returns(panel)
-    mkt_ho = None if _mkt_full is None else _mkt_full[panel.T - n_hold:]
+    _mkt_full = _panel_market_returns(panel)             # full timeline; the scorer slices eval rows
     # OVERLAY (CR-9): the base book on the FULL timeline is the multiplier target for the full-panel
     # re-score; the holdout rows are sliced off it below, matching the cross_sectional warm-up path.
     # F14: base_components is already on the full timeline, so no slicing here.
@@ -629,8 +696,13 @@ def evolve(
         try:                                              # F3: scoring must not crash the run
             if is_corrected:
                 assert corrected_cfg is not None and lord_level is not None
-                cr = corrected_contract_fitness(cand_ho, base_ho, ts_ho, cfg, corrected_cfg,
-                                                lord_level=lord_level, market_returns=mkt_ho)
+                # v15.0: scored on the FULL causal timeline, evaluated on the holdout rows only, so the
+                # combiner enters the holdout warm (sized from past vols) instead of cold-starting an
+                # equal-weight warm-up on the holdout slice (see corrected_contract_fitness).
+                cr = corrected_contract_fitness(np.asarray(full[0], dtype=np.float64), base_full,
+                                                np.asarray(timestamps), cfg, corrected_cfg,
+                                                lord_level=lord_level, market_returns=_mkt_full,
+                                                eval_from=panel.T - n_hold)
             else:
                 hv = combination_fitness(cand_ho, base_ho, ts_ho, cfg, gen_n_eff=final_n_eff,
                                          turnover_ann=full[1], n_nodes=node_count(parse(c.formula)),
@@ -639,6 +711,15 @@ def evolve(
             holdout_validation.append({"formula": c.formula, "holdout": "fitness raised"})
             continue
         train_delta = c.result.delta_sr_oos               # type: ignore[union-attr]
+        if is_corrected and not np.isfinite(cr.corrected_t):
+            # v15.0: NO STATISTIC, NO DECISION. `_sharpe_diff_z` returns NaN when the paired books are
+            # degenerate (fewer than 8 common bars, a zero-variance book, a non-positive variance). That
+            # used to be recorded as a holdout REJECTION — classified by U4 and charged a LORD++ test —
+            # although no test statistic was ever formed. It is now a non-adjudication, like the
+            # `degenerate` / `fitness raised` entries above.
+            holdout_validation.append({"formula": c.formula, "holdout": "degenerate statistic",
+                                       "contract": CONTRACT_CORRECTED, "n_bars": cr.n_bars})
+            continue
         if is_corrected:
             passed = cr.passes_corrected
             # Same four keys the shipped path emits (the card/manifest layer reads them verbatim),
@@ -649,8 +730,10 @@ def evolve(
                 "contract": CONTRACT_CORRECTED, "corrected_t": cr.corrected_t,
                 "p_value": cr.p_value, "lord_level": float(lord_level), "rho": cr.rho,
                 "n_eff": cr.n_eff, "n_bars": cr.n_bars,
+                "cand_usable_frac": cr.cand_usable_frac,
                 "legs": {"t": cr.t_pass, "lord": cr.lord_pass, "uplift": cr.uplift_pass,
-                         "fragility": cr.fragility_pass, "collinearity": cr.collinearity_pass}})
+                         "fragility": cr.fragility_pass, "collinearity": cr.collinearity_pass,
+                         "exposure": cr.exposure_pass, "degenerate": cr.degenerate_pass}})
         else:
             passed = hv.passes_gate
             holdout_validation.append({
@@ -670,8 +753,37 @@ def evolve(
         except Exception as exc:                          # noqa: BLE001 - advisory, never fatal
             log.warning("PBO computation skipped: %r", exc)
 
+    # v15.0: the denominator counts DECISIONS, and every pre-registered seed without one is named.
+    decided = {hv["formula"] for hv in holdout_validation if "holdout_passes" in hv}
+    holdout_reason = {hv["formula"]: hv["holdout"] for hv in holdout_validation if "holdout" in hv}
+    passer_formulas = {c.formula for c in train_passers}
+    not_tested: list[dict] = []
+    train_rejected: list[str] = []
+    for f in sorted(prereg - decided):
+        cand = scored.get(f)
+        if f in holdout_reason:
+            why = f"holdout: {holdout_reason[f]}"
+        elif cand is not None and cand.result is None:
+            why = cand.reason or "no fitness result"
+        elif f not in passer_formulas:
+            if not is_corrected:
+                # SHIPPED contract: its 6-way gate on TRAIN is part of the contract's own decision
+                # rule (train gate AND holdout gate), so a pre-registration failing it WAS adjudicated —
+                # rejected by the contract as defined. Charged and ledgered as before.
+                train_rejected.append(f)
+                continue
+            why = "screened on train (offspring_policy=all)"
+        else:                                                       # pragma: no cover - defensive
+            why = "no holdout decision"
+        not_tested.append({"formula": f, "reason": why})
+    if not_tested:
+        log.warning("%d of %d pre-registered specs received NO holdout decision (NOT_TESTED — no "
+                    "online-FDR charge): %s", len(not_tested), len(prereg),
+                    "; ".join(f"{d['reason']} [{d['formula'][:60]}]" for d in not_tested[:5]))
+
     return GenerationReport(
         hall_of_fame=ranked[:10],
         gen_n_total=gen_n_total, gen_n_eff=final_n_eff,
         holdout_validation=holdout_validation, promising=promising, pbo=pbo,
-        contract=contract, n_holdout_tested=len(train_passers))
+        contract=contract, n_holdout_tested=len(decided), not_tested=not_tested,
+        train_rejected=train_rejected)

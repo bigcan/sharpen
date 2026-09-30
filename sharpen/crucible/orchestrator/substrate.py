@@ -669,8 +669,13 @@ class OrchestratorStore:
     def clear_snapshot(self, substrate_id: str) -> None:
         """Forget the last observed snapshot for a substrate — roll back a tentative observation when
         a tick crashes mid-work, so the NEXT tick re-detects the data as new and retries it (C9-01).
-        A no-op when the substrate was never seen."""
-        self._conn.execute("DELETE FROM last_seen WHERE substrate_id = ?", (substrate_id,))
+        A no-op when the substrate was never seen.
+
+        v15.0: resets ONLY ``snapshot_hash``. It used to DELETE the whole ``last_seen`` row, which also
+        erased ``cohort_key`` — so a first tick that rendered a cohort verdict and then crashed later in
+        the same tick would re-fire (and re-charge) the same cohort on the next night."""
+        self._conn.execute("UPDATE last_seen SET snapshot_hash = NULL WHERE substrate_id = ?",
+                           (substrate_id,))
         self._conn.commit()
 
     # --- tick history ------------------------------------------------------------------------------

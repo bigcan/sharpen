@@ -580,16 +580,23 @@ def _tick_timestamps(start_ts: str | None, nights: int) -> list[str]:
     lockbox forward boundary out). Real nightly cadence comes from the OS scheduler invoking this script
     once per night (--nights 1). REPRODUCE / explicit replay (--start-ts given): step +1 calendar day
     per night but NEVER stamp past wall-clock now (cap at now) — a recorded recipe (--start-ts <ts>
-    --nights 1) re-runs bit-identically because a single past ts is returned verbatim, uncapped."""
+    --nights 1) re-runs bit-identically because a single past ts is returned verbatim, uncapped.
+
+    v15.0 — every stamp is DISTINCT. The default branch returned the same ``now`` N times (and the capped
+    branch did for every night past wall-clock), so a ``--nights 4`` burst gave four ticks the same
+    run id (``tick-<sub>-<ts>``), the same derived GP seed, and the same output directory — the second
+    mined tick overwrote the first's manifest and cards. Clashing stamps are now offset by i
+    microseconds from process start: still never ahead of the moment the tick actually runs."""
     now = datetime.now(timezone.utc)
     if not start_ts:
-        return [now.isoformat() for _ in range(nights)]
+        return [(now + timedelta(microseconds=i)).isoformat() for i in range(nights)]
     base = datetime.fromisoformat(start_ts)
     base_cmp = base if base.tzinfo is not None else base.replace(tzinfo=timezone.utc)
     out: list[str] = []
     for i in range(nights):
         stepped_cmp = base_cmp + timedelta(days=i)
-        out.append(now.isoformat() if stepped_cmp > now else (base + timedelta(days=i)).isoformat())
+        out.append((now + timedelta(microseconds=i)).isoformat() if stepped_cmp > now
+                   else (base + timedelta(days=i)).isoformat())
     return out
 
 

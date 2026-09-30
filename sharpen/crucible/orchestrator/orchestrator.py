@@ -149,6 +149,27 @@ def _cohort_config_key(sub: Substrate) -> str | None:
     return f"{sub.cohort_gates_hash or ''}:xsec={int(bool(sub.cohort_cfg.include_cross_sectional))}"
 
 
+def _charge_cohort(fdr: OnlineFDR, cohort_cards: list[CohortCard], substrate_id: str) -> float:
+    """ADR-4: a cohort EVALUATED is ONE online-FDR test on the substrate's account. Returns the level
+    charged.
+
+    v15.0 — a cohort is credited as a LORD++ DISCOVERY only if its binding MC p-value clears the level
+    THIS test is charged. The cohort decides PROMISING against its own ``alpha_cohort`` (0.05), while the
+    per-candidate account it shares charges it ``next_level()`` — 0.00065 after eight barren tests. LORD++
+    replenishes wealth on a rejection at level α_t; crediting a rejection made at 0.05 against a 0.00065
+    charge (77x looser) would raise the NEXT per-candidate level ~41x on the strength of a test the
+    account never priced. The cohort's own verdict is untouched — only the account's credit is gated."""
+    level = fdr.next_level()
+    p_values = [c.mc_p_value for c in cohort_cards
+                if c.verdict == "PROMISING" and c.mc_p_value is not None]
+    is_discovery = bool(p_values) and min(p_values) <= level
+    if p_values and not is_discovery:
+        log.info("substrate %s: cohort PROMISING at its own alpha (p=%.4g) is NOT a LORD++ discovery "
+                 "at the charged level %.3g — the account is charged, not replenished",
+                 substrate_id, min(p_values), level)
+    return fdr.observe(is_discovery=is_discovery)
+
+
 def _cohort_only_tick(
     *, sub: Substrate, store: OrchestratorStore, prepared: PreparedSubstrate, tick_ts: str,
     snap: str, reason: str, crucible_version: str, ghash: str, cohort_key: str,
@@ -176,7 +197,7 @@ def _cohort_only_tick(
     if cohort_cards:
         fdr = store.load_fdr(sub.substrate_id, alpha=sub.fdr_alpha, w0=sub.fdr_w0,
                              alpha_floor=sub.fdr_alpha_floor)
-        fdr_total += fdr.observe(is_discovery=(n_cohort_promising > 0))
+        fdr_total += _charge_cohort(fdr, list(cohort_cards), sub.substrate_id)
         store.save_fdr(sub.substrate_id, fdr)
         store.set_cohort_key(sub.substrate_id, cohort_key)
         if out_dir is not None:
@@ -399,6 +420,14 @@ def _process_substrate(
     # --- Stage 3+4: UNCHANGED mine + T0–T5 (reuse P2 loop; no 2nd proposer call) -------------------
     run_id = f"tick-{sub.substrate_id}-{tick_ts}"
     lord_level = _tick_lord_level(sub, store, n_tests=n_fresh) if sub.contract == "corrected" else None
+    # v15.0: when the cohort adjudication is OUTSTANDING, a mined tick runs it over the substrate's WHOLE
+    # pre-registered pool (ledger pool + this tick's fresh specs), not just tonight's batch. Before, the
+    # batch cohort satisfied the edge trigger (set_cohort_key below), so on any substrate whose first
+    # post-change tick had fresh specs the v12.2 whole-pool cohort could never run (3 of the 4 us_equity
+    # cohort cards on record used tick-local pools). When nothing is pending the batch cohort runs as
+    # before and does NOT consume the trigger.
+    whole_pool_cohort = cohort_pending
+    cohort_pool = (_whole_cohort_pool(sub, fresh_specs) if whole_pool_cohort else None)
     result = run_hypothesis_loop(
         panel=prepared.panel, base_returns=prepared.base_returns,
         timestamps=prepared.timestamps, cfg=sub.cfg, evolve_kwargs=sub.evolve_kwargs,
@@ -411,14 +440,21 @@ def _process_substrate(
         corrected_gates_hash=sub.corrected_gates_hash, lord_level=lord_level,
         search_memory_cfg=sub.search_memory_cfg,
         search_memory_gates_hash=sub.search_memory_gates_hash,
-        substrate_mde=(None if prepared.power is None else prepared.power.implied_mde_delta_sr))
+        substrate_mde=(None if prepared.power is None else prepared.power.implied_mde_delta_sr),
+        cohort_pool=cohort_pool)
 
-    # --- online-FDR: charge one test per pre-registered spec (deterministic order) -----------------
+    # --- online-FDR: charge one test per pre-registered spec the holdout gate DECIDED -------------
+    # v15.0: a pre-registered spec that never received a holdout decision (NOT_TESTED — Tier-0 cull,
+    # degenerate score/statistic, evaluation error) is not a test and cannot produce a false discovery,
+    # so it spends no wealth. Before, every fresh spec was charged: the 2026-08-10 us_equity tick
+    # charged 107 levels for 16 decisions, and every phantom charge also tightened the next real test.
     promising_hashes = {c.candidate_hash for c in result.cards}
     fdr = store.load_fdr(sub.substrate_id, alpha=sub.fdr_alpha, w0=sub.fdr_w0,
                          alpha_floor=sub.fdr_alpha_floor)
     fdr_total = 0.0
     for pr in sorted(fresh_specs, key=lambda s: s.candidate_hash):
+        if pr.candidate_hash not in result.adjudicated_hashes:
+            continue
         charged = fdr.observe(is_discovery=(pr.candidate_hash in promising_hashes))
         sub.ledger.update_fdr_charge(pr.candidate_hash, charged)
         fdr_total += charged
@@ -429,11 +465,12 @@ def _process_substrate(
     # recorded via ledger.update_fdr_charge (which is per-candidate).
     n_cohort_promising = sum(1 for c in result.cohort_cards if c.verdict == "PROMISING")
     if result.cohort_cards:
-        fdr_total += fdr.observe(is_discovery=(n_cohort_promising > 0))
+        fdr_total += _charge_cohort(fdr, list(result.cohort_cards), sub.substrate_id)
     store.save_fdr(sub.substrate_id, fdr)
     # v12.2: record WHICH cohort configuration adjudicated this substrate, only on a rendered
     # verdict, so `cohort_pending` is edge-triggered and a crashed tick re-runs the cohort.
-    if result.cohort_cards and cohort_key is not None:
+    # v15.0: only a WHOLE-POOL verdict consumes the trigger (see `whole_pool_cohort` above).
+    if result.cohort_cards and cohort_key is not None and whole_pool_cohort:
         store.set_cohort_key(sub.substrate_id, cohort_key)
 
     # --- CR-8 lockbox: enroll every PROMISING survivor (idempotent). A fresh entry is INCUBATING with
@@ -452,6 +489,11 @@ def _process_substrate(
         log.warning("substrate %s: the holdout gate adjudicated ZERO candidates — n_promising=%d is "
                     "VACUOUS (no test ran), not a negative result", sub.substrate_id,
                     result.n_promising)
+    elif result.n_not_tested:
+        log.warning("substrate %s: %d of %d pre-registered specs NOT_TESTED (no holdout decision; "
+                    "not charged) — read n_promising=%d against n_holdout_tested=%d",
+                    sub.substrate_id, result.n_not_tested, n_fresh, result.n_promising,
+                    n_holdout_tested)
     record = TickRecord(
         tick_ts=tick_ts, substrate_id=sub.substrate_id, dirty=True, mined=True, reason=reason,
         snapshot_hash=snap, n_preregistered=n_fresh, n_scored=n_scored,
@@ -478,6 +520,19 @@ def _process_substrate(
         result.manifest.write(sub_dir)
 
     return record, outcome, snap
+
+
+def _whole_cohort_pool(sub: Substrate, fresh_specs: list[PreRegisteredSpec]
+                       ) -> list[tuple[str, str, str]]:
+    """The substrate's WHOLE pre-registered pool for a cohort adjudication: every ledgered
+    pre-registration of this substrate plus tonight's fresh specs (pre-registered inside the loop, after
+    this is assembled), de-duplicated by hash and sorted — deterministic, never performance-ranked
+    (ADR-3 (B); a Sharpe-selected pool through a gate that does not price the selection measured FPR
+    1.000)."""
+    pool = {h: (h, f, ct) for h, f, ct in sub.ledger.pre_registered_pool(f"tick-{sub.substrate_id}-")}
+    for pr in fresh_specs:
+        pool.setdefault(pr.candidate_hash, (pr.candidate_hash, pr.formula, pr.spec.candidate_type))
+    return [pool[h] for h in sorted(pool)]
 
 
 def _feature_slot_bars(panel: Panel) -> tuple[tuple[str, int], ...]:
