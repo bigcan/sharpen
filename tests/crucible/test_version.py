@@ -103,7 +103,9 @@ def test_versions_are_distinct_and_tagged_form() -> None:
     # v13.1 = `taiwan_smallcap` wired as a substrate. MINOR: it ADDS a panel + its base-book binding
     # v15.0 = the 2026-09-30 whole-platform deep audit (MAJOR: which hypotheses a tick tests, the
     # gate's degenerate channels, two data inputs, the LORD++ accounting — see version.py).
-    assert CRUCIBLE_VERSION == "crucible-v15.0"
+    # v16.0 = the v15.0 audit's operator decisions (MAJOR: sequential LORD++ levels, the live-level
+    # power guard, the SPRT lockbox, the cohort pool — see version.py).
+    assert CRUCIBLE_VERSION == "crucible-v16.0"
     assert CRUCIBLE_BASELINE_VERSION == "crucible-v1.0"
     assert CRUCIBLE_VERSION != CRUCIBLE_BASELINE_VERSION
 

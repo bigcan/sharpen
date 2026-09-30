@@ -795,7 +795,33 @@ from pathlib import Path
 #     extra.offspring_searched records it; synthetic tick 550 s -> 31 s, 178 s with the search on);
 #     cached base book; one evaluation per genome.
 # Tripwires: tests/**/test_*v15*.py (each defect test mutation-checked against the pre-fix code).
-CRUCIBLE_VERSION = "crucible-v15.0"
+# `crucible-v16.0` is a **MAJOR** bump: the operator decisions the v15.0 deep audit left open, made on
+# 2026-09-30 under the operator's delegation ("make the best decisions ... the end goal is a robust
+# efficient alpha miner"). MAJOR because it changes the binding LORD++ levels, which substrates are
+# mined, the lockbox verdict and the cohort pool. No frozen gates file changed; the edited lockbox /
+# cohort / alt-data gates are re-registered in configs/gates_registry.json.
+#
+#   * SEQUENTIAL LORD++ LEVELS. Each decided pre-registration is tested at its OWN level, in
+#     pre-registration order (fdr.LordSequence), instead of every spec at the batch's tightest level;
+#     a discovery replenishes the later specs of the same batch; the orchestrator replays the sequence
+#     on the persistent account and refuses to charge if a level drifts. +18% expected detections on an
+#     8-spec first batch, +41% on a 40-spec one (z-mean 3.5). The k^-1.6 spending sequence is KEPT:
+#     Javanmard-Montanari was costed and is 1-17% worse over the 100-test lifetimes on record.
+#   * POWER-LORD-01 WIRED. The substrate-power guard re-stamps at the live account's level, selecting
+#     the calibration row by LEVEL (replenishment and refunds honoured; a level tighter than every
+#     measured one refuses). U4 rejection classes read the batch's tightest level. us_equity: MDE 1.32
+#     at a fresh level vs 2.12 at its live one (ceiling 1.457) — the record's closure, now enforced.
+#   * LOCKBOX = WALD SPRT ON THE FORWARD SHARPE DIFFERENCE. The fixed rule scored the Sharpe of
+#     b_aug − b_base, which is sign-inverted for a genuine diversifier, with one 63-bar look (false CLEAR
+#     44%). New enrollments: block-summed, vol-standardized aug-vs-base differences from
+#     fitness.augmented_book, α 0.10 / β 0.20 / H1 ΔSR 0.30, cap 756 bars -> INCONCLUSIVE; false CLEAR
+#     2-8% by Monte Carlo. An entry keeps the rule it was enrolled under.
+#   * COHORT enforce_funnel_feasibility: false — consistent with v15.0 (pre-registrations are tested,
+#     not screened). SCOUT altdata.min_bar_coverage: 0.50.
+#   * STORE REPAIR (operator data, not code): results/crucible_orchestrator/real — 40 untested
+#     pre-registrations reopened, us_equity account compacted 152 -> 54 (98 phantom charges); backups
+#     beside the store.
+CRUCIBLE_VERSION = "crucible-v16.0"
 
 # The baseline (pre-gate-repair) system, preserved as a git tag for reproducibility comparisons.
 CRUCIBLE_BASELINE_VERSION = "crucible-v1.0"

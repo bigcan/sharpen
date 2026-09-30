@@ -1,4 +1,4 @@
-# Crucible deep audit — 2026-09-30 (`crucible-v15.0`)
+# Crucible deep audit — 2026-09-30 (`crucible-v15.0`, operator decisions `crucible-v16.0`)
 
 Branch `claude/crucible-deep-audit` (from `agentic-trading-lab` @ `20c8e263`). Whole-platform audit, not
 diff-scoped: five parallel finders (funnel statistics · GP/DSL engine · core + orchestrator · agentic +
@@ -83,31 +83,32 @@ synthetic tick. Every fix ships with tripwire tests that were run against the pr
   logged), and the default run records the same 11 pre-registration rows — verdict, rejection class and
   charge (pinned by `test_prereg_ledger_rows_do_not_depend_on_the_offspring_search`).
 
-## Operator decisions (not changed — each is a gate or a live-store edit)
+## Operator decisions — made 2026-09-30 (`crucible-v16.0`)
 
-* **POWER-LORD-01 is not wired.** Wiring it is stricter and, on the guard's own grid, flips us_equity to
-  REFUSE (the 2026-08-09 memo). Decide together with a finer calibration grid.
-* **LORD++ spending sequence.** γ_k ∝ k^-1.6 puts 44% of all wealth on the first test (after 8 tests the
-  level is 6.5e-4, z≈3.2); the tick also tests every spec at the batch's TIGHTEST level while charging each
-  its own. Both are conservative-valid; a flatter sequence and per-spec levels would each add power.
-* **Lockbox criterion** (63 bars, forward SR >= 0.30) barely separates edge from noise: P(clear) 0.44 at
-  IR 0 vs 0.64 at IR 1.0. Needs a power-derived horizon/threshold or a sequential test.
-* **Cohort `enforce_funnel_feasibility: true`** mirrors a turnover cull the funnel no longer applies to
-  pre-registrations (it culled 96 of 140 us_equity members).
-* **Historical stores.** `scripts/research/crucible_v15_reopen.py --store <dir>` (dry-run) lists the
-  definitely-untested pre-registrations and the LORD++ phantom charges; `--apply-reopen` /
-  `--apply-fdr-refund` repair them (backups written). On `results/crucible_orchestrator/real`: 40 rows,
-  us_equity 98 phantoms. The declared-(-1) LLM specs need no repair — their folded formulas hash anew.
-* **Scout coverage floor.** Set `altdata.min_bar_coverage` in `configs/crucible_altdata.gates.yaml` (proposed
-  0.50: a series must exist for at least half the panel, i.e. before the holdout starts) and re-register the
-  file (`python scripts/sharpops_gate_registry.py --register configs/crucible_altdata.gates.yaml --reason ...`).
-  Unset, the scout keeps its pre-v15 behaviour.
-* **Shared ledgers.** The ledger's primary key is the formula, so a formula tested on one substrate cannot
-  be tested on another in the same store; run one `--out` per substrate.
-* **Execution convention.** Every book enters at the close the signal reads; a one-bar lag halves the
-  5-day reversal IC on Taiwan small-cap. Add a lag check before any capital decision.
-* **F3 capturability** uses one rebalance phase (holder_conc -0.045 at offset 0; positive on 16 of 21
-  offsets). Staggered books would remove the arbitrary phase.
+The operator delegated the open decisions ("make the best decisions for me, the end goal is a robust
+efficient alpha miner"). Each was decided on measured evidence; every code change carries mutation-checked
+tripwires (`tests/crucible/test_v16_0_*.py`).
+
+| Decision | Resolution | Evidence |
+|---|---|---|
+| Batch-min LORD++ levels | **Sequential per-spec levels** in pre-registration order (`fdr.LordSequence`); discoveries replenish later specs of the same batch; the orchestrator replays the sequence on the persistent account and refuses to charge on any level drift | +18% expected detections on an 8-spec first batch, +41% on a 40-spec one, +6-9% on later batches (z-mean 3.5, t-floor 2.33). Valid: LORD++ needs only a testing order fixed before the p-values; extra legs act as `p' = p` or 1 |
+| γ_k ∝ k^-1.6 ("44% on test 1") | **Kept** | Javanmard–Montanari costed on the same model: 17% / 5% / 1% WORSE over 100 tests (z-mean 2.5 / 3.5 / 4.5), ±5% at 200; it wins only near 1,000 tests (1.2-1.4x). Streams on record: 8 and 152 charges |
+| POWER-LORD-01 | **Wired**: the guard re-stamps at the live account's next level, selecting the calibration row by LEVEL (replenishment and refunds honoured; tighter than every measured level ⇒ refuse); U4 rejection classes read the batch's tightest level | us_equity: MDE 1.32 fresh (mines, ceiling 1.457) → 1.65 after 8 charges → 2.12 at its live 54 → refused. cross_asset refused at every depth. The record's "us_equity closed" is now enforced by the guard |
+| Lockbox criterion | **Wald SPRT on the forward Sharpe DIFFERENCE** (block-summed vol-standardized aug-vs-base differences from `augmented_book`; α 0.10, β 0.20, H1 ΔSR 0.30, no verdict before 63 bars, cap 756 ⇒ INCONCLUSIVE). Entries keep the rule they were enrolled under | The fixed rule scored the Sharpe of `b_aug − b_base` — the Tier-C substitution residual, sign-inverted for a genuine diversifier — with a single look (false CLEAR 44%). Monte Carlo of the SPRT: false CLEAR 2-8%; at ΔSR 0.30 CLEAR 41-62% (ρ 0.97), mostly INCONCLUSIVE at ρ 0.90; a leak with zero forward edge REJECTED 57-75% in ~320-380 bars; an in-sample selection edge does not bias it |
+| Cohort `enforce_funnel_feasibility` | **false** | Set true in v13 for consistency with a funnel that refused high-turnover pre-registrations; since v15 the funnel tests them on net-of-cost streams, so the same consistency argument now requires false (it culled 96 of 140 us_equity members). Turnover cost is the substrate cost model's job |
+| Scout coverage floor | **`altdata.min_bar_coverage: 0.50`** (gates re-registered) | FRED's ~3y ICE window on a 19y clock, TAIFEX's 3-4 days and a cold T86 store were slots spending LORD++ wealth on near-powerless tests |
+| Historical store | **Repaired** `results/crucible_orchestrator/real` with `crucible_v15_reopen.py` after a dry run and a rehearsal on a copy: 40 untested pre-registrations reopened (verdict → NULL, re-proposable); us_equity LORD++ account compacted 152 → 54 (98 phantom charges; next level 7.0e-06 → 3.6e-05). Backups: `*.pre_v15_reopen.bak` beside the store | The refund is LORD++-valid: no discoveries, and 54 ≥ the 42 real tests, so the real tests' levels plus the refunded stream's future levels still sum to at most W0 |
+
+Still open (not in the delegated list): **shared ledgers** (the ledger's primary key is the formula, so run one
+`--out` per substrate); **execution convention** (every book enters at the close the signal reads; a one-bar
+lag halves the 5-day reversal IC on Taiwan small-cap — add a lag check before any capital decision); **F3
+capturability** uses one rebalance phase (holder_conc -0.045 at offset 0, positive on 16 of 21 offsets).
+
+**Operational consequence for efficiency.** With LORD++ levels decaying per test, a substrate affords only a
+handful of well-powered tests before the guard refuses it (us_equity: after 8). Sequential levels give the
+first specs of each batch the high levels, so the PROPOSER'S ORDER now decides which hypotheses get power.
+Order pre-registrations by prior plausibility (curated bank first, or the Jev ranker), never by any in-sample
+score of the holdout.
 
 ## Not fixed (low / latent)
 
@@ -124,7 +125,9 @@ verdict and no routing; degenerate genomes are no longer bred).
 ## CRU-1 / CRU-2
 
 No frozen gates file changed (signal_eval `519158fa1450`, taiwan_signal_eval `22a18172be1a`,
-taiwan_smallcap_altdata `0ccf6dd584f0`), and no gates file changed at all: every entry in
-`configs/gates_registry.json` still matches. The agent view gains one column, `stat_hash` — a hash of the formula text and
-its declared type, no score. MAJOR bump: v15.0 changes which hypotheses are tested, the gate's degenerate
-handling, two data inputs and the LORD++ accounting.
+taiwan_smallcap_altdata `0ccf6dd584f0`). v15.0 changed no gates file at all; v16.0 edits three unfrozen
+ones (lockbox, cohort, alt-data), each re-registered in `configs/gates_registry.json` with the decision as
+its reason. The agent view gains one column, `stat_hash` — a hash of the formula text and its declared
+type, no score. MAJOR bumps: v15.0 changes which hypotheses are tested, the gate's degenerate handling, two
+data inputs and the LORD++ accounting; v16.0 changes the binding LORD++ levels, which substrates are
+mined, the lockbox verdict and the cohort pool.
