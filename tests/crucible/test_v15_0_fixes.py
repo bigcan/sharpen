@@ -12,7 +12,9 @@ Each test FAILS on the pre-v15 code:
     never ran on a substrate whose first post-change tick had fresh specs;
   * ``clear_snapshot`` deleted the cohort key with the snapshot, re-firing a rendered cohort;
   * ``--nights N`` without ``--start-ts`` stamped every tick identically (run-id / seed / artifact
-    collisions).
+    collisions);
+  * a decided pre-registration was ledgered LOGGED or SCORED_NOT_SELECTED depending on whether bred
+    offspring displaced it from the hall of fame.
 """
 from __future__ import annotations
 
@@ -263,3 +265,44 @@ def test_a_readmission_is_consumed_by_the_attempt(tmp_path) -> None:
     led.mark_readmitted(["c1"], 1.0)                          # re-test ran at MDE 1.0, no decision
     assert led.readmissible(current_mde=1.0, cfg=_sm_cfg(), run_prefix="tick-A-") == []
     assert led.readmissible(current_mde=0.7, cfg=_sm_cfg(), run_prefix="tick-A-")   # more power again
+
+
+# ------------------------------------------------------------------ pre-registration verdict labels
+def _prereg_rows(tmp_path: Path, search_offspring: bool) -> tuple[dict, set]:
+    import scripts.research.crucible_calibration as cal
+    from sharpen.crucible.agentic.hypothesis import HypothesisAuthor
+    from sharpen.crucible.agentic.loop import run_hypothesis_loop
+    from sharpen.crucible.agentic.proposer import LibrarySeedProposer
+    from sharpen.crucible.search_memory import SearchMemoryConfig
+    from sharpen.signals.generation.config import load_generation_config
+
+    cfg, ek = load_generation_config(GATES)
+    ek = {**ek, "pop_size": 24, "n_generations": 3, "search_offspring": search_offspring}
+    cc = CorrectedConfig.from_yaml(_CORRECTED)
+    sm = SearchMemoryConfig.from_yaml(ROOT / "configs" / "crucible_search_memory.gates.yaml")
+    panel = cal._noise_panel(1000, 12, seed=5, n_feature_slots=4)
+    base = cal._proxy_base_sleeves(panel, hold=ek["hold_horizon"])
+    with TrialLedger(tmp_path / f"l{int(search_offspring)}.db") as led:
+        author = HypothesisAuthor(LibrarySeedProposer(), led, max_proposals=10)
+        res = run_hypothesis_loop(
+            panel=panel, base_returns=base, timestamps=cal._panel_ts(panel), cfg=cfg, evolve_kwargs=ek,
+            author=author, run_id="t1", crucible_version="crucible-v15.0", gates_hash="x",
+            proposal_ts="2026-07-30T00:00:00", contract="corrected", corrected_cfg=cc,
+            search_memory_cfg=sm, substrate_mde=1.4)
+        rows = {r["candidate_hash"]: (r["verdict"], r["rejection_class"], r["implied_mde_at_test"])
+                for r in led._conn.execute(                   # noqa: SLF001 — ledger probe
+                    "SELECT candidate_hash, verdict, rejection_class, implied_mde_at_test "
+                    "FROM trial_ledger WHERE spec_json IS NOT NULL")}
+    return rows, set(res.adjudicated_hashes)
+
+
+@pytest.mark.slow
+def test_prereg_ledger_rows_do_not_depend_on_the_offspring_search(tmp_path) -> None:
+    """A decided pre-registration used to read LOGGED when it surfaced in the hall of fame and
+    SCORED_NOT_SELECTED when bred offspring displaced it — so the v15 search skip (every seed surfaces)
+    flipped every label in the end-to-end benchmark while the decisions and charges were identical."""
+    on, charged_on = _prereg_rows(tmp_path, True)
+    off, charged_off = _prereg_rows(tmp_path, False)
+    assert on and on == off
+    assert charged_on == charged_off
+    assert {v for v, _, _ in on.values()} <= {"PROMISING", "SCORED_NOT_SELECTED", "NOT_TESTED"}

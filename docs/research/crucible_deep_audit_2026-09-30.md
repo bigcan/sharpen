@@ -64,7 +64,8 @@ synthetic tick. Every fix ships with tripwire tests that were run against the pr
 | 21 | MEDIUM | Reproduce did not pin the decision function; FDR alpha/W0 declared but unconsumed; `--nights` stamps collided | Pins added; YAML wired + drift warning; distinct stamps | `test_v15_0_robustness`, `test_v15_0_fixes` |
 | 22 | MEDIUM | Governance Tier-2 command could not run (invalid scope, RL pillars) | Survivor pillars C1-C7, valid scope, context | `test_governance` |
 | 23 | MEDIUM | GP bred from degenerate-vol genomes: their train uplift is the combiner's EW-fallback artifact (+0.33 on the synthetic substrate); they took 2-4 of the 6 elite slots in 2 of 3 searches | Scored (a pre-registration still reaches the holdout), never bred | `test_generation_evolve_v15` |
-| 24 | LOW | Cohort-gate crash left run tests uncharged; LLM non-list payload raised; Jev fallback mislabelled | Cohort failure contained; payload guarded; `+identity-fallback` | `test_v15_0_robustness` |
+| 24 | LOW | A decided pre-registration's ledger label depended on hall-of-fame membership (LOGGED if it surfaced, SCORED_NOT_SELECTED if bred offspring displaced it), so the v15 search skip flipped every label in the benchmark | The verdict states the spec's own test: PROMISING / SCORED_NOT_SELECTED / NOT_TESTED; offspring stay LOGGED | `test_v15_0_fixes` |
+| 25 | LOW | Cohort-gate crash left run tests uncharged; LLM non-list payload raised; Jev fallback mislabelled | Cohort failure contained; payload guarded; `+identity-fallback` | `test_v15_0_robustness` |
 
 ## Efficiency (verdict-preserving)
 
@@ -75,7 +76,12 @@ synthetic tick. Every fix ships with tripwire tests that were run against the pr
   (pinned); `--offspring-search on` restores it.
 * Base book cached per split; one full-panel evaluation per genome shared by the causality probe and the
   return stream; `_candidate_returns` vectorized (bit-identical).
-* Measured end-to-end: see "Benchmark" below.
+* **Measured end-to-end** (one synthetic orchestrator tick, identical CLI args, same machine, run
+  sequentially; unrelated processes held 5 of 16 cores throughout): v14 baseline (`20c8e263`) **550 s** →
+  v15 with the offspring search forced on **178 s** (3.1x) → v15 default **31 s** (17.7x). All three charged
+  12 LORD++ tests. v15-on reproduces v14's ledger (11 pre-registrations scored and lost, 20 offspring
+  logged), and the default run records the same 11 pre-registration rows — verdict, rejection class and
+  charge (pinned by `test_prereg_ledger_rows_do_not_depend_on_the_offspring_search`).
 
 ## Operator decisions (not changed — each is a gate or a live-store edit)
 

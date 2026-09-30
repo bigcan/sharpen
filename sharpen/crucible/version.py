@@ -757,7 +757,9 @@ from pathlib import Path
 #     then ledgered SCORED_NOT_SELECTED and CHARGED a LORD++ test (2026-08-10 us_equity: 107 charged, 16
 #     adjudicated). Seeds are now exempt under the corrected contract (never bred); a pre-registration with
 #     no holdout decision is NOT_TESTED and charged nothing; n_holdout_tested counts decisions; the
-#     eligible set is matched on canonical strings. v12.0's stated cause (an uplift cull) was wrong.
+#     eligible set is matched on canonical strings; a pre-registration's verdict states its own test
+#     (SCORED_NOT_SELECTED / NOT_TESTED), not whether offspring displaced it from the hall of fame.
+#     v12.0's stated cause (an uplift cull) was wrong.
 #   * THE PRE-REGISTERED DIRECTION IS THE TESTED DIRECTION. expected_sign was never applied (15/53 LLM
 #     specs in taiwan_v2 were scored mirrored); the Author folds -1 into the traded formula; the curated
 #     WQ101 seeds are relabelled +1 (the library's pre-signed convention; their hashes are unchanged).
@@ -789,7 +791,8 @@ from pathlib import Path
 #     governance Tier-2 command is runnable (survivor pillars C1-C7).
 #   * EFFICIENCY (verdict-preserving). Vectorized combiner (bit-identical); the offspring GP search is
 #     skipped when no offspring can be promoted (every pre-registered decision bit-identical; manifest
-#     extra.offspring_searched records it); cached base book; one evaluation per genome.
+#     extra.offspring_searched records it; synthetic tick 550 s -> 31 s, 178 s with the search on);
+#     cached base book; one evaluation per genome.
 # Tripwires: tests/**/test_*v15*.py (each defect test mutation-checked against the pre-fix code).
 CRUCIBLE_VERSION = "crucible-v15.0"
 

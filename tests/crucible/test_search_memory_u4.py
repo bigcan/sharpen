@@ -403,8 +403,12 @@ def test_every_holdout_adjudicated_rejection_carries_a_class(tmp_path: Path) -> 
 
         # ... and the regression is only exercised if at least one of them is a NON-surfaced
         # pre-registration — the row class that produced the 145/145 production hole. If the fixture
-        # ever stops generating one, this test would go green without testing anything.
-        assert any(rows[candidate_hash(f)]["verdict"] == "SCORED_NOT_SELECTED" for f in rejected), \
+        # ever stops generating one, this test would go green without testing anything. (v15.0: read
+        # surfacing directly — a decided pre-registration is SCORED_NOT_SELECTED whether or not it
+        # surfaced, so the verdict no longer identifies the loop that wrote it.)
+        surfaced = {candidate_hash(c.formula) for r in res.reports.values()
+                    for c in (*r.hall_of_fame, *r.promising)}
+        assert any(candidate_hash(f) not in surfaced for f in rejected), \
             "fixture drifted: every adjudicated rejection surfaced in the hall of fame, so the " \
             "second ledger loop — where production wrote 145 of 145 pre-registrations — is untested"
 

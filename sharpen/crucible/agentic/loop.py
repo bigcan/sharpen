@@ -286,8 +286,13 @@ def run_hypothesis_loop(
             pr = prereg_by_hash.get(chash)
             if chash in promising_hashes:
                 verdict = _PROMISING
-            elif pr is not None and (ct, c.formula) not in adjudicated:
-                verdict = _NOT_TESTED                    # v15.0: surfaced on train, never decided
+            elif pr is not None:
+                # v15.0: a PRE-REGISTRATION's verdict states the fact about ITS test — decided and lost,
+                # or never decided — never whether it made the hall of fame. Surfacing is decided by
+                # train fitness against whatever offspring were bred, so the same decision used to read
+                # LOGGED when the seed surfaced and SCORED_NOT_SELECTED when offspring displaced it, and
+                # skipping the offspring search flipped every decided seed's label.
+                verdict = _SCORED_NOT_SELECTED if (ct, c.formula) in adjudicated else _NOT_TESTED
             else:
                 verdict = _LOGGED
             verdicts[chash] = verdict
