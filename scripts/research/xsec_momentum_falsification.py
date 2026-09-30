@@ -49,11 +49,16 @@ ANN = 252
 
 
 def get_prices() -> pd.DataFrame:
+    from sharpen.data.panel_integrity import assert_index_ok   # N8: unique + increasing index
+
     if CACHE.exists():
-        return pd.read_parquet(CACHE)
+        close = pd.read_parquet(CACHE)
+        assert_index_ok(close.index, f"get_prices ({CACHE.name})")
+        return close
     raw = yf.download(ALL_TICKERS, start=START, end=END, progress=False, auto_adjust=True)
     close = raw["Close"].copy()
     close = close.dropna(how="all").sort_index()
+    assert_index_ok(close.index, "get_prices (fetch)")
     close.to_parquet(CACHE)
     return close
 

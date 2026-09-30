@@ -42,6 +42,7 @@ from sharpen.crypto.eval.statistics import (  # noqa: E402
     skewness,
     strip_leading_warmup,
 )
+from sharpen.data.panel_integrity import require_ok  # noqa: E402
 from sharpen.features import defensive_signals as dfs  # noqa: E402
 
 ANN = mom.ANN
@@ -133,19 +134,31 @@ def main():
     out = {"book": "tailwind-v1 (momentum TSMOM + BAB defensive hedge)",
            "composition": ["momentum", "defensive"], "checks": {}}
     close, rets, bench, rebal = _mom_frame()
+    require_ok(close, "research panel", universe="tailwind_18etf")         # N8
 
-    # ---- ATTACK 1: BAB look-ahead (causal vs same-day execution) ----
+    # ---- ATTACK 1: BAB timing DECAY (not a leak check; Tier-2 T2-12, resolved 2026-09-30) ----
+    # lag 1 vs lag 0 are BOTH causal: their gap measures signal decay, not look-ahead. A lag=-1
+    # probe (weights applied to the return they would have had to FORESEE) shows why no Sharpe
+    # gap can serve as a leak check here: on the real panel a genuine one-day look-ahead lifts
+    # BAB's Sharpe by only 0.013 (0.412 -> 0.425), because a MONTHLY book differs on one day a
+    # month. Look-ahead is therefore covered by the assert_causal tripwires (6 points incl. the
+    # final bar, with a teeth test: tests/real_data/test_verdict_pipeline_and_causality.py), not here.
     w_bab = _bab_weights(close, rets, rebal)
     causal = sh(_net_lag(w_bab, rets, 1))
     sameday = sh(_net_lag(w_bab, rets, 0))
-    leak_gap = round(sameday - causal, 3)
-    out["checks"]["A_bab_leak"] = {
-        "causal_sharpe": causal, "sameday_sharpe": sameday, "gap": leak_gap,
-        "pass": abs(leak_gap) < leak_max,
-        "note": "same-day must NOT beat causal; a look-ahead inflates same-day"}
-    if abs(leak_gap) >= leak_max:
-        findings.append(("S1" if leak_gap > leak_s1 else "S2", "BAB leak",
-                         f"same-day-vs-causal gap {leak_gap}"))
+    lookahead = sh(_net_lag(w_bab, rets, -1))
+    decay_gap = round(sameday - causal, 3)
+    out["checks"]["A_bab_timing_decay"] = {
+        "causal_sharpe": causal, "sameday_sharpe": sameday, "decay_gap_lag0_minus_lag1": decay_gap,
+        "lookahead_probe_lag_minus1_sharpe": lookahead,
+        "lookahead_probe_gap": round(lookahead - causal, 3),
+        "pass": abs(decay_gap) < leak_max,
+        "note": "gated on DECAY only (same-day must not beat causal by the tolerance). The lag -1 "
+                "probe is reported to show a Sharpe gap cannot detect look-ahead in a monthly "
+                "book; the leak class is gated by the assert_causal tripwires."}
+    if abs(decay_gap) >= leak_max:
+        findings.append(("S1" if decay_gap > leak_s1 else "S2", "BAB timing decay",
+                         f"same-day-vs-causal gap {decay_gap}"))
 
     # ---- ATTACK 2: BAB standalone subperiods — DESCRIPTIVE, NOT gated ----
     # BAB is a crash hedge (cont-96 convexity): crash-concentrated standalone Sharpe is the

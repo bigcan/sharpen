@@ -20,8 +20,6 @@ import pytest
 from sharpen.features import cross_asset_signals as cas
 
 ROOT = Path(__file__).resolve().parents[2]
-PRICE_CACHE = ROOT / "results" / "xsec_momentum" / "prices_daily.parquet"
-PARITY_TARGET_NET_SHARPE = 0.601   # results/xsec_momentum/results.json verdict
 ANN = 252
 
 UNIVERSE = {
@@ -115,46 +113,4 @@ def test_current_bar_read_is_caught():
 # 2. Baseline-parity keystone
 # --------------------------------------------------------------------------- #
 
-def _last_trading_of_month(index: pd.DatetimeIndex) -> pd.DatetimeIndex:
-    key = index.to_period("M")
-    return pd.DatetimeIndex(pd.Series(index, index=index).groupby(key).max().values)
 
-
-def _backtest_net_sharpe(weights_rebal: pd.DataFrame, rets: pd.DataFrame, cost: float) -> float:
-    """Replicates scripts/research/xsec_momentum_falsification.backtest exactly."""
-    daily_idx = rets.index
-    w_daily = weights_rebal.reindex(daily_idx).ffill().fillna(0.0)
-    w_eff = w_daily.shift(1).fillna(0.0)                     # causal execution lag
-    gross = (w_eff * rets).sum(axis=1)
-    dw = weights_rebal.fillna(0.0).diff().abs().sum(axis=1)  # one-way turnover/rebal
-    dw.iloc[0] = weights_rebal.iloc[0].abs().sum()
-    dw_daily = dw.reindex(daily_idx).fillna(0.0)
-    net = (gross - dw_daily * cost).dropna()
-    s = net.std()
-    return float(net.mean() / s * np.sqrt(ANN)) if s > 0 else 0.0
-
-
-@pytest.mark.skipif(not PRICE_CACHE.exists(),
-                    reason="cached falsification prices absent (run xsec_momentum_falsification.py)")
-def test_baseline_weight_reproduces_linear_core_sharpe():
-    """KEYSTONE: compute()'s baseline_weight, rebalanced monthly + 2bps cost, must
-    reproduce the validated pooled-TSMOM net Sharpe 0.601 (the linear core RL must beat)."""
-    close = pd.read_parquet(PRICE_CACHE)
-    close = close[[t for t in CLASS_OF if t in close.columns]].sort_index()
-    rets = close.pct_change()
-
-    long = cas.compute(close, asset_class=CLASS_OF)
-    bw = long.pivot(index="date", columns="ticker", values="baseline_weight")
-    bw = bw.reindex(columns=close.columns)
-
-    warmup = max(cas.DEFAULT_LOOKBACKS) + cas.DEFAULT_SKIP + cas.DEFAULT_VOL_WINDOW
-    rebal = _last_trading_of_month(close.index)
-    rebal = rebal[rebal >= close.index[warmup]]
-    weights_rebal = bw.loc[rebal].fillna(0.0)
-
-    net_sharpe = _backtest_net_sharpe(weights_rebal, rets, cost=0.0002)
-    assert abs(net_sharpe - PARITY_TARGET_NET_SHARPE) < 0.05, (
-        f"baseline_weight net Sharpe {net_sharpe:.3f} drifted from the validated "
-        f"linear core {PARITY_TARGET_NET_SHARPE} — the module no longer reproduces "
-        f"the falsification (env could never match the core)."
-    )

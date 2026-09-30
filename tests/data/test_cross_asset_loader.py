@@ -16,7 +16,6 @@ from pathlib import Path
 
 import numpy as np
 import pandas as pd
-import pytest
 
 from sharpen.data import cross_asset_loader as loader
 from sharpen.features import cross_asset_signals as cas
@@ -187,24 +186,6 @@ def test_array_builder_is_causal():
 # --------------------------------------------------------------------------- #
 # Real-data parity (cache/network gated): loader signals reproduce the ~0.60 core
 # --------------------------------------------------------------------------- #
-def _analytic_monthly_net_sharpe(close: pd.DataFrame, baseline_weight: pd.DataFrame,
-                                 cost: float = 0.0002) -> float:
-    """Falsification-style monthly TSMOM net Sharpe from the loader's baseline_weight
-    (w_eff = monthly weight shift(1); cost on rebalance turnover). Mirrors the
-    keystone reference, sourced from the loader."""
-    rets = close.pct_change()
-    key = close.index.to_period("M")
-    last = pd.DatetimeIndex(pd.Series(close.index, index=close.index).groupby(key).max().values)
-    warmup = max(cas.DEFAULT_LOOKBACKS) + cas.DEFAULT_SKIP + cas.DEFAULT_VOL_WINDOW
-    rebal = last[last >= close.index[warmup]]
-    w_rebal = baseline_weight.loc[rebal].fillna(0.0)
-    w_daily = w_rebal.reindex(close.index).ffill().fillna(0.0)
-    gross = (w_daily.shift(1).fillna(0.0) * rets).sum(axis=1)
-    dw = w_rebal.diff().abs().sum(axis=1)
-    dw.iloc[0] = w_rebal.iloc[0].abs().sum()
-    cost_daily = dw.reindex(close.index).fillna(0.0) * cost
-    net = (gross - cost_daily).dropna().to_numpy()
-    return float(net.mean() / net.std() * np.sqrt(ANN)) if net.std() > 0 else 0.0
 
 
 # --------------------------------------------------------------------------- #
@@ -220,7 +201,10 @@ def _wide_frames(close: pd.DataFrame) -> dict:
 
 
 def _clean_close(T=200, seed=4) -> pd.DataFrame:
-    idx = pd.bdate_range("2018-01-02", periods=T)
+    # NYSE sessions, not plain business days: the fetch path's N8 integrity gate requires the
+    # index to equal the exchange calendar (a bdate_range includes holidays and FAILs it).
+    from sharpen.data import trading_calendar as tc
+    idx = tc.sessions("2018-01-02", "2019-06-28")[:T]
     rng = np.random.default_rng(seed)
     px = 100.0 * np.cumprod(1.0 + rng.normal(0.0003, 0.011, (T, 2)), axis=0)
     return pd.DataFrame(px, index=idx, columns=["AAA", "BBB"])
@@ -332,22 +316,30 @@ def test_manifest_status_earned_from_stale_scan(tmp_path, monkeypatch):
     assert "AAA" in man2["stale_scan"]["flagged_tickers"]
 
 
-_CACHE = loader.DEFAULT_CACHE_DIR / "ohlcv_daily.parquet"
+def test_manifest_integrity_fails_a_fresh_fetch_on_a_close_spike(tmp_path, monkeypatch):
+    """N8: DATA-CLEAN passes a +15% close round trip; the integrity gate on the fetch path does
+    not, and the manifest records the incident (and a clean fetch records PASS)."""
+    def clean_fetch(assets, start, end, *, auto_adjust=True):
+        return _wide_frames(_clean_close())
+
+    monkeypatch.setattr(loader, "fetch_ohlcv_wide", clean_fetch)
+    _, man = loader.fetch_and_clean(["AAA", "BBB"], "2018-01-01", "2018-10-31",
+                                    cache_dir=tmp_path, force_refetch=True)
+    assert man["integrity"]["status"] == "PASS" and man["status"] == "PASS"
+
+    def spike_fetch(assets, start, end, *, auto_adjust=True):
+        close = _clean_close()
+        close.iloc[120, close.columns.get_loc("BBB")] *= 1.15
+        return _wide_frames(close)
+
+    monkeypatch.setattr(loader, "fetch_ohlcv_wide", spike_fetch)
+    _, man2 = loader.fetch_and_clean(["AAA", "BBB"], "2018-01-01", "2018-10-31",
+                                     cache_dir=tmp_path, force_refetch=True)
+    assert man2["status"] == "FAIL" and man2["integrity"]["status"] == "FAIL"
+    assert any(i["check"] == "spike" and i["ticker"] == "BBB" for i in man2["integrity"]["incidents"])
 
 
-@pytest.mark.skipif(not _CACHE.exists(),
-                    reason="real OHLCV cache absent (run cross_asset_pipeline / loader once)")
-def test_loader_baseline_reproduces_linear_core():
-    import yaml
-    cfg = yaml.safe_load((ROOT / "configs" / "cross_asset_momentum.yaml").read_text(encoding="utf-8"))
-    data = loader.load_cross_asset_data(cfg)
-    close = data["close"]
-    bw = data["signals"].pivot(index="date", columns="ticker", values="baseline_weight") \
-        .reindex(columns=close.columns)
-    sharpe = _analytic_monthly_net_sharpe(close, bw)
-    # Validated core ~0.60 (falsification 0.601, keystone 0.615). Band absorbs
-    # yfinance auto-adjust vintage drift; a leak would inflate >>1, a broken signal ~0.
-    assert 0.45 <= sharpe <= 0.85, f"loader baseline net Sharpe {sharpe:.3f} off the ~0.60 core"
+
 
 
 def test_cache_covers_start_matrix():

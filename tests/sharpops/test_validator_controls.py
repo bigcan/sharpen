@@ -127,6 +127,14 @@ def test_unread_keys_warn_wherever_they_appear():
     assert _run(vc.check_unread_keys, {"gates": {"min_dsr": 0.95}}).warnings == []
 
 
+def test_own_capital_config_paper_deploy_failure_set_is_pinned():
+    """Tier-2 T7-17: the paper-deploy validator pin covered only the challenge config. The own-
+    capital book fails on exactly ONE thing, the missing kill_file (T6-11 / T7-18); any other
+    failure appearing, or this one silently disappearing, must be noticed."""
+    r = vc.validate(ROOT / "configs" / "tailwind_v1.yaml", "paper-deploy")
+    assert len(r.failures) == 1 and r.failures[0].startswith("kill_file path required"), r.failures
+
+
 def test_new_checks_are_registered():
     assert vc.check_linear_controls_consumed in vc.STAGE_CHECKS["paper-deploy"]
     assert all(vc.check_unread_keys in checks for checks in vc.STAGE_CHECKS.values())

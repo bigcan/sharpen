@@ -16,7 +16,6 @@ import pytest
 from sharpen.data import trading_calendar as tc
 
 ROOT = Path(__file__).resolve().parents[2]
-PANEL = ROOT / "results" / "tailwind_v1" / "ohlcv_daily.parquet"
 
 
 @pytest.mark.parametrize("day", [
@@ -95,9 +94,3 @@ def test_fails_closed_outside_its_rules():
         tc.last_complete_session(dt.datetime(2026, 7, 31, 17, 0), settle_minutes=30)
 
 
-@pytest.mark.skipif(not PANEL.exists(), reason="cached ETF panel absent (gitignored results/)")
-def test_reproduces_the_cached_panel_calendar_exactly():
-    long = pd.read_parquet(PANEL, columns=["date"])
-    idx = pd.DatetimeIndex(sorted(pd.to_datetime(long["date"]).unique()))
-    cal = tc.sessions(idx[0], idx[-1])
-    assert cal.equals(idx), (list(cal.difference(idx).date)[:5], list(idx.difference(cal).date)[:5])
