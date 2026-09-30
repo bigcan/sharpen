@@ -347,9 +347,17 @@ If Sharpen is useful to you, you can support its development on
 Support pays for compute and upkeep of the open research. It buys no access to strategies,
 signals or advice, and nothing here is a claim about future returns.
 
+**Commercial support.** Firms using Sharpen or Crucible can engage the author for integration,
+custom research pipelines, independent falsification audits of a strategy, or training on the
+methodology. Contact the maintainer through [github.com/bigcan](https://github.com/bigcan).
+Engagements cover software and research methodology only, never investment advice, signals or
+capital management.
+
 ---
 
 ## License
 
 [Apache License 2.0](LICENSE). Copyright 2026 Keng Lee. Attribution for derived third-party code is
 in [NOTICE](NOTICE). No market data is distributed; see [docs/DATA.md](docs/DATA.md).
+"Sharpen" and "Crucible" are trademarks of Keng Lee; the license covers the code, not the names.
+See [TRADEMARKS.md](TRADEMARKS.md).
