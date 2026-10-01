@@ -1,0 +1,115 @@
+{
+  "export_id": "102b401de303",
+  "hypotheses": {
+    "by_type": {
+      "cross_sectional": 18,
+      "overlay": 0,
+      "unknown": 0
+    },
+    "count": 18,
+    "semantic_hashes": [
+      "189cd82e988c",
+      "19c9ea5e9b5d",
+      "295afb8f24fb",
+      "342f77a90c05",
+      "3e007a5d8689",
+      "498d5ac6cbae",
+      "4bfd4a485462",
+      "513c61a9f961",
+      "5b68aadbe74a",
+      "6e5934602654",
+      "902535997085",
+      "94283b6f464f",
+      "ab46c6a0b56b",
+      "b2e6f75f9c19",
+      "b3004f0a330e",
+      "be4fb71d68b3",
+      "d877286ee3a2",
+      "e07beb59a90b"
+    ]
+  },
+  "kind": "crucible_closed_search",
+  "power": {
+    "decisive_mde_multiple": 1.0,
+    "economic_floor": 0.1,
+    "economic_floor_gates_hash": "d1523707b860",
+    "economic_floor_source": "guards.uplift_min",
+    "mde_at_test_max": 1.959632,
+    "mde_at_test_min": 1.959632,
+    "mde_source": "tick_log",
+    "mde_substrate": 1.959632,
+    "mde_unmeasured_ticks": 0
+  },
+  "provenance": {
+    "cohort_gates_hashes": [],
+    "contracts": [
+      "corrected"
+    ],
+    "corrected_gates_hashes": [
+      "7fc2a73be779"
+    ],
+    "crucible_versions": [
+      "crucible-v11.0"
+    ],
+    "data_snapshot_hashes": [
+      "c6f765733b26"
+    ],
+    "first_date": "2026-08-04",
+    "gates_hashes": [
+      "83ffe83380fc"
+    ],
+    "last_date": "2026-08-04",
+    "manifest_hashes": [
+      "e97e1e030555"
+    ],
+    "proposers": [
+      "library-seed-v1"
+    ],
+    "runs": 1,
+    "search_memory_gates_hashes": [
+      "26a0f6433347"
+    ],
+    "source": "trial_ledger"
+  },
+  "rejections": {
+    "decisive": 0,
+    "unclassified": null,
+    "underpowered": 0
+  },
+  "schema_version": 1,
+  "substrate": {
+    "data_end": "2026-07-31",
+    "data_sources": [
+      "Dukascopy hourly bars"
+    ],
+    "data_start": "2008-01-01",
+    "id": "intraday_fx",
+    "search_space": "library seed formulas plus genetic offspring; 7-bar hold",
+    "universe": "9 FX majors, hourly"
+  },
+  "ticks": {
+    "cohort_only": 0,
+    "errors": 0,
+    "idle": 0,
+    "mined": 1,
+    "no_score": 0,
+    "screened_only": 0,
+    "screened_unknown": 1,
+    "tested": 0,
+    "total": 1,
+    "underpowered_skips": 0
+  },
+  "trials": {
+    "holdout_count_complete": false,
+    "holdout_tested": null,
+    "preregistered": 8,
+    "promising": 0,
+    "recorded": 18,
+    "scored": 18
+  },
+  "verdict": "OPEN_UNDERPOWERED",
+  "verdict_reasons": [
+    "holdout_count_not_recorded",
+    "mde_above_floor"
+  ]
+}

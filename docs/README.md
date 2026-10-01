@@ -41,6 +41,7 @@ Normative documents. These define contracts; the guides explain how to work with
 | [Crucible agentic discovery spec](research/crucible_agentic_discovery_spec.md) | Crucible's design contract |
 | [Signal eval system design](research/signal_eval_system_design.md) | The evaluation funnel's design |
 | [Manifest schema](schemas/manifest.schema.json) | JSON schema for stage manifests |
+| [Community ledger schema](schemas/community_closed_search.schema.json) | JSON schema for a shared Crucible search ([`community/ledger/`](../community/ledger/README.md)) |
 | [Deep lifecycle audit template](audit/deep_lifecycle_audit_template.md) | The Tier-2 audit structure |
 
 > **Caveat on `sharpops.md` §5.** That section describes a *planned* staged DAG launcher.

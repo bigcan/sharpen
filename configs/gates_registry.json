@@ -145,9 +145,10 @@
       "reason": "initial registration 2026-09-30 (SharpOps ladder decision item 7): baseline of every gates file as committed; later edits need a re-registration citing a decision"
     },
     "configs/gmgp1_volume_study.gates.yaml": {
-      "sha256": "52529a9967bfeb76056ed728f0f6cb075e2140ba2e17e558248304fae65edb29",
-      "registered_on": "2026-09-30",
-      "reason": "initial registration 2026-09-30 (SharpOps ladder decision item 7): baseline of every gates file as committed; later edits need a re-registration citing a decision"
+      "sha256": "c1abee13fe255ae353fac4df333d6d4ffd352d639d9d2c736a5373b3a3baa1ed",
+      "registered_on": "2026-10-01",
+      "reason": "2026-10-01: plan_file made home-relative (comment-grade metadata, no threshold changed) so the published bytes match the registered hash; the publish filter rewrote the absolute path and broke the registry check in the public build",
+      "previous_sha256": "52529a9967bfeb76056ed728f0f6cb075e2140ba2e17e558248304fae65edb29"
     },
     "configs/gmgp1_volume_study_v2.gates.yaml": {
       "sha256": "fab7c53365960485f103401d28b9dd09836e5297b9acff7d007b9df049ff4587",
