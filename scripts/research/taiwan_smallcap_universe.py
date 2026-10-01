@@ -22,6 +22,28 @@ share a quantity (avoids the June large-cap size-confound leaking into universe 
 Survivorship caveat: the step-1 pool is enumerated from ``TaiwanStockInfo`` (currently-listed), so
 delisted names are absent → membership is an UPPER BOUND. A survivorship-free PIT rebuild (augment
 the pool with ``TaiwanStockDelisting`` ids, or TEJ) is a promotion gate, not part of this probe.
+
+OPT-IN point-in-time corrections (both OFF by default, so the default call reproduces the membership
+the sealed Taiwan small-cap probes were scored on, row for row):
+
+  ``--max-stale-days N``  step 1 takes each name's last bar on/before t however old that bar is, so
+                          a name that has stopped trading is ranked on its final close at every
+                          later rebalance and holds a band slot nobody can trade. (The caveat's
+                          premise is only partly true: the listing endpoint also returns names that
+                          have since stopped trading.) With N set, a name whose last bar is more
+                          than N calendar days before t is dropped.
+  ``--seg-gap-days N``    steps 2 and 5 count bars per stock CODE, and a code can be re-issued to a
+                          different company. With N set, a silence longer than N calendar days
+                          starts a new listing segment and both the ADV window and the history
+                          floor are counted inside the segment.
+
+The two are meant to be used together: stray prints dated after a name's last real trade make it
+look recent again, and then only the per-segment history floor keeps it out — which it does when
+the silence before the prints is longer than ``--seg-gap-days``. Prints closer than that pass both
+checks; they are bad rows and have to be removed from the price file itself.
+
+Either switch changes a pre-registered universe, so turning them on is a deliberate re-pin, not a
+default — the CLI refuses to write a corrected membership unless ``--out`` says where.
 """
 from __future__ import annotations
 
@@ -55,16 +77,33 @@ def _shares_asof(shareholding: pd.DataFrame) -> pd.DataFrame:
 
 def build_membership(prices: pd.DataFrame, shareholding: pd.DataFrame, *,
                      lo_rank: int = 51, hi_rank: int = 250, adv_window: int = 60,
-                     min_adv_twd: float = 5.0e6, min_history: int = 250) -> pd.DataFrame:
-    """Monthly cap-rank membership → long ``[rebalance_date, stock_id, rank, market_cap, adv_twd]``."""
+                     min_adv_twd: float = 5.0e6, min_history: int = 250,
+                     max_stale_days: int | None = None,
+                     seg_gap_days: int | None = None) -> pd.DataFrame:
+    """Monthly cap-rank membership → long ``[rebalance_date, stock_id, rank, market_cap, adv_twd]``.
+
+    ``max_stale_days`` and ``seg_gap_days`` are the opt-in corrections described in the module
+    docstring. ``None`` (the default for both) is the sealed behaviour, and both stay causal: the
+    staleness of a bar and the gap that opens a segment are measured backwards from bars ``<= t``.
+    """
+    for name, days in (("max_stale_days", max_stale_days), ("seg_gap_days", seg_gap_days)):
+        if days is not None and days < 0:
+            raise ValueError(f"{name} must be >= 0 or None (off), got {days}")
+
     px = prices.copy()
     px["date"] = pd.to_datetime(px["date"])
     px["ticker"] = px["ticker"].astype(str)
     px = px.dropna(subset=["close"]).sort_values(["ticker", "date"])
+    by: str | list[str] = "ticker"
+    if seg_gap_days is not None:
+        # a bar more than seg_gap_days after the code's previous bar opens a new listing segment
+        gap = px.groupby("ticker")["date"].diff().dt.days
+        px["seg"] = (gap > seg_gap_days).groupby(px["ticker"]).cumsum()
+        by = ["ticker", "seg"]
     px["dollar"] = px["close"] * px["volume"].where(px["volume"] > 0)
-    px["adv"] = (px.groupby("ticker")["dollar"]
+    px["adv"] = (px.groupby(by)["dollar"]
                  .transform(lambda s: s.rolling(adv_window, min_periods=max(10, adv_window // 3)).mean()))
-    px["nobs"] = px.groupby("ticker").cumcount() + 1
+    px["nobs"] = px.groupby(by).cumcount() + 1
 
     shares = _shares_asof(shareholding)
     rebalances = month_end_rebalances(pd.DatetimeIndex(px["date"].unique()))
@@ -72,7 +111,9 @@ def build_membership(prices: pd.DataFrame, shareholding: pd.DataFrame, *,
 
     for t in rebalances:
         snap = (px[px["date"] <= t].groupby("ticker").tail(1)     # last causal bar per name <= t
-                .loc[:, ["ticker", "close", "adv", "nobs"]])
+                .loc[:, ["ticker", "date", "close", "adv", "nobs"]])
+        if max_stale_days is not None:                            # ...and that bar must be recent
+            snap = snap[(t - snap["date"]).dt.days <= max_stale_days]
         snap = snap[(snap["nobs"] >= min_history) & (snap["adv"] >= min_adv_twd) & (snap["close"] > 0)]
         if snap.empty:
             continue
@@ -109,9 +150,21 @@ def main() -> int:
     ap.add_argument("--adv-window", type=int, default=60)
     ap.add_argument("--min-adv-twd", type=float, default=5.0e6, help="Trailing-ADV liquidity floor (TWD)")
     ap.add_argument("--min-history", type=int, default=250, help="Min prior trading days (drops IPO noise)")
+    ap.add_argument("--max-stale-days", type=int, default=None,
+                    help="Opt-in: drop a name whose last bar is more than N calendar days before the "
+                         "rebalance (default: off, the sealed behaviour). Requires --out.")
+    ap.add_argument("--seg-gap-days", type=int, default=None,
+                    help="Opt-in: a silence longer than N calendar days starts a new listing segment; "
+                         "history and ADV are counted per segment (default: off, the sealed "
+                         "behaviour). Requires --out.")
     args = ap.parse_args()
 
     data = (ROOT / args.data) if not Path(args.data).is_absolute() else Path(args.data)
+    corrected = args.max_stale_days is not None or args.seg_gap_days is not None
+    if corrected and not args.out:               # same test as the default-location fallback below
+        log.error("--max-stale-days / --seg-gap-days change the universe; pass --out explicitly. "
+                  "The default would replace the membership under %s in place.", data / "universe")
+        return 2
     out_dir = Path(args.out) if args.out else data / "universe"
     if not out_dir.is_absolute():
         out_dir = ROOT / out_dir
@@ -124,9 +177,13 @@ def main() -> int:
         log.warning("no shareholding.parquet — cannot cap-rank without total_shares; aborting.")
         return 2
 
+    if corrected:
+        log.info("PIT corrections ON: max_stale_days=%s seg_gap_days=%s — this is NOT the sealed "
+                 "universe", args.max_stale_days, args.seg_gap_days)
     mem = build_membership(prices, shareholding, lo_rank=args.lo_rank, hi_rank=args.hi_rank,
                            adv_window=args.adv_window, min_adv_twd=args.min_adv_twd,
-                           min_history=args.min_history)
+                           min_history=args.min_history, max_stale_days=args.max_stale_days,
+                           seg_gap_days=args.seg_gap_days)
     if mem.empty:
         log.error("empty membership — check min_adv_twd / shares coverage / price history.")
         return 2

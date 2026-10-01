@@ -54,6 +54,25 @@ CAUSALITY (LEAK-2), the three places it is load-bearing:
   * MEMBERSHIP expands monthly rebalances with ``searchsorted(..., "right") - 1`` — the last
     rebalance AT OR BEFORE t, never the next one.
 
+STALE VALUES (opt-in, OFF by default). :func:`asof_grid` carries a channel's last print forward
+with no age limit, so a name whose vendor feed has stopped keeps one frozen value for as long as it
+trades. ``build_taiwan_smallcap_panel(max_age_days={channel: days})`` turns those cells into NaN
+once the print is older than the cap. No caller sets it: a capped panel is not the panel the sealed
+Taiwan small-cap probes were scored on, so adopting it is a re-pin for the operator to decide. The
+membership builder (``scripts/research/taiwan_smallcap_universe.py``) has two opt-in corrections of
+the same kind, for names that stopped trading and for re-issued stock codes.
+
+SAME-DAY TIES (opt-in, OFF by default). When two prints of one name share an ``avail_date``,
+:func:`asof_grid` keeps "the last" after a sort that is not stable, so which print that is depends
+on where the pair falls in the sort, not on the data. Both prints are public by that date, so this
+is not look-ahead; the cost is a value one session older than necessary. It happens on real data:
+a make-up Saturday session and the Friday before it are both stamped the following Monday.
+``build_taiwan_smallcap_panel(stable_ties=True)`` makes the later print win every time. No caller
+sets it, for the same reason as the age cap: it changes cells of the panel the sealed Taiwan
+small-cap probes were scored on. The sort key reaches numpy as ``datetime64``, whose quicksort has
+no SIMD path in numpy 1.26, so the default is repeatable across CPUs on one numpy/pandas version.
+It is not guaranteed across versions.
+
 Run the tripwires whenever this builder is touched:
 
     python -m sharpen.crucible.data.taiwan_smallcap_panel
@@ -62,6 +81,7 @@ from __future__ import annotations
 
 import hashlib
 import logging
+from collections.abc import Mapping
 from pathlib import Path
 
 import numpy as np
@@ -99,12 +119,31 @@ _FROZEN_POOL = "pool.frozen.parquet"
 # --------------------------------------------------------------------------- #
 def asof_grid(events: pd.DataFrame, dates: np.ndarray, tickers: tuple[str, ...],
               value_col: str, avail_col: str = "avail_date",
-              id_col: str = "stock_id") -> np.ndarray:
+              id_col: str = "stock_id", *, max_age_days: int | None = None,
+              stable_ties: bool = False) -> np.ndarray:
     """``(T,N)`` where ``grid[t,n]`` = last ``value_col`` for ticker n with ``avail_date <= dates[t]``.
 
     Per ticker: ``merge_asof`` the trading dates onto the event stream sorted by availability
     (backward direction), so no value appears before it is public. NaN before the first event.
+
+    ``max_age_days`` is OPT-IN; ``None`` is the sealed behaviour, where the last print is carried
+    forward for as long as the grid runs. With a cap, a print is carried while
+    ``dates[t] - avail_date <= max_age_days`` (calendar days, inclusive) and the cell is NaN after
+    that until a newer print arrives — so a name whose feed has stopped drops out of the
+    cross-section instead of holding one frozen value. Both dates are ``<= dates[t]``, so the cap
+    adds no look-ahead.
+
+    ``stable_ties`` is OPT-IN; ``False`` is the sealed behaviour, where prints of one ticker that
+    share an avail date are ordered by an unstable sort and the survivor is whichever lands last.
+    With ``True`` the sort is stable, so the survivor is the row that comes LAST IN ``events``.
+    :func:`balance_util` and :func:`flow_events` emit a ticker's rows in observation-date order, so
+    for the balance and flow channels that is the later-dated print; a caller passing its own
+    events must order them the same way. Both tied prints are public at ``avail_date``, so neither
+    choice is look-ahead.
     """
+    if max_age_days is not None and max_age_days < 0:
+        raise ValueError(f"max_age_days must be >= 0 or None (no cap), got {max_age_days}")
+    tolerance = None if max_age_days is None else pd.Timedelta(days=max_age_days)
     T, N = len(dates), len(tickers)
     grid = np.full((T, N), np.nan, dtype=np.float64)
     if events is None or events.empty or value_col not in events.columns:
@@ -118,10 +157,11 @@ def asof_grid(events: pd.DataFrame, dates: np.ndarray, tickers: tuple[str, ...],
         j = col.get(str(tk))
         if j is None:
             continue
-        g = g[[avail_col, value_col]].sort_values(avail_col)
+        g = g[[avail_col, value_col]]
+        g = g.sort_values(avail_col, kind="stable") if stable_ties else g.sort_values(avail_col)
         # collapse duplicate avail dates to the LAST print that day (keep it public-consistent)
         g = g.groupby(avail_col, as_index=False).last()
-        merged = pd.merge_asof(d, g, on=avail_col, direction="backward")
+        merged = pd.merge_asof(d, g, on=avail_col, direction="backward", tolerance=tolerance)
         grid[:, j] = merged[value_col].to_numpy(dtype=np.float64)
     return grid
 
@@ -334,14 +374,48 @@ def _read(data: Path, name: str) -> pd.DataFrame:
     return pd.read_parquet(p) if p.exists() else pd.DataFrame()
 
 
+def _age_caps(max_age_days: "Mapping[str, int | None] | None",
+              channels: tuple[str, ...]) -> dict[str, int]:
+    """The per-channel age caps actually in force: ``{channel: days}`` with the ``None`` entries dropped.
+
+    A cap naming a channel that is not being built is an error, not a no-op — a misspelt channel
+    would otherwise leave the panel uncapped while the caller believes it is capped. The same goes
+    for a bare number (the form :func:`asof_grid` takes): ``0`` is falsy and would read as "no cap".
+    Days are normalised to built-in ``int`` because the result is stamped into ``meta`` and
+    serialised.
+    """
+    if max_age_days is None:
+        return {}
+    if not isinstance(max_age_days, Mapping):
+        raise TypeError("max_age_days must be a mapping {channel: days} or None, got "
+                        f"{type(max_age_days).__name__}")
+    caps: dict[str, int] = {}
+    for channel, days in max_age_days.items():
+        if days is None:
+            continue
+        if int(days) != days or days < 0:
+            raise ValueError(f"max_age_days[{channel!r}] must be a whole number of days >= 0 or "
+                             f"None (no cap), got {days!r}")
+        caps[channel] = int(days)
+    stray = set(caps) - set(channels)
+    if stray:
+        raise ValueError(f"max_age_days names channel(s) {sorted(stray)} that are not being built; "
+                         f"requested channels: {list(channels)}")
+    return caps
+
+
 def _build_channels(data: Path, dates: np.ndarray, tickers: tuple[str, ...],
-                    channels: tuple[str, ...]) -> dict[str, np.ndarray]:
+                    channels: tuple[str, ...],
+                    max_age_days: "Mapping[str, int | None] | None" = None,
+                    stable_ties: bool = False) -> dict[str, np.ndarray]:
     """Assemble the requested alt-data feature slots, reading only the parquets they need."""
     want = set(channels)
     unknown = want - set(ALL_CHANNELS)
     if unknown:
         raise ValueError(f"unknown taiwan_smallcap channel(s) {sorted(unknown)}; "
                          f"available: {list(ALL_CHANNELS)}")
+    cap = _age_caps(max_age_days, channels).get               # cap(slot) -> days, or None = no cap
+    ties = bool(stable_ties)
     slots: dict[str, np.ndarray] = {}
     empty = np.full((len(dates), len(tickers)), np.nan, dtype=np.float64)
 
@@ -352,23 +426,26 @@ def _build_channels(data: Path, dates: np.ndarray, tickers: tuple[str, ...],
 
     if "mrev_yoy" in want:
         slots["mrev_yoy"] = asof_grid(month_revenue_yoy(_read(data, "month_revenue.parquet"), dates),
-                                      dates, tickers, "yoy")
+                                      dates, tickers, "yoy", max_age_days=cap("mrev_yoy"),
+                                      stable_ties=ties)
     if "margin_util" in want:
         slots["margin_util"] = asof_grid(
             balance_util(margin, shareholding, balance_col="margin_balance", out_col="margin_util"),
-            dates, tickers, "margin_util")
+            dates, tickers, "margin_util", max_age_days=cap("margin_util"), stable_ties=ties)
     if "holder_conc" in want:
-        slots["holder_conc"] = (asof_grid(shareholding, dates, tickers, "big_holder_pct")
+        slots["holder_conc"] = (asof_grid(shareholding, dates, tickers, "big_holder_pct",
+                                          max_age_days=cap("holder_conc"), stable_ties=ties)
                                 if not shareholding.empty else empty.copy())
     if "short_util" in want:
         slots["short_util"] = asof_grid(
             balance_util(margin, shareholding, balance_col="short_balance", out_col="short_util"),
-            dates, tickers, "short_util")
+            dates, tickers, "short_util", max_age_days=cap("short_util"), stable_ties=ties)
     if want & set(FLOW_CHANNELS):
         inst = _read(data, "institutional.parquet")
         for col, slot in (("foreign_net", "foreign_flow"), ("trust_net", "trust_flow")):
             if slot in want:
-                slots[slot] = (asof_grid(flow_events(inst, col, slot), dates, tickers, slot)
+                slots[slot] = (asof_grid(flow_events(inst, col, slot), dates, tickers, slot,
+                                         max_age_days=cap(slot), stable_ties=ties)
                                if not inst.empty else empty.copy())
     return slots
 
@@ -378,12 +455,25 @@ def build_taiwan_smallcap_panel(
     *,
     adv_window: int = ADV_WINDOW,
     channels: tuple[str, ...] = CORE_CHANNELS,
+    max_age_days: "Mapping[str, int | None] | None" = None,
+    stable_ties: bool = False,
 ) -> Panel:
     """The cap-rank 51-250 TWSE/TPEx small/mid-cap panel with its alt-data channels as feature slots.
 
     ``channels`` defaults to :data:`CORE_CHANNELS` — the three the 2026-07-15 campaign locked — so
     the probe scripts that delegate here stay byte-identical. The orchestrator passes
     :data:`ALL_CHANNELS`.
+
+    ``max_age_days`` is an OPT-IN per-channel age cap, ``{channel: calendar days}`` — see
+    :func:`asof_grid`. The default ``None`` caps nothing and is the sealed behaviour. A channel left
+    out of the mapping stays uncapped; a sensible cap is a little over two of the channel's own
+    reporting periods (about 75 days for a monthly series). When a cap is in force it is stamped
+    into ``meta["max_age_days"]``, so a scorecard built on a capped panel says so; the default meta
+    carries no such key and is unchanged.
+
+    ``stable_ties`` is an OPT-IN tie-break for prints that share an avail date — see
+    :func:`asof_grid`. The default ``False`` is the sealed behaviour. It applies to every channel
+    and, when on, is stamped into ``meta["stable_ties"]``; the default meta is unchanged.
     """
     data = Path(data) if data is not None else DEFAULT_DATA
     if not (data / "prices.parquet").exists():
@@ -391,6 +481,9 @@ def build_taiwan_smallcap_panel(
             f"missing {data / 'prices.parquet'} — fetch the substrate first via "
             f"scripts/data/fetch_taiwan_fundamentals_finmind.py + "
             f"scripts/research/taiwan_smallcap_universe.py")
+    age_caps = _age_caps(max_age_days, channels)             # fail before the heavy reads
+    if not isinstance(stable_ties, (bool, np.bool_)):
+        raise TypeError(f"stable_ties must be a bool, got {type(stable_ties).__name__}")
 
     prices = pd.read_parquet(data / "prices.parquet")
     members = pd.read_parquet(data / "universe" / "membership.parquet")
@@ -426,7 +519,7 @@ def build_taiwan_smallcap_panel(
         arr[~tradeable] = np.nan
 
     sector_id, sector_prov = sector_map(data, tickers)
-    slots = _build_channels(data, dates, tickers, channels)
+    slots = _build_channels(data, dates, tickers, channels, age_caps, stable_ties)
 
     liq_days = int((active.sum(axis=1) >= 25).sum())
     meta = {
@@ -443,6 +536,10 @@ def build_taiwan_smallcap_panel(
         "note": ("cap-rank 51-250 monthly PIT membership; RAW unadjusted prices; current-listing pool "
                  "⇒ survivorship UPPER BOUND"),
     }
+    if age_caps:                 # only when a cap is in force: the default meta must not move
+        meta["max_age_days"] = age_caps
+    if stable_ties:              # likewise: stamped only when on
+        meta["stable_ties"] = True
     return Panel(dates, tickers, o, h, lo, c, v, active, adv, sector_id, meta, feature_slots=slots)
 
 
