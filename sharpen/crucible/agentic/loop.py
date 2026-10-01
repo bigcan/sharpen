@@ -46,6 +46,7 @@ from .hypothesis import HypothesisAuthor, PreRegisteredSpec, candidate_hash
 if TYPE_CHECKING:
     from ...signals.generation.base_sleeves import SleeveComponents
     from ..corrected_contract import CorrectedConfig
+    from ..orchestrator.fdr import LordSequence
     from ..search_memory import SearchMemoryConfig
 
 log = logging.getLogger("crucible.loop")
@@ -58,6 +59,15 @@ _PROMISING = "PROMISING"
 # hall-of-fame/promising set — "scored and lost", distinct from "never scored" (NOW-3, C3-05/C6-06/
 # C7-07). Like _LOGGED it is NON-killing: a non-survivor must never enter killed_families.
 _SCORED_NOT_SELECTED = "SCORED_NOT_SELECTED"
+# crucible-v15.0 — terminal verdict for a PRE-REGISTERED spec that never received a holdout pass/fail
+# decision (Tier-0 causality cull, degenerate score or statistic, evaluation error, or — shipped contract
+# / `offspring_policy: all` only — a train screen). Before v15.0 these rows were written
+# SCORED_NOT_SELECTED ("scored and lost") and CHARGED a LORD++ test, so a tick that tested nothing read
+# as a negative result: the 2026-08-10 us_equity extended-bank tick recorded 107 pre-registrations as
+# lost while its holdout adjudicated 16. NON-killing, carries no rejection class, charged NO FDR wealth,
+# and still a dedup key (every remaining cause is deterministic for the formula on this panel, so
+# re-proposing it would only re-cull it — the livelock shape the v12.x fixes removed).
+_NOT_TESTED = "NOT_TESTED"
 
 
 @dataclass(frozen=True, slots=True)
@@ -72,6 +82,15 @@ class HypothesisLoopResult:
     dropped: int = 0                              # proposals rejected pre-compute (dedup/killed/parse)
     cohort_cards: list[CohortCard] = field(default_factory=list)   # Phase 4: opt-in cohort verdicts
     extra: dict = field(default_factory=dict)
+    # v15.0: candidate hashes of the PRE-REGISTERED specs the binding holdout gate actually decided —
+    # the online-FDR charging set (the orchestrator charges these and only these) — and the count of
+    # pre-registered specs ledgered NOT_TESTED this pass.
+    adjudicated_hashes: frozenset = frozenset()
+    n_not_tested: int = 0
+    # v16.0: the sequential LORD++ decisions, in testing order — ``(candidate_hash, level, discovery)``.
+    # The orchestrator replays exactly this sequence on the persistent account. Empty when the tick
+    # used a single ``lord_level`` (or the shipped contract).
+    lord_decisions: tuple = ()
 
 
 def _holdout_entry(report: GenerationReport, formula: str) -> dict | None:
@@ -125,6 +144,14 @@ def _holdout_rejections(report: GenerationReport, ct: str) -> set[tuple[str, str
             if hv.get("holdout_passes") is False and hv.get("formula") is not None}
 
 
+def _holdout_adjudicated(report: GenerationReport, ct: str) -> set[tuple[str, str]]:
+    """``(candidate_type, formula)`` keys the binding holdout gate DECIDED (pass or fail) — every
+    ``holdout_validation`` entry that carries ``holdout_passes``. The complement among pre-registered
+    specs is NOT_TESTED (v15.0)."""
+    return {(ct, str(hv["formula"])) for hv in report.holdout_validation
+            if "holdout_passes" in hv and hv.get("formula") is not None}
+
+
 def _rejection_class(*, search_memory_cfg: "SearchMemoryConfig | None", substrate_mde: float | None,
                      cfg: FitnessConfig, corrected_cfg: "CorrectedConfig | None") -> str | None:
     """U4 class for a candidate the holdout gate REJECTED — ``DECISIVE`` when this substrate had the
@@ -176,6 +203,7 @@ def run_hypothesis_loop(
     corrected_cfg: "CorrectedConfig | None" = None,
     corrected_gates_hash: str | None = None,
     lord_level: float | None = None,
+    lord_sequence: "LordSequence | None" = None,
     search_memory_cfg: "SearchMemoryConfig | None" = None,
     search_memory_gates_hash: str | None = None,
     substrate_mde: float | None = None,
@@ -192,7 +220,10 @@ def run_hypothesis_loop(
     ``contract`` / ``corrected_cfg`` / ``lord_level`` (crucible-v6.0) select and parameterize the
     decision layer ``evolve`` applies on the embargoed holdout; ``corrected_gates_hash`` is the
     corrected thresholds file's byte hash, pinned into the manifest symmetrically with ``gates_hash``.
-    Defaults reproduce the shipped funnel exactly.
+    Defaults reproduce the shipped funnel exactly. ``lord_sequence`` (crucible-v16.0) replaces
+    ``lord_level`` with per-spec sequential LORD++ levels shared across both candidate types (cross-
+    sectional seeds first, then overlay, each in pre-registration order); its decisions come back in
+    ``HypothesisLoopResult.lord_decisions``.
 
     ``search_memory_cfg`` / ``substrate_mde`` (U4, crucible-v10.0) enable the REJECTION CLASSIFICATION
     that makes ``ledger.killed_families()`` able to fire at all: a rejected candidate is stamped
@@ -237,6 +268,7 @@ def run_hypothesis_loop(
     # holdout-tested population and the SURFACED population are different sets — see the second ledger
     # loop below, where the majority of them are written.
     holdout_rejected: set[tuple[str, str]] = set()
+    adjudicated: set[tuple[str, str]] = set()   # v15.0: every holdout DECISION (pass or fail)
     n_classified = 0                             # rejections that actually got a class on a ledger row
     for ct in ("cross_sectional", "overlay"):
         seeds = [pr.formula for pr in specs if pr.spec.candidate_type == ct]
@@ -245,9 +277,12 @@ def run_hypothesis_loop(
         log.info("mining %d %s seeds (contract=%s)", len(seeds), ct, contract)
         report = evolve(seeds, panel, base_returns, timestamps, cfg, candidate_type=ct,
                         base_components=base_components, contract=contract,
-                        corrected_cfg=corrected_cfg, lord_level=lord_level, **ek)
+                        corrected_cfg=corrected_cfg, lord_level=lord_level,
+                        **({"lord_sequence": lord_sequence} if lord_sequence is not None else {}), **ek)
         reports[ct] = report
         holdout_rejected |= _holdout_rejections(report, ct)
+        adjudicated |= _holdout_adjudicated(report, ct)
+        adjudicated |= {(ct, str(f)) for f in report.train_rejected}   # shipped-contract train rejections
         promising_hashes = {candidate_hash(c.formula) for c in report.promising}
         # Record every surfaced genome to the ledger (file-drawer): the hall-of-fame UNION the
         # gate-passers. report.promising is NOT guaranteed a subset of hall_of_fame, so a PROMISING
@@ -258,9 +293,19 @@ def run_hypothesis_loop(
         for c in (*report.hall_of_fame, *report.promising):
             surfaced.setdefault(candidate_hash(c.formula), c)
         for chash, c in surfaced.items():
-            verdict = _PROMISING if chash in promising_hashes else _LOGGED
-            verdicts[chash] = verdict
             pr = prereg_by_hash.get(chash)
+            if chash in promising_hashes:
+                verdict = _PROMISING
+            elif pr is not None:
+                # v15.0: a PRE-REGISTRATION's verdict states the fact about ITS test — decided and lost,
+                # or never decided — never whether it made the hall of fame. Surfacing is decided by
+                # train fitness against whatever offspring were bred, so the same decision used to read
+                # LOGGED when the seed surfaced and SCORED_NOT_SELECTED when offspring displaced it, and
+                # skipping the offspring search flipped every decided seed's label.
+                verdict = _SCORED_NOT_SELECTED if (ct, c.formula) in adjudicated else _NOT_TESTED
+            else:
+                verdict = _LOGGED
+            verdicts[chash] = verdict
             res = c.result
             # U4: classify only a candidate that ACTUALLY REACHED the holdout gate and failed it. A
             # train-pre-filter cull (or an offspring blocked by `prereg_only`) was never tested
@@ -322,11 +367,13 @@ def run_hypothesis_loop(
                                       corrected_cfg=corrected_cfg)
                      if (pr.spec.candidate_type, pr.formula) in holdout_rejected else None)
         n_classified += rej_class is not None
+        decided = (pr.spec.candidate_type, pr.formula) in adjudicated
         ledger.record(TrialRecord(
             candidate_hash=pr.candidate_hash, crucible_version=crucible_version,
             family=pr.spec.family, candidate_type=pr.spec.candidate_type, formula=pr.formula,
             economic_rationale=pr.economic_rationale, first_seen_run=run_id,
-            proposal_ts=pr.proposal_ts, verdict=_SCORED_NOT_SELECTED,
+            proposal_ts=pr.proposal_ts,
+            verdict=(_SCORED_NOT_SELECTED if decided else _NOT_TESTED),
             data_snapshot_hash=data_snapshot_hash,
             rejection_class=rej_class,
             implied_mde_at_test=(substrate_mde if rej_class is not None else None)))
@@ -349,14 +396,24 @@ def run_hypothesis_loop(
     # (cohort_prov stays {} → the cohort manifest fields keep their empty defaults). The provenance is
     # PINNED into the reproduce contract (not the non-gated `extra`) because cohort verdicts + the MC
     # p-value are decision-bearing. Caps at PROMISING (Tier-2 for capital). ------------------------
-    cohort_cards, cohort_prov = _evaluate_cohort_gate(
-        pool=(cohort_pool if cohort_pool is not None
-              else [(pr.candidate_hash, pr.formula, pr.spec.candidate_type) for pr in specs]),
-        panel=panel, base_returns=base_returns, timestamps=timestamps, cfg=cfg, ek=ek,
-        run_id=run_id, crucible_version=crucible_version, gates_hash=gates_hash,
-        proposal_ts=proposal_ts, data_snapshot_hash=data_snapshot_hash, cohort_cfg=cohort_cfg,
-        cohort_mc_kwargs=cohort_mc_kwargs, cohort_gates_hash=cohort_gates_hash,
-        base_components=base_components)
+    # v15.0: the cohort gate runs AFTER every per-candidate verdict above is committed to the ledger,
+    # but the online-FDR charges for those verdicts happen in the CALLER once this function returns. An
+    # exception here used to abort the tick in that window: verdicts written, LORD++ never charged, and
+    # the specs then deduped forever (a crash after tests ran left them uncharged — anti-conservative).
+    # The cohort is an optional, separate adjudication, so its failure is logged and the tick proceeds.
+    try:
+        cohort_cards, cohort_prov = _evaluate_cohort_gate(
+            pool=(cohort_pool if cohort_pool is not None
+                  else [(pr.candidate_hash, pr.formula, pr.spec.candidate_type) for pr in specs]),
+            panel=panel, base_returns=base_returns, timestamps=timestamps, cfg=cfg, ek=ek,
+            run_id=run_id, crucible_version=crucible_version, gates_hash=gates_hash,
+            proposal_ts=proposal_ts, data_snapshot_hash=data_snapshot_hash, cohort_cfg=cohort_cfg,
+            cohort_mc_kwargs=cohort_mc_kwargs, cohort_gates_hash=cohort_gates_hash,
+            base_components=base_components)
+    except Exception:                                  # noqa: BLE001 — see comment above
+        log.exception("cohort gate FAILED — no cohort verdict this tick; per-candidate verdicts stand "
+                      "and are charged normally")
+        cohort_cards, cohort_prov = [], {}
 
     n_after = ledger.count()
     manifest = RunManifest(
@@ -374,11 +431,24 @@ def run_hypothesis_loop(
         corrected_gates_hash=(corrected_gates_hash if contract == CONTRACT_CORRECTED else None),
         # U4: pin the search-memory gates ONLY when the search memory is actually active, so a run with
         # U4 detached keeps its pre-v10.0 manifest bytes (same rule as corrected_gates_hash above).
-        search_memory_gates_hash=(search_memory_gates_hash if search_memory_cfg is not None else None))
+        search_memory_gates_hash=(search_memory_gates_hash if search_memory_cfg is not None else None),
+        # v15.0: whether each candidate type's offspring GP search ran — part of what reproduce must
+        # re-derive (it sets the surfaced/file-drawer set), not decision-bearing for pre-registrations.
+        extra={"offspring_searched": {ct: bool(r.offspring_searched) for ct, r in reports.items()}})
 
+    adjudicated_hashes = frozenset(
+        pr.candidate_hash for pr in specs if (pr.spec.candidate_type, pr.formula) in adjudicated)
+    n_not_tested = len(specs) - len(adjudicated_hashes)
+    if n_not_tested:
+        log.warning("%d of %d pre-registered specs are NOT_TESTED (no holdout decision) — ledgered as "
+                    "such and charged no online-FDR wealth", n_not_tested, len(specs))
     return HypothesisLoopResult(
         specs=specs, reports=reports, cards=cards, manifest=manifest,
-        n_promising=len(cards), dropped=dropped, cohort_cards=cohort_cards)
+        n_promising=len(cards), dropped=dropped, cohort_cards=cohort_cards,
+        adjudicated_hashes=adjudicated_hashes, n_not_tested=n_not_tested,
+        lord_decisions=(tuple((candidate_hash(f), float(level), bool(disc))
+                              for _ct, f, level, disc in lord_sequence.decisions)
+                        if lord_sequence is not None else ()))
 
 
 def run_cohort_only(

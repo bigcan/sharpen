@@ -65,7 +65,9 @@ def _substrate(beta: float):
 def _run(calib, beta: float, *, contract: str, corrected=None, lord_level=None):
     panel, base, ts = _substrate(beta)
     ek = dict(calib.ek)
-    ek.update(pop_size=12, n_generations=2)
+    # v15.0: force the offspring search. Under corrected+prereg_only it is skipped by default (offspring
+    # cannot be promoted); these tests exist precisely to show that offspring, when searched, are blocked.
+    ek.update(pop_size=12, n_generations=2, search_offspring=True)
     kw: dict = {"contract": contract}
     if corrected is not None:
         kw["corrected_cfg"] = corrected

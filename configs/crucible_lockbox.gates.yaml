@@ -9,14 +9,35 @@
 # load_incubation_criterion(), and enroll() copies the VALUES into each lockbox entry (CR-2: the
 # criterion is pinned per candidate at enrollment and never edited afterward).
 incubation:
-  # The pre-registered evaluation HORIZON: the number of forward (post-proposal) bars that must
-  # accrue before ANY verdict is rendered. Fixed in advance and outcome-independent, so the single
-  # evaluation at this horizon is NOT optional stopping / peeking (spec §9 "ledger-oracle" theme).
-  # ~63 trading days ≈ one calendar quarter of data that did not exist when the hypothesis was written.
+  # crucible-v16.0: the decision rule. `sprt` (below) replaces `fixed` for every NEW enrollment; an
+  # entry keeps the rule it was enrolled under (the columns are pinned per candidate, CR-2).
+  #
+  # WHY THE FIXED RULE WAS RETIRED (2026-09-30 deep audit, operator decision delegated 2026-09-30):
+  #  * its statistic — the Sharpe of b_aug − b_base — is the Tier-C-sealed substitution residual
+  #    w·(r_c − b_base): a genuine variance-reducing diversifier has a NEGATIVE one, so the lockbox would
+  #    have rejected exactly the candidates the corrected contract promotes on the Sharpe difference;
+  #  * one look at 63 bars against 0.30 is a coin flip: P(clear) 0.44 at zero edge vs 0.64 at IR 1.0.
+  # The SPRT tests the forward Sharpe DIFFERENCE of the augmented vs base book (the statistic the gate
+  # certifies), block-summed over `block_bars`, with vols and the block noise pinned from the last
+  # `calib_bars` pre-proposal bars. Monte Carlo of this construction (4,000 draws per cell, ρ(aug, base)
+  # 0.97 / 0.90, AR(1) 0 / 0.3):
+  #    false CLEAR at ΔSR 0: 2-8% (α 10%) — the old rule's was 44%;
+  #    at ΔSR 0.30: CLEAR 41-62% at ρ 0.97, mostly INCONCLUSIVE at ρ 0.90 (the honest answer at that noise);
+  #    a leak (in-sample edge, forward 0): REJECTED 57-75% within ~320-380 bars at ρ 0.97;
+  #    an in-sample selection edge does not bias the forward test (vols/noise are mean-free).
+  test: sprt
+  # No verdict before this many forward bars (also the legacy `fixed` rule's single horizon).
   min_forward_bars: 63
-  # The forward marginal-contribution annualized Sharpe a candidate must clear at the horizon to
-  # become eligible for the human Tier-2 gate. A conservative-positive floor: forward evidence must be
-  # an actual positive contribution, not merely "not a disaster". Below this at the horizon -> REJECTED
-  # (terminal, never human-eligible). No promotion to capital ever follows automatically (a human +
-  # Tier-2 deep audit remain non-negotiable, CLAUDE.md).
+  # SPRT cap: still undecided at 3 years of forward data -> INCONCLUSIVE (terminal, never eligible).
+  max_forward_bars: 756
+  block_bars: 21
+  calib_bars: 504
+  # H1: the annualized forward ΔSR worth a human's time. H0: ΔSR = 0.
+  delta_sr_h1: 0.30
+  # P(CLEARED | H0) and P(REJECTED | H1) — Wald boundaries ln((1-β)/α), ln(β/(1-α)). CLEARED only makes
+  # a card ELIGIBLE for the human Tier-2 gate; no promotion to capital ever follows automatically.
+  alpha: 0.10
+  beta: 0.20
+  # LEGACY (`fixed` entries only): the forward marginal-contribution annualized Sharpe floor at the
+  # single horizon. Retained so a pre-v16 entry is still judged by the rule it was enrolled under.
   min_forward_sharpe: 0.30

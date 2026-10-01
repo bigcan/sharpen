@@ -65,6 +65,9 @@ def main() -> int:
     ap.add_argument("--start", default="2015-01-05", help="ISO date; default = Taiwan panel start")
     ap.add_argument("--end", default=None, help="ISO date; default = today (UTC+8 Taiwan)")
     ap.add_argument("--sleep", type=float, default=0.3, help="politeness delay between live day calls")
+    ap.add_argument("--repoll-weekday-empty", action="store_true",
+                    help="REPAIR: re-fetch every stored WEEKDAY recorded as empty (crucible-v15.0 — the "
+                         "store had recorded real trading days as non-trading after a no-data reply)")
     ap.add_argument("--store-path", default=None,
                     help="override the store file (default = the connector's shared default path)")
     args = ap.parse_args()
@@ -90,6 +93,7 @@ def main() -> int:
         store_path=store_path,
         max_lookback_days=span_days + 10,        # never floor the requested start
         max_live_days_per_fetch=span_days + 10,  # fill the WHOLE range in this one run
+        repoll_weekday_empty=args.repoll_weekday_empty,
     )
     ref = next(r for r in conn.discover() if r.series_id.endswith(":foreign_net"))
 

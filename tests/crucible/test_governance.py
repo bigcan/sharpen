@@ -46,7 +46,10 @@ def _card(chash: str = "surv01") -> DiscoveryCard:
 def test_deep_audit_invocation_is_human_command() -> None:
     cmd = deep_audit_invocation("crucible", "overlay:surv01")
     assert "deep_strategy_audit" in cmd
-    assert '"workstream": "crucible"' in cmd and '"scope": "overlay:surv01"' in cmd
+    # v15.0: the workflow accepts only "all" or pillar keys (a substrate label aborted it) and needs
+    # survivor pillars (its defaults are the RL lifecycle); the caller's label stays on the packet.
+    assert '"workstream": "crucible"' in cmd and '"scope": "all"' in cmd and '"pillars"' in cmd
+    assert '"scope": "C2,C4"' in deep_audit_invocation("crucible", "c2, C4")
 
 
 def test_handoff_for_cleared_carries_evidence_and_verdict() -> None:

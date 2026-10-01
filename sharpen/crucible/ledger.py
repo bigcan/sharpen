@@ -38,6 +38,7 @@ from .search_memory import (
     REJECTION_UNDERPOWERED,
     is_readmissible,
     semantic_hash,
+    statistical_hash,
 )
 
 if TYPE_CHECKING:
@@ -56,7 +57,10 @@ PROMISING_VERDICTS = frozenset({"PROMISING", "ADD_CANDIDATE"})
 # AST. It is computed from the formula TEXT alone and carries no score/verdict information, so adding it
 # does not widen the anti-oracle moat (CRU-2); ``rejection_class`` / ``implied_mde_at_test`` are
 # score-adjacent and stay OUT of the view.
-_AGENT_VIEW_COLUMNS = ("candidate_hash", "semantic_hash", "candidate_type", "family")
+# ``stat_hash`` (v15.0) is the third DEDUP KEY: the formula canonicalized modulo every transform the
+# SCORED BOOK is invariant to (``search_memory.statistical_hash``) — still a hash of the formula TEXT and
+# its declared type alone, so it widens nothing (CRU-2).
+_AGENT_VIEW_COLUMNS = ("candidate_hash", "semantic_hash", "stat_hash", "candidate_type", "family")
 
 # --- upsert monotonicity policy (C7-04) -----------------------------------------------------------
 # Re-recording a candidate by hash must NEVER destroy provenance or downgrade a settled verdict. The
@@ -111,7 +115,8 @@ CREATE TABLE IF NOT EXISTS trial_ledger (
     fdr_wealth_charged  REAL,            -- online-FDR spend (P3); nullable in P0
     semantic_hash       TEXT,            -- U4 DEDUP KEY: hash of the commutative-canonical AST
     rejection_class     TEXT,            -- U4 SCORE column: 'DECISIVE' | 'UNDERPOWERED' | NULL
-    implied_mde_at_test REAL             -- U4 SCORE column: substrate MDE when this test ran
+    implied_mde_at_test REAL,            -- U4 SCORE column: substrate MDE when this test ran
+    stat_hash           TEXT             -- v15.0 DEDUP KEY: statistical_hash (book-invariant canonical)
 );
 CREATE INDEX IF NOT EXISTS ix_trial_family ON trial_ledger(family);
 CREATE INDEX IF NOT EXISTS ix_trial_verdict ON trial_ledger(verdict);
@@ -123,6 +128,7 @@ CREATE INDEX IF NOT EXISTS ix_trial_verdict ON trial_ledger(verdict);
 _U4_INDEX_SQL = """
 CREATE INDEX IF NOT EXISTS ix_trial_semantic ON trial_ledger(semantic_hash);
 CREATE INDEX IF NOT EXISTS ix_trial_rejection ON trial_ledger(rejection_class);
+CREATE INDEX IF NOT EXISTS ix_trial_stat ON trial_ledger(stat_hash);
 """
 
 # The agent view is created SEPARATELY from _SCHEMA and DROPPED first: `CREATE VIEW IF NOT EXISTS` on an
@@ -173,6 +179,7 @@ class TrialRecord:
     semantic_hash: str | None = None
     rejection_class: str | None = None
     implied_mde_at_test: float | None = None
+    stat_hash: str | None = None          # v15.0; derived from formula + candidate_type when None
 
 
 class TrialLedger:
@@ -192,7 +199,7 @@ class TrialLedger:
         # cheerfully re-derive all 403 of them.
         have = {r["name"] for r in self._conn.execute("PRAGMA table_info(trial_ledger)")}
         for col, decl in (("semantic_hash", "TEXT"), ("rejection_class", "TEXT"),
-                          ("implied_mde_at_test", "REAL")):
+                          ("implied_mde_at_test", "REAL"), ("stat_hash", "TEXT")):
             if col not in have:
                 self._conn.execute(f"ALTER TABLE trial_ledger ADD COLUMN {col} {decl}")
         self._conn.executescript(_U4_INDEX_SQL)
@@ -200,6 +207,8 @@ class TrialLedger:
         self._conn.commit()
         if "semantic_hash" not in have:
             self._backfill_semantic_hashes()
+        if "stat_hash" not in have:
+            self._backfill_stat_hashes()
 
     def close(self) -> None:
         self._conn.close()
@@ -222,7 +231,7 @@ class TrialLedger:
             "candidate_hash", "crucible_version", "family", "candidate_type", "spec_json",
             "formula", "economic_rationale", "first_seen_run", "proposal_ts", "verdict", "dsr",
             "delta_sr_oos", "marginal_hlz_t", "data_snapshot_hash", "fdr_wealth_charged",
-            "semantic_hash", "rejection_class", "implied_mde_at_test",
+            "semantic_hash", "rejection_class", "implied_mde_at_test", "stat_hash",
         ]
         vals = [getattr(rec, c) for c in cols]
         if rec.semantic_hash is None and rec.formula:
@@ -231,6 +240,12 @@ class TrialLedger:
             # recording the trial matters more than indexing it.
             try:
                 vals[cols.index("semantic_hash")] = semantic_hash(rec.formula)
+            except Exception:                                 # noqa: BLE001
+                pass
+        if rec.stat_hash is None and rec.formula:             # v15.0 — same rule for the third key
+            try:
+                vals[cols.index("stat_hash")] = statistical_hash(
+                    rec.formula, rec.candidate_type or "cross_sectional")
             except Exception:                                 # noqa: BLE001
                 pass
         placeholders = ", ".join("?" for _ in cols)
@@ -277,6 +292,26 @@ class TrialLedger:
         if rows:
             log.info("U4 ledger migration: back-filled semantic_hash for %d/%d rows (%d unparseable)",
                      done, len(rows), bad)
+
+    def _backfill_stat_hashes(self) -> None:
+        """One-shot v15.0 migration: ``stat_hash`` for every historical row with a formula, so the
+        statistical dedup sees the whole record (a row without ``candidate_type`` predates CR-9 and is
+        a cross-sectional genome)."""
+        rows = self._conn.execute(
+            "SELECT candidate_hash, formula, candidate_type FROM trial_ledger "
+            "WHERE stat_hash IS NULL AND formula IS NOT NULL").fetchall()
+        done = 0
+        for r in rows:
+            try:
+                h = statistical_hash(r["formula"], r["candidate_type"] or "cross_sectional")
+            except Exception:                                 # noqa: BLE001 — unparseable legacy row
+                continue
+            self._conn.execute("UPDATE trial_ledger SET stat_hash = ? WHERE candidate_hash = ?",
+                               (h, r["candidate_hash"]))
+            done += 1
+        self._conn.commit()
+        if rows:
+            log.info("v15.0 ledger migration: back-filled stat_hash for %d/%d rows", done, len(rows))
 
     def count(self) -> int:
         """Total distinct candidates in the ledger (the cross-run file-drawer N)."""
@@ -411,7 +446,7 @@ class TrialLedger:
         return sorted(r[0] for r in rows)
 
     def readmissible(self, *, current_mde: float, cfg: "SearchMemoryConfig",
-                     limit: int = 32) -> list[dict]:
+                     limit: int = 32, run_prefix: str | None = None) -> list[dict]:
         """U4 power-aware re-admission: parked (``UNDERPOWERED``) candidates whose original test ran at
         a materially WORSE MDE than the substrate now has, so re-testing them can produce information
         the first test could not (:func:`search_memory.is_readmissible`).
@@ -424,13 +459,24 @@ class TrialLedger:
 
         Ordered oldest-MDE-first (the most badly-underpowered original tests, i.e. the ones with the most
         to gain) then by hash for determinism, and capped at ``limit`` so re-admissions cannot crowd the
-        per-tick candidate budget (CR-7)."""
+        per-tick candidate budget (CR-7).
+
+        v15.0 — ``run_prefix`` scopes the candidates to ONE substrate (``tick-<substrate_id>-``; the
+        orchestrator passes it): unscoped, a substrate re-admitted another substrate's parked specs,
+        culled the ones that read slots it does not have, and — never adjudicating them, so never
+        updating their MDE — re-admitted them every night, charging LORD++ each time. A SETTLED row
+        (PROMISING / killed) is never re-admitted: a PROMISING re-test kept its UNDERPOWERED class and
+        old MDE, so it came back every tick and was re-credited as a NEW LORD++ discovery each time."""
+        settled = sorted(_SETTLED_VERDICTS)
+        scope = " AND first_seen_run LIKE ?" if run_prefix else ""
         rows = self._conn.execute(
             "SELECT candidate_hash, semantic_hash, family, candidate_type, formula, spec_json, "
             "       economic_rationale, proposal_ts, rejection_class, implied_mde_at_test "
             "FROM trial_ledger WHERE rejection_class = ? AND formula IS NOT NULL "
+            f"AND (verdict IS NULL OR verdict NOT IN ({', '.join('?' for _ in settled)})){scope} "
             "ORDER BY implied_mde_at_test DESC, candidate_hash ASC",
-            (REJECTION_UNDERPOWERED,)).fetchall()
+            (REJECTION_UNDERPOWERED, *settled, *((f"{run_prefix}%",) if run_prefix else ()))
+        ).fetchall()
         cap = max(0, int(limit))
         out: list[dict] = []
         for r in rows:
@@ -441,6 +487,20 @@ class TrialLedger:
                                current_mde=current_mde, cfg=cfg):
                 out.append(dict(r))
         return out
+
+    def mark_readmitted(self, candidate_hashes: list[str], current_mde: float) -> None:
+        """v15.0 — a re-admission is CONSUMED by the attempt: stamp ``implied_mde_at_test`` with the MDE
+        the re-test runs at, so a re-test that ends without a holdout decision (culled, degenerate) is
+        not re-admitted again until the substrate gains power AGAIN. Settled rows are untouched."""
+        if not candidate_hashes:
+            return
+        settled = sorted(_SETTLED_VERDICTS)
+        for h in candidate_hashes:
+            self._conn.execute(
+                "UPDATE trial_ledger SET implied_mde_at_test = ? WHERE candidate_hash = ? "
+                f"AND (verdict IS NULL OR verdict NOT IN ({', '.join('?' for _ in settled)}))",
+                (float(current_mde), h, *settled))
+        self._conn.commit()
 
     def agent_view(self, run_prefix: str | None = None) -> dict:
         """The complete agent-VISIBLE projection (CR-1): dedup rows (candidate_hash / semantic_hash /
@@ -453,6 +513,7 @@ class TrialLedger:
             "candidates": [dict(r) for r in rows],
             "candidate_hashes": sorted(r["candidate_hash"] for r in rows),
             "semantic_hashes": sorted({r["semantic_hash"] for r in rows if r["semantic_hash"]}),
+            "stat_hashes": sorted({r["stat_hash"] for r in rows if r["stat_hash"]}),
             "killed_families": self.killed_families(run_prefix),
         }
 

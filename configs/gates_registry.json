@@ -32,9 +32,10 @@
       "reason": "initial registration 2026-09-30 (SharpOps ladder decision item 7): baseline of every gates file as committed; later edits need a re-registration citing a decision"
     },
     "configs/crucible_altdata.gates.yaml": {
-      "sha256": "3e32b813caf2380c84c73023548b3f530e64d67fe81b43564853d74b8ed93642",
+      "sha256": "28db215e08e4b6533d8c8fdd643a66c20c32ebc3134087ae981edf58b70f579a",
       "registered_on": "2026-09-30",
-      "reason": "initial registration 2026-09-30 (SharpOps ladder decision item 7): baseline of every gates file as committed; later edits need a re-registration citing a decision"
+      "reason": "crucible-v16.0 operator decisions (delegated by the operator 2026-09-30; docs/research/crucible_deep_audit_2026-09-30.md): lockbox -> Wald SPRT on the forward Sharpe difference (the fixed 63-bar marginal-Sharpe rule was a sign-inverted coin flip); cohort enforce_funnel_feasibility false (consistent with v15: pre-registrations are tested, not screened); scout altdata.min_bar_coverage 0.50",
+      "previous_sha256": "3e32b813caf2380c84c73023548b3f530e64d67fe81b43564853d74b8ed93642"
     },
     "configs/crucible_calibration.gates.yaml": {
       "sha256": "edb180dfce5abda12e9ec2f1873623c74857ddff07d8e4d2cebb47fe913213bf",
@@ -62,9 +63,10 @@
       "reason": "initial registration 2026-09-30 (SharpOps ladder decision item 7): baseline of every gates file as committed; later edits need a re-registration citing a decision"
     },
     "configs/crucible_cohort.gates.yaml": {
-      "sha256": "8da0722fa4ddb301ead0d445d9d65dab500c45d8578621856fd3bb81bfcde3e6",
+      "sha256": "743803453a2634c878685695e8b94ca49d1736eaf69e9458aa0eee4943bc269d",
       "registered_on": "2026-09-30",
-      "reason": "initial registration 2026-09-30 (SharpOps ladder decision item 7): baseline of every gates file as committed; later edits need a re-registration citing a decision"
+      "reason": "crucible-v16.0 operator decisions (delegated by the operator 2026-09-30; docs/research/crucible_deep_audit_2026-09-30.md): lockbox -> Wald SPRT on the forward Sharpe difference (the fixed 63-bar marginal-Sharpe rule was a sign-inverted coin flip); cohort enforce_funnel_feasibility false (consistent with v15: pre-registrations are tested, not screened); scout altdata.min_bar_coverage 0.50",
+      "previous_sha256": "8da0722fa4ddb301ead0d445d9d65dab500c45d8578621856fd3bb81bfcde3e6"
     },
     "configs/crucible_corrected_contract.gates.yaml": {
       "sha256": "d1523707b860513079d7312f1f9bbd3fbd09a3bfce078b9c6dc4c4b4458a6f03",
@@ -72,9 +74,10 @@
       "reason": "initial registration 2026-09-30 (SharpOps ladder decision item 7): baseline of every gates file as committed; later edits need a re-registration citing a decision"
     },
     "configs/crucible_lockbox.gates.yaml": {
-      "sha256": "8f8a7a4879e30ef12adca3e6b79d1b36c7b670d892024832eda51e7256797ea3",
+      "sha256": "aada955153b3330c8aa87284dd3c45d859612dbf9589b6b5180c074154234370",
       "registered_on": "2026-09-30",
-      "reason": "initial registration 2026-09-30 (SharpOps ladder decision item 7): baseline of every gates file as committed; later edits need a re-registration citing a decision"
+      "reason": "crucible-v16.0 operator decisions (delegated by the operator 2026-09-30; docs/research/crucible_deep_audit_2026-09-30.md): lockbox -> Wald SPRT on the forward Sharpe difference (the fixed 63-bar marginal-Sharpe rule was a sign-inverted coin flip); cohort enforce_funnel_feasibility false (consistent with v15: pre-registrations are tested, not screened); scout altdata.min_bar_coverage 0.50",
+      "previous_sha256": "8f8a7a4879e30ef12adca3e6b79d1b36c7b670d892024832eda51e7256797ea3"
     },
     "configs/crucible_multiplicity.gates.yaml": {
       "sha256": "a7604a06bf9343b519031e0be43ff00ad0ded6a40679b18d14c75c3d9ed37f76",

@@ -37,6 +37,7 @@ from .ledger import (
 )
 from .lockbox import (
     STATUS_CLEARED,
+    STATUS_INCONCLUSIVE,
     STATUS_INCUBATING,
     STATUS_REJECTED,
     ForwardEvidence,
@@ -96,6 +97,7 @@ __all__ = [
     "ReproduceReport",
     "RunManifest",
     "STATUS_CLEARED",
+    "STATUS_INCONCLUSIVE",
     "STATUS_INCUBATING",
     "STATUS_REJECTED",
     "Substrate",

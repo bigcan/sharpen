@@ -126,6 +126,17 @@ def _default_transport(url: str) -> dict:
         return json.loads(resp.read().decode("utf-8"))
 
 
+#: A no-data reply for a day this recent (Taipei calendar) is NOT persisted as a non-trading day:
+#: T86 posts after the close and occasionally late, so "no data yet" and "holiday" look identical.
+_RECENT_NO_DATA_DAYS = 3
+
+
+def _taipei_today() -> np.datetime64:
+    """Today's date on the Asia/Taipei calendar (T86's publication calendar)."""
+    import datetime as _dt
+    return np.datetime64(_dt.datetime.now(_dt.timezone(_dt.timedelta(hours=8))).date(), "D")
+
+
 class _AccumulationStore:
     """A tiny, idempotent JSON store — ``"YYYYMMDD" -> {ticker: {field: value}}`` — mirroring
     :class:`~.taifex_positioning._AccumulationStore` but keyed by the T86 FETCH UNIT (a full calendar
@@ -142,8 +153,15 @@ class _AccumulationStore:
             return {}
         try:
             return json.loads(self.path.read_text(encoding="utf-8"))
-        except (json.JSONDecodeError, OSError):
-            logger.warning("twse_inst: store at %s unreadable — treating as empty", self.path)
+        except (json.JSONDecodeError, OSError, UnicodeDecodeError):
+        # v15.0: an UNREADABLE store is moved aside (``<name>.corrupt-<utc>``), never silently treated
+        # as empty — the next save() would otherwise overwrite the only copy of poll-only history that
+        # cannot be re-downloaded (deep audit 2026-09-30: a torn file became a 1-day store). The tick
+        # still proceeds on an empty store, and the quarantined file is there to recover by hand.
+            from .taifex_positioning import _quarantine
+            moved = _quarantine(self.path)
+            logger.error("twse_inst: store at %s unreadable — moved aside to %s; continuing EMPTY "
+                         "(recover the history from that file)", self.path, moved)
             return {}
 
     def save(self, data: dict[str, dict[str, dict[str, float]]]) -> None:
@@ -174,6 +192,8 @@ class TwseInstitutionalConnector:
         sleep_seconds: float = 0.3,
         store_path: str | Path | None = None,
         save_every_days: int = 200,
+        repoll_weekday_empty: bool = False,
+        today: "Callable[[], np.datetime64] | None" = None,
     ) -> None:
         self._transport = transport
         self._tickers = tickers or _DEFAULT_TICKERS
@@ -196,6 +216,15 @@ class TwseInstitutionalConnector:
         # interruption and is resumable (a re-run skips already-stored days). The orchestrator fetches
         # far fewer than this per tick, so it still saves exactly once (at the end) — no behavior change.
         self._save_every = int(save_every_days)
+        # v15.0 — a "no data" reply is only trusted as a NON-TRADING DAY when it is not RECENT: T86 is
+        # published after the Taipei close, so polling today (the backfill's default `end`) or a day
+        # whose publication is late gets the same stat != OK reply as a holiday — and was persisted
+        # forever. Such days are left UNPOLLED and retried. `today` is injectable for tests.
+        self._today = today or _taipei_today
+        # Repair switch (the backfill script's --repoll-weekday-empty): treat every stored WEEKDAY that
+        # was recorded as empty as un-polled. The live store carried 58 real trading days recorded as
+        # empty (days the OHLCV panel and FinMind both trade); this re-fetches them.
+        self._repoll_weekday_empty = bool(repoll_weekday_empty)
 
     # -- interface -----------------------------------------------------------------
     def discover(self) -> list[SeriesRef]:
@@ -290,12 +319,15 @@ class TwseInstitutionalConnector:
             if self._live_budget <= 0:
                 break                             # network budget spent — remaining gaps fill next run
             date_str = str(day).replace("-", "")
-            if date_str in store:
+            if date_str in store and not (self._repoll_weekday_empty and not store[date_str]
+                                          and np.is_busday(day)):
                 continue                          # already polled (idempotent) — costs no budget
             result = self._fetch_day_live(date_str)   # OK-payload | {} (no data) | None (transport fail)
             self._live_budget -= 1                    # a network call was made either way
             if result is None:                        # C1-06: a transient TRANSPORT failure must NEVER be
                 continue                              # recorded as a holiday — leave it unpolled to retry
+            if not result and day >= self._today() - np.timedelta64(_RECENT_NO_DATA_DAYS, "D"):
+                continue                              # v15.0: too recent to call a holiday — retry later
             store[date_str] = self._extract_day(result) if result else {}
             fetched += 1
             if self._save_every > 0 and fetched % self._save_every == 0:

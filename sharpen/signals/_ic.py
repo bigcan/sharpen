@@ -352,7 +352,11 @@ def block_bootstrap_mean(
     return {
         "ci_low": float(np.quantile(means, alpha / 2.0)),
         "ci_high": float(np.quantile(means, 1.0 - alpha / 2.0)),
-        "p_le_0": float((means <= 0.0).mean()),
+        # v15.0: add-one Monte-Carlo p-value, (1 + #{mean* <= 0}) / (1 + B). The raw share could be
+        # exactly 0, which BH/BHY then leave at q = 0 for ANY family size — the multiplicity
+        # correction silently vanishes (a t=3.88 series: q 0 at every m, vs normal-p BHY q 0.39 at
+        # m=1000). Never below 1/(B+1), the resolution the bootstrap actually has.
+        "p_le_0": float((1.0 + float((means <= 0.0).sum())) / (1.0 + float(boots))),
         "mean": float(d.mean()),
         "block": int(block),
         "n_boot": int(boots),

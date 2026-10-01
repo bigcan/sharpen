@@ -97,6 +97,143 @@ def semantic_hash(formula: str) -> str:
     return hashlib.sha256(canonical_formula(formula).encode("utf-8")).hexdigest()[:12]
 
 
+# --------------------------------------------------------------------------- hypothesis identity
+def sign_folded_formula(formula: str, expected_sign: int) -> str:
+    """The formula the funnel will actually TRADE for a proposal declaring ``expected_sign`` (v15.0).
+
+    Every scoring path downstream of the Author — ``evolve`` (both candidate types), the cohort pool,
+    the lockbox's forward evidence, re-admission — consumes the formula STRING alone and trades it as
+    written (a one-sided test in that direction). ``-1`` is therefore folded in as a unary negation;
+    ``+1`` returns the formula unchanged, so every +1 proposal keeps its canonical string and hash."""
+    if int(expected_sign) == -1:
+        return f"-({formula})"
+    return formula
+
+
+def candidate_hash(formula: str) -> str:
+    """The ledger PRIMARY dedup key: 12-hex SHA-256 of the canonical formula string
+    (``to_formula(parse(formula))`` — the exact string ``evolve`` stores for a scored genome)."""
+    return hashlib.sha256(to_formula(parse(formula)).encode("utf-8")).hexdigest()[:12]
+
+
+def _const_value(node: AstNode) -> float | None:
+    """Numeric value of an ALL-CONSTANT subtree (``const``, ``neg``, and +-*/ over constants), else
+    None. ``-1`` parses as ``neg(const 1)``, so a plain ``node.op == 'const'`` test misses it."""
+    if node.op == "const":
+        return float(node.payload)                            # type: ignore[arg-type]
+    if node.op == "neg" and len(node.children) == 1:
+        v = _const_value(node.children[0])
+        return None if v is None else -v
+    if node.op in ("add", "sub", "mul", "div") and len(node.children) == 2:
+        a, b = (_const_value(c) for c in node.children)
+        if a is None or b is None:
+            return None
+        if node.op == "div":
+            return None if b == 0 else a / b
+        return {"add": a + b, "sub": a - b, "mul": a * b}[node.op]
+    return None
+
+
+def _peel_invariant(node: AstNode, candidate_type: str) -> tuple[int, AstNode] | None:
+    """Strip the ROOT chain of transforms the scored book is invariant to; returns ``(sign, body)``, or
+    None for a zero multiplier (a constant, degenerate score).
+
+    CROSS-SECTIONAL — the rank-L/S book is built from the per-row ORDINAL ranks of the finite, active
+    scores (``eval_harness._ls_weights``), so any per-row monotone-increasing transform of the final
+    score leaves it unchanged: ``rank``, ``scale`` (by a positive constant), ``+/- c``, ``* c`` / ``/ c``
+    (sign tracked), ``signedpower(x, a>0)``, and ``log`` of a ``rank``/``ts_rank`` (strictly positive).
+    Verified bitwise on a synthetic panel by the deep audit (2026-09-30): ``adv60``, ``rank(adv60)``,
+    ``rank(scale(adv60))``, ``rank(rank(adv60))``, ``3*adv60``, ``adv60/7``, ``adv60+5``,
+    ``rank(adv60)-0.5`` and ``signedpower(adv60,2)`` all produce the identical book, and ``(-1)``/
+    ``(-0.5)``/``(-2)``/``(-3)*ts_rank(v,10)`` the identical mirrored one — each had been ledgered and
+    LORD++-charged separately (39% of one holdout budget went to such duplicates). They differ only in
+    how a +-inf score cell (division by zero) is ranked versus excluded — a numerical edge case, not a
+    different hypothesis.
+    OVERLAY — the per-day timing scalar is z-scored on an expanding window, which is invariant to a
+    POSITIVE AFFINE transform only: ``+/- c`` and ``* c`` / ``/ c`` (sign tracked). Never ``rank``/
+    ``scale``/``signedpower``/``log`` (nonlinear in the timing scalar).
+    Only the root chain is peeled: below a time-series operator nothing is invariant."""
+    xs = candidate_type == "cross_sectional"
+    sign = 1
+    while True:
+        op, ch = node.op, node.children
+        if op == "neg" and len(ch) == 1:
+            sign, node = -sign, ch[0]
+            continue
+        if xs and op == "rank" and len(ch) == 1:
+            node = ch[0]
+            continue
+        if xs and op == "scale" and ch:
+            a = 1.0 if len(ch) == 1 else _const_value(ch[1])
+            if a is not None and a > 0:
+                node = ch[0]
+                continue
+            break
+        if op in ("add", "sub") and len(ch) == 2:
+            ca, cb = _const_value(ch[0]), _const_value(ch[1])
+            if cb is not None and ca is None:                 # x +/- c
+                node = ch[0]
+                continue
+            if ca is not None and cb is None:                 # c + x  |  c - x  (= -x)
+                if op == "sub":
+                    sign = -sign
+                node = ch[1]
+                continue
+            break
+        if op == "mul" and len(ch) == 2:
+            ca, cb = _const_value(ch[0]), _const_value(ch[1])
+            if (ca is None) == (cb is None):
+                break
+            c, x = (ca, ch[1]) if ca is not None else (cb, ch[0])
+            if c == 0:
+                return None
+            sign, node = (-sign if c < 0 else sign), x
+            continue
+        if op == "div" and len(ch) == 2:
+            cb = _const_value(ch[1])
+            if cb is not None and _const_value(ch[0]) is None:   # x / c only — never c / x
+                if cb == 0:
+                    return None
+                sign, node = (-sign if cb < 0 else sign), ch[0]
+                continue
+            break
+        if xs and op == "signedpower" and len(ch) == 2:
+            a = _const_value(ch[1])
+            if a is not None and a > 0:
+                node = ch[0]
+                continue
+            break
+        if xs and op == "log" and len(ch) == 1 and ch[0].op in ("rank", "ts_rank"):
+            node = ch[0]
+            continue
+        break
+    return sign, node
+
+
+def statistical_hash(formula: str, candidate_type: str = "cross_sectional") -> str:
+    """12-hex dedup key invariant to every transform the SCORED BOOK is invariant to (crucible-v15.0):
+    the book-invariant root chain is peeled (:func:`_peel_invariant`), the remaining body gets the U4
+    commutative canonicalization, and the key is ``(candidate_type, sign, body)`` — a negated
+    hypothesis is a DIFFERENT (mirror) hypothesis and keeps a different key. Structural: a hash of the
+    formula TEXT and its declared type only, so it is CRU-2-safe as an agent-visible dedup key."""
+    ct = candidate_type or "cross_sectional"
+    peeled = _peel_invariant(parse(formula), ct)
+    if peeled is None:                                        # zero multiplier: key the text as-is
+        body_s, sign = canonical_formula(formula), 0
+    else:
+        sign, body = peeled
+        body_s = to_formula(_canonicalize(body))
+    return hashlib.sha256(f"{ct}|{sign}|{body_s}".encode("utf-8")).hexdigest()[:12]
+
+
+def hypothesis_keys(formula: str, expected_sign: int, candidate_type: str) -> tuple[str, str, str]:
+    """``(candidate_hash, semantic_hash, statistical_hash)`` of the formula the funnel will TRADE for
+    this proposal — the three dedup keys the Author checks, available to a proposer that wants to skip
+    already-registered hypotheses BEFORE truncating its batch."""
+    traded = to_formula(parse(sign_folded_formula(formula, expected_sign)))
+    return candidate_hash(traded), semantic_hash(traded), statistical_hash(traded, candidate_type)
+
+
 # --------------------------------------------------------------------------- decisiveness config
 @dataclass(frozen=True, slots=True)
 class SearchMemoryConfig:

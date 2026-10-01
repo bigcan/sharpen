@@ -38,10 +38,20 @@ until a p-value-consuming procedure is wired (design roadmap: prereg-cashing + A
 """
 from __future__ import annotations
 
+import math
 from dataclasses import dataclass, field
 
 # Spending-sequence exponent: γ_k ∝ k^(-p). p>1 is required for a finite sum; 1.6 is the standard
 # LORD default (a mild decay — keeps enough budget for late tests while summing to 1).
+#
+# KEPT at crucible-v16.0 after a costed comparison with the Javanmard–Montanari sequence (the onlineFDR
+# package default, γ_j ∝ log(max(j,2)) / (j·e^{√log j})). JM spends ~21% of W0 in the first 100 tests and
+# ~31% in the first 1,000 (a very heavy tail); k^-1.6 spends ~95% in the first 100. Scored as expected
+# detections of a stream of true alphas at z-mean 2.5 / 3.5 / 4.5 under the corrected contract's t-floor
+# (z >= 2.33): k^-1.6 is 17% / 5% / 1% better over 100 tests, within ±5% at 200, and JM wins only around
+# 1,000 tests (1.2-1.4x) — beyond any substrate's charged stream on record (8 and 152). The "44% of W0
+# on test 1" looks wasteful but costs little: levels map to z as √(2 log 1/α), so the early high levels
+# buy most of a finite stream's power.
 _GAMMA_EXPONENT = 1.6
 
 
@@ -153,3 +163,47 @@ class OnlineFDR:
                    alpha_floor=float(data.get("alpha_floor", 0.0)),
                    num_tests=int(data["num_tests"]),
                    discoveries=[int(x) for x in data.get("discoveries", [])])
+
+
+@dataclass
+class LordSequence:
+    """Sequential LORD++ levels for ONE tick's pre-registered specs (crucible-v16.0).
+
+    Until v16.0 a tick tested EVERY spec at the tightest level of its batch (``_tick_lord_level``: the
+    level its LAST test would get with no discovery) while charging each spec its own, looser level.
+    Valid, but it discarded power twice: every spec except the last was tested tighter than the level it
+    paid for, and a discovery inside the batch could not replenish the specs after it. Computed on the
+    k^-1.6 sequence at z-mean 3.5 (t-floor 2.33): +18% expected detections on an 8-spec first batch, +41%
+    on a 40-spec one, +6-9% on later batches.
+
+    LORD++ is an ONLINE procedure: it requires only that the testing ORDER be fixed before the p-values
+    are seen. The pre-registration order is, so each decided spec is tested at its own level, in that
+    order, on a PRIVATE copy of the account. The orchestrator then replays the identical sequence on the
+    persistent account (same levels, same discoveries) to charge it, and checks that the levels agree.
+
+    The decision is ``p <= level AND every level-independent leg passes``. That is LORD++ applied to
+    ``p' = p`` if the legs pass else ``1``; since ``p' >= p`` it is still super-uniform under the null,
+    so the FDR guarantee carries over unchanged."""
+
+    account: OnlineFDR
+    decisions: list[tuple[str, str, float, bool]] = field(default_factory=list)
+
+    @classmethod
+    def from_account(cls, account: OnlineFDR) -> "LordSequence":
+        """A sequence over a private COPY of ``account`` — the persisted account is never touched."""
+        return cls(account=OnlineFDR.from_json(account.to_json()))
+
+    def next_level(self) -> float:
+        return self.account.next_level()
+
+    def decide(self, candidate_type: str, formula: str, *, p_value: float, legs_pass: bool,
+               binding: bool = True) -> tuple[float, bool]:
+        """Test one decided spec at its own level and advance the private account. Returns
+        ``(level, discovery)``. ``binding=False`` (the corrected contract's ``online_fdr.binding``)
+        keeps the charge but never lets the level refuse a spec."""
+        level = self.account.next_level()
+        lord_ok = (not binding) or (math.isfinite(p_value) and p_value <= level)
+        discovery = bool(legs_pass and lord_ok)
+        self.account.observe(is_discovery=discovery)
+        self.decisions.append((str(candidate_type), str(formula), float(level), discovery))
+        return level, discovery

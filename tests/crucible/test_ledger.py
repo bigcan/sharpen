@@ -82,9 +82,11 @@ def test_agent_view_exposes_no_score_columns(tmp_path: Path) -> None:
     with TrialLedger(db) as led:
         led.record(_rec("h1", "momentum", "LOGGED"))
         view = led.agent_view()
-        # the projection carries only dedup keys + the killed-family list. ``semantic_hashes`` (U4) is a
-        # dedup key like ``candidate_hashes`` — derived from the formula TEXT, carrying no score.
-        assert set(view) == {"candidates", "candidate_hashes", "semantic_hashes", "killed_families"}
+        # the projection carries only dedup keys + the killed-family list. ``semantic_hashes`` (U4) and
+        # ``stat_hashes`` (v15.0) are dedup keys like ``candidate_hashes`` — derived from the formula
+        # TEXT (and its declared type), carrying no score.
+        assert set(view) == {"candidates", "candidate_hashes", "semantic_hashes", "stat_hashes",
+                             "killed_families"}
         for row in view["candidates"]:
             assert set(row) == set(TrialLedger.agent_view_columns())
             for f in _FORBIDDEN:

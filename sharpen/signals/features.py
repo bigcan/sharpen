@@ -83,9 +83,20 @@ class Panel:
     def forward_returns(self, h: int) -> np.ndarray:
         """``(T, N)`` close-to-close forward return ``close[t+h]/close[t] - 1``.
 
-        NaN on the last ``h`` rows and wherever either endpoint is inactive/non-positive
-        (LEAK-2: this is a LABEL, never a feature). Matches the gated construction in
-        ``cmgp1_x2_leak_ic_probe_v2``.
+        NaN on the last ``h`` rows, wherever the name is not ``active`` at FORMATION ``t``, and
+        wherever either endpoint price is missing/non-positive (LEAK-2: this is a LABEL, never a
+        feature).
+
+        crucible-v15.0 — the label no longer requires ``active[t+h]``. ``active`` is the PIT
+        MEMBERSHIP mask (us_equity: top-300 by ADV; taiwan_smallcap: the cap-rank 51-250 band), so
+        conditioning the realized return on membership at ``t+h`` selected the label sample on
+        FUTURE information: a name that left the universe inside ``(t, t+h]`` lost its whole return,
+        although a position formed at ``t`` still earns it. Measured on real caches (deep audit
+        2026-09-30): taiwan_smallcap H=21 dropped 4.81% of formation-active labels whose realized
+        mean was -1.44% vs +1.24% kept — a 21-day reversal probe's IC-IR roughly doubled on the biased
+        label; us_equity H=21 dropped 2.07% (+0.14% vs +1.08%). A name that stops TRADING (no price at
+        ``t+h``) still yields NaN — no delisting return is available on these free feeds, which is a
+        documented survivorship limitation, not a look-ahead.
         """
         if h < 1:
             raise ValueError(f"horizon must be >= 1; got {h}")
@@ -94,8 +105,8 @@ class Panel:
         if h < self.T:
             denom = np.where(c[:-h] > 0, c[:-h], np.nan)
             ratio = c[h:] / denom - 1.0
-            both_active = self.active[:-h] & self.active[h:]
-            ratio = np.where(both_active, ratio, np.nan)
+            priced_later = np.isfinite(c[h:]) & (c[h:] > 0)
+            ratio = np.where(self.active[:-h] & priced_later, ratio, np.nan)
             fwd[:-h] = ratio
         return fwd
 

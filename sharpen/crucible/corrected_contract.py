@@ -38,10 +38,9 @@ from sharpen.signals.eval_harness import _ann_sharpe
 from sharpen.signals.generation.fitness import (
     _ar1_effective_n,
     _base_span_corr,
-    _CAND,
-    _combined_book,
     _cpcv_index_paths,
     _per_period_sharpe,
+    augmented_book,
     FitnessConfig,
 )
 
@@ -128,6 +127,12 @@ class CorrectedResult:
     # ``exposure_pass`` is then True (inert leg), so every pre-cont-151 call is byte-identical.
     market_beta: float = float("nan")
     exposure_pass: bool = True
+    # crucible-v15.0 DEGENERACY guard — the F14-4 anti-hijack floor (candidate vol >=
+    # ``FitnessConfig.degenerate_vol_frac`` x the smallest base-sleeve vol) applied on the EVALUATED bars.
+    # It lived only in the train pre-filter, which v12.0 stopped applying to pre-registered specs, so the
+    # binding gate had no degeneracy protection at all. A correctness floor, not a tunable threshold.
+    degenerate_pass: bool = True
+    cand_usable_frac: float = float("nan")   # share of evaluated bars on which the candidate joined
 
 
 # ---------------------------------------------------------------- LORD++ helper (read-only use)
@@ -202,16 +207,33 @@ def corrected_contract_fitness(
     *,
     lord_level: float,
     market_returns: "np.ndarray | None" = None,
+    eval_from: int = 0,
 ) -> CorrectedResult:
     """Score a single candidate by the corrected contract. ``cand_returns`` must be net of cost.
     ``cfg`` supplies MECHANICS only (combiner + CPCV + periods_per_year); ``cc`` supplies every decision
-    threshold; ``lord_level`` is the current ``OnlineFDR.next_level()`` (see :func:`fresh_lord_level`)."""
-    base = {str(k): np.asarray(v, dtype=np.float64) for k, v in base_returns.items()}
-    cand = np.asarray(cand_returns, dtype=np.float64)
-    aug = {**base, _CAND: cand}
+    threshold; ``lord_level`` is the current ``OnlineFDR.next_level()`` (see :func:`fresh_lord_level`).
 
-    b_base = _combined_book(base, timestamps, cfg)
-    b_aug = _combined_book(aug, timestamps, cfg)
+    ``eval_from`` (crucible-v15.0): the inputs may span the FULL causal timeline, with every statistic
+    evaluated on rows ``[eval_from:]`` only (the embargoed holdout). The combiner then sizes the sleeves
+    at the first holdout bar from their causal PAST (train-period vols) instead of cold-starting on the
+    holdout slice, where its first ~63-84 bars were an equal-weight warm-up that injected noise into
+    every holdout statistic. Nothing from the holdout enters the train rows and vice versa: the
+    combiner is strictly trailing (``.shift(1)``). ``eval_from=0`` (the default) scores the whole input
+    exactly as before — the path every research harness that passes pre-sliced arrays still takes.
+
+    The augmented book is :func:`fitness.augmented_book` — the candidate joins only on bars where the
+    combiner can size it (the EW-fallback artifact it removes is documented there)."""
+    base_full = {str(k): np.asarray(v, dtype=np.float64) for k, v in base_returns.items()}
+    cand_full = np.asarray(cand_returns, dtype=np.float64)
+    b_base_full, b_aug_full, usable_full = augmented_book(base_full, cand_full, timestamps, cfg)
+    ev = slice(max(0, int(eval_from)), None)
+    b_base, b_aug = b_base_full[ev], b_aug_full[ev]
+    cand = cand_full[ev]
+    base = {k: v[ev] for k, v in base_full.items()}
+    if market_returns is not None:
+        market_returns = np.asarray(market_returns, dtype=np.float64)
+        if market_returns.shape[0] == cand_full.shape[0]:
+            market_returns = market_returns[ev]
 
     # SIGNIFICANCE — the full-panel Jobson-Korkie-Memmel Sharpe-difference z (ADR-1). NOT a t across CPCV
     # paths (voided by E1: 15 overlapping paths ≈ 1.3 effective obs -> miscalibrated + powerless).
@@ -258,8 +280,18 @@ def corrected_contract_fitness(
     market_beta = _market_beta(cand, market_returns)
     exposure_pass = bool(cc.max_market_beta is None or not np.isfinite(market_beta)
                          or abs(market_beta) <= cc.max_market_beta)
+    # DEGENERACY guard (v15.0) — the F14-4 floor on the evaluated bars (see CorrectedResult).
+    cand_fin = cand[np.isfinite(cand)]
+    cand_vol = float(cand_fin.std(ddof=1)) if cand_fin.size > 1 else 0.0
+    base_vols = [float(v[np.isfinite(v)].std(ddof=1)) for v in base.values()
+                 if int(np.isfinite(v).sum()) > 1]
+    min_base_vol = min(base_vols) if base_vols else 0.0
+    degenerate_pass = bool(cand_vol >= cfg.degenerate_vol_frac * min_base_vol) if min_base_vol > 0 \
+        else bool(cand_vol > 0.0)
+    usable_ev = usable_full[ev]
+    cand_usable_frac = float(usable_ev.mean()) if usable_ev.size else float("nan")
     passes = bool(t_pass and lord_pass and uplift_pass and fragility_pass and collinearity_pass
-                  and exposure_pass)
+                  and exposure_pass and degenerate_pass)
 
     return CorrectedResult(
         corrected_t=corrected_t, p_value=p_value, delta_sr=delta_sr, delta_median=delta_median,
@@ -267,4 +299,5 @@ def corrected_contract_fitness(
         n_bars=int(n_bars), n_eff=n_eff, n_paths=int(parr.size),
         t_pass=t_pass, lord_pass=lord_pass, uplift_pass=uplift_pass, fragility_pass=fragility_pass,
         collinearity_pass=collinearity_pass, passes_corrected=passes,
-        market_beta=market_beta, exposure_pass=exposure_pass)
+        market_beta=market_beta, exposure_pass=exposure_pass,
+        degenerate_pass=degenerate_pass, cand_usable_frac=cand_usable_frac)

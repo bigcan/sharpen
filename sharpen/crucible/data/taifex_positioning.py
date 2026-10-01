@@ -44,6 +44,7 @@ a "biggest-longs-vs-biggest-shorts skew," not "the top N traders' net position."
 from __future__ import annotations
 
 import json
+import os
 import logging
 from collections.abc import Callable
 from pathlib import Path
@@ -107,13 +108,32 @@ class _AccumulationStore:
             return {}
         try:
             return json.loads(self.path.read_text(encoding="utf-8"))
-        except (json.JSONDecodeError, OSError):
-            logger.warning("taifex_oi: store at %s unreadable — treating as empty", self.path)
+        except (json.JSONDecodeError, OSError, UnicodeDecodeError):
+        # v15.0: an UNREADABLE store is moved aside (``<name>.corrupt-<utc>``), never silently treated
+        # as empty — the next save() would otherwise overwrite the only copy of poll-only history that
+        # cannot be re-downloaded (deep audit 2026-09-30: a torn file became a 1-day store). The tick
+        # still proceeds on an empty store, and the quarantined file is there to recover by hand.
+            moved = _quarantine(self.path)
+            logger.error("taifex_oi: store at %s unreadable — moved aside to %s; continuing EMPTY "
+                         "(recover the history from that file)", self.path, moved)
             return {}
 
     def save(self, data: dict[str, dict[str, float | None]]) -> None:
+        # v15.0: atomic (tmp + os.replace on the same volume). A plain write_text truncates the file
+        # BEFORE writing, so a kill mid-save left a torn store that load() then treated as empty.
         self.path.parent.mkdir(parents=True, exist_ok=True)
-        self.path.write_text(json.dumps(data, indent=2, sort_keys=True), encoding="utf-8")
+        tmp = self.path.with_suffix(self.path.suffix + ".tmp")
+        tmp.write_text(json.dumps(data, indent=2, sort_keys=True), encoding="utf-8")
+        os.replace(tmp, self.path)
+
+
+def _quarantine(path: Path) -> Path:
+    """Rename an unreadable store aside, never delete it. Returns the new path."""
+    import datetime as _dt
+    stamp = _dt.datetime.now(_dt.timezone.utc).strftime("%Y%m%dT%H%M%SZ")
+    dest = path.with_name(f"{path.name}.corrupt-{stamp}")
+    os.replace(path, dest)
+    return dest
 
 
 class TaifexPositioningConnector:

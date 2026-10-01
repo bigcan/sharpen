@@ -750,7 +750,78 @@ from pathlib import Path
 #     per substrate by the orchestrator.
 # Tripwires: tests/crucible/test_v14_0_fixes.py, tests/signals/test_v14_0_stats_fixes.py (each
 # mutation-checked: reverting the fix fails its test).
-CRUCIBLE_VERSION = "crucible-v14.0"
+#
+#   * A PRE-REGISTRATION IS TESTED, NOT SCREENED — the fifth instance of a cheap screen stricter than the
+#     gate. Search bounds (24 nodes; turnover > 2x soft cap) culled pre-registered seeds before fitness
+#     (40/100 WQ101 formulas incl. curated #9; the us_equity H=2 seeds at 88-168 turnover/yr), which were
+#     then ledgered SCORED_NOT_SELECTED and CHARGED a LORD++ test (2026-08-10 us_equity: 107 charged, 16
+#     adjudicated). Seeds are now exempt under the corrected contract (never bred); a pre-registration with
+#     no holdout decision is NOT_TESTED and charged nothing; n_holdout_tested counts decisions; the
+#     eligible set is matched on canonical strings; a pre-registration's verdict states its own test
+#     (SCORED_NOT_SELECTED / NOT_TESTED), not whether offspring displaced it from the hall of fame.
+#     v12.0's stated cause (an uplift cull) was wrong.
+#   * THE PRE-REGISTERED DIRECTION IS THE TESTED DIRECTION. expected_sign was never applied (15/53 LLM
+#     specs in taiwan_v2 were scored mirrored); the Author folds -1 into the traded formula; the curated
+#     WQ101 seeds are relabelled +1 (the library's pre-signed convention; their hashes are unchanged).
+#   * THE BINDING GATE'S DEGENERATE CHANNELS. The combiner's all-sleeve equal-weight fallback let an
+#     unusable candidate turn the augmented book into EW(base) vs IV(base) — a constant stream scored
+#     z 2.7-15.6. fitness.augmented_book (the candidate joins only where the combiner can size it), a
+#     degenerate-vol leg, NaN statistic = no decision, and full-timeline scoring (eval_from) so the
+#     combiner enters the holdout warm. The market-beta leg is forward-aligned (it measured 0.03 on a 0.54
+#     book). A candidate never sized on any holdout bar (z = 0 by construction) is no decision either,
+#     and a degenerate-vol genome is never bred (it took 2-4 of the 6 elite slots in 2 of 3 synthetic
+#     searches on the fallback artifact alone). The calibration harness scores exactly as production.
+#   * LEAK-2 DATA. COT releases pinned to the actual CFTC record for the 2013/2018-19/2025 shutdowns and
+#     the 2023 ION outage, plus ad-hoc federal closures; WALCL Thursday-holiday weeks; FRED period-start
+#     series fail closed; Panel.forward_returns conditions on FORMATION-time membership only.
+#   * ONLINE-FDR / COHORT. Cohort discoveries credit the per-candidate account only at the charged level;
+#     a pending whole-pool cohort runs over the whole pool and alone consumes the trigger; clear_snapshot
+#     keeps the cohort key; U4 re-admission is substrate-scoped, never re-admits a settled row, and is
+#     consumed by the attempt; the corrected contract's online_fdr alpha/W0 are consumed.
+#   * HYPOTHESIS SUPPLY. statistical_hash (a third, CRU-2-safe dedup key: the formula modulo every
+#     transform the scored book is invariant to — rank/scale/affine constants/…); the library proposer
+#     skips registered keys BEFORE its cap (77 extended-bank formulas were unreachable); per-name (T,N)
+#     slots get cross-sectional templates and are named as such to the LLM.
+#   * FUNNEL. Declared neutralization controls (sector, size) and winsor_pct are applied; add-one
+#     bootstrap p; PSR/MinTRL at the HAC effective count; the Tier-0 tripwire probes the warm-up (32
+#     probes, seeded per signal, in the scorecard).
+#   * ROBUSTNESS. us_equity cache loads again (pre-rename pickles); T86 / TAIFEX stores stop losing
+#     history; scout coverage floor wired (altdata.min_bar_coverage — off until the operator sets it);
+#     reproduce pins the decision function; distinct --nights stamps; the claude -p proposer is
+#     sandboxed (no tools, no MCP, empty cwd); the governance Tier-2 command is runnable (survivor
+#     pillars C1-C7).
+#   * EFFICIENCY (verdict-preserving). Vectorized combiner (bit-identical); the offspring GP search is
+#     skipped when no offspring can be promoted (every pre-registered decision bit-identical; manifest
+#     extra.offspring_searched records it; synthetic tick 550 s -> 31 s, 178 s with the search on);
+#     cached base book; one evaluation per genome.
+# Tripwires: tests/**/test_*v15*.py (each defect test mutation-checked against the pre-fix code).
+# `crucible-v16.0` is a **MAJOR** bump: the operator decisions the v15.0 deep audit left open, made on
+# 2026-09-30 under the operator's delegation ("make the best decisions ... the end goal is a robust
+# efficient alpha miner"). MAJOR because it changes the binding LORD++ levels, which substrates are
+# mined, the lockbox verdict and the cohort pool. No frozen gates file changed; the edited lockbox /
+# cohort / alt-data gates are re-registered in configs/gates_registry.json.
+#
+#   * SEQUENTIAL LORD++ LEVELS. Each decided pre-registration is tested at its OWN level, in
+#     pre-registration order (fdr.LordSequence), instead of every spec at the batch's tightest level;
+#     a discovery replenishes the later specs of the same batch; the orchestrator replays the sequence
+#     on the persistent account and refuses to charge if a level drifts. +18% expected detections on an
+#     8-spec first batch, +41% on a 40-spec one (z-mean 3.5). The k^-1.6 spending sequence is KEPT:
+#     Javanmard-Montanari was costed and is 1-17% worse over the 100-test lifetimes on record.
+#   * POWER-LORD-01 WIRED. The substrate-power guard re-stamps at the live account's level, selecting
+#     the calibration row by LEVEL (replenishment and refunds honoured; a level tighter than every
+#     measured one refuses). U4 rejection classes read the batch's tightest level. us_equity: MDE 1.32
+#     at a fresh level vs 2.12 at its live one (ceiling 1.457) — the record's closure, now enforced.
+#   * LOCKBOX = WALD SPRT ON THE FORWARD SHARPE DIFFERENCE. The fixed rule scored the Sharpe of
+#     b_aug − b_base, which is sign-inverted for a genuine diversifier, with one 63-bar look (false CLEAR
+#     44%). New enrollments: block-summed, vol-standardized aug-vs-base differences from
+#     fitness.augmented_book, α 0.10 / β 0.20 / H1 ΔSR 0.30, cap 756 bars -> INCONCLUSIVE; false CLEAR
+#     2-8% by Monte Carlo. An entry keeps the rule it was enrolled under.
+#   * COHORT enforce_funnel_feasibility: false — consistent with v15.0 (pre-registrations are tested,
+#     not screened). SCOUT altdata.min_bar_coverage: 0.50.
+#   * STORE REPAIR (operator data, not code): results/crucible_orchestrator/real — 40 untested
+#     pre-registrations reopened, us_equity account compacted 152 -> 54 (98 phantom charges); backups
+#     beside the store.
+CRUCIBLE_VERSION = "crucible-v16.0"
 
 # The baseline (pre-gate-repair) system, preserved as a git tag for reproducibility comparisons.
 CRUCIBLE_BASELINE_VERSION = "crucible-v1.0"

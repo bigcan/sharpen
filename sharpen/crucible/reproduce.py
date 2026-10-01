@@ -25,8 +25,11 @@ from .version import CRUCIBLE_VERSION, gates_hash
 # pins are the reproducibility layers. File-drawer counts / token cost are cross-run bookkeeping, not
 # decision-bearing, so they are compared only inside the strict content_hash, never gating `ok`.
 # ``cohort_gates_hash`` is the Phase-4 cohort gate's own bytes-pin (None on a non-cohort run).
+# v15.0: ``contract`` / ``corrected_gates_hash`` / ``search_memory_gates_hash`` name the VERDICT FUNCTION
+# and its thresholds (manifest.py calls ``contract`` "the most decision-bearing pin in the manifest"), yet
+# two manifests differing only in them reproduced as ok=True.
 _PIN_FIELDS = ("crucible_version", "gates_hash", "data_snapshot_hash", "rng_seeds",
-               "cohort_gates_hash")
+               "cohort_gates_hash", "contract", "corrected_gates_hash", "search_memory_gates_hash")
 
 
 @dataclass(frozen=True, slots=True)
