@@ -11,7 +11,7 @@ The Crucible alpha-mining platform keeps its own version (`sharpen/crucible/vers
 `crucible-vMAJOR.MINOR`), because it stamps every mining run; each entry below names the Crucible
 versions it contains.
 
-## [1.1.1] — unreleased
+## [1.1.1] — 2026-10-01
 
 ### Fixed
 - **Crucible v18.0 withdraws v17.0's cohort book.** The cohort analytic floor and Monte Carlo null
