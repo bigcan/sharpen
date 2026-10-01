@@ -176,45 +176,6 @@ def augmented_book(base_returns: Mapping[str, np.ndarray], cand_returns: np.ndar
     return b_base, np.where(usable, b_aug_raw, b_base), usable
 
 
-def joined_book(required: Mapping[str, np.ndarray], optional: Mapping[str, np.ndarray],
-                timestamps: np.ndarray, cfg: FitnessConfig,
-                required_book: "np.ndarray | None" = None) -> np.ndarray:
-    """The combined book of ``required`` plus every ``optional`` sleeve the combiner can SIZE on that
-    bar — :func:`augmented_book` generalized to several candidates (the cohort; crucible-v17.0).
-
-    ``_combined_book(required + optional)`` has the v15.0 defect on every bar where ANY optional
-    sleeve's trailing vol is unusable (its warm-up, or a stretch of zero returns): the combiner falls
-    back to equal weight for EVERY sleeve, so the book there measures EW-vs-inverse-vol weighting of
-    the others, not the member. Here bar k uses ``_combined_book(required + U_k)``, ``U_k`` the
-    optional sleeves usable at k (:func:`_candidate_usable`, the combiner's own rule). With no usable
-    optional sleeve the bar is the ``required`` book; with ``required`` empty too (a members-only book
-    in its warm-up) it is the raw combiner over all of ``optional`` — its ordinary equal-weight
-    warm-up. Where every optional sleeve is usable the result is bit-identical to ``_combined_book``
-    of the union, and with one optional sleeve it is ``augmented_book``'s ``b_aug``."""
-    req = {str(k): np.asarray(v, dtype=np.float64) for k, v in required.items()}
-    opt = {str(k): np.asarray(v, dtype=np.float64) for k, v in optional.items()}
-    if not opt:
-        return (_combined_book(req, timestamps, cfg) if required_book is None
-                else np.asarray(required_book, dtype=np.float64))
-    names = list(opt)
-    usable = np.stack([_candidate_usable(opt[n], timestamps, cfg) for n in names], axis=1)   # (K,M)
-    patterns, inverse = np.unique(usable, axis=0, return_inverse=True)
-    inverse = np.asarray(inverse).reshape(-1)
-    out = np.empty(usable.shape[0], dtype=np.float64)
-    for i, pat in enumerate(patterns):
-        subset = {n: opt[n] for n, on in zip(names, pat) if on}
-        if subset:
-            book = _combined_book({**req, **subset}, timestamps, cfg)
-        elif req:
-            book = (_combined_book(req, timestamps, cfg) if required_book is None
-                    else np.asarray(required_book, dtype=np.float64))
-        else:
-            book = _combined_book(opt, timestamps, cfg)
-        rows = inverse == i
-        out[rows] = book[rows]
-    return out
-
-
 def _combined_book_with_components(
     net_returns: Mapping[str, np.ndarray],
     components: "Mapping[str, SleeveComponents]",

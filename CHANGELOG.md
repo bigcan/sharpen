@@ -11,6 +11,14 @@ The Crucible alpha-mining platform keeps its own version (`sharpen/crucible/vers
 `crucible-vMAJOR.MINOR`), because it stamps every mining run; each entry below names the Crucible
 versions it contains.
 
+## [1.1.1] — unreleased
+
+### Fixed
+- **Crucible v18.0 withdraws v17.0's cohort book.** The cohort analytic floor and Monte Carlo null
+  use the raw combiner again. The v17.0 book, which fell back to the base book on bars where a
+  member could not be sized, made the null test reject every no-edge panel built from a real pool
+  (60 of 60 at alpha 0.05, against 1 of 60 for the raw combiner). No recorded verdict was affected.
+
 ## [1.1.0] — 2026-10-01
 
 ### Added

@@ -851,7 +851,26 @@ from pathlib import Path
 #     (192 s of a 217 s panel build), bit-identical; the Taiwan small-cap futures base book pays
 #     `base_cost_bps` 0.0010, not the candidate's 0.0021 stock-tax cost.
 # Tripwires: tests/**/test_v17_0_*.py.
-CRUCIBLE_VERSION = "crucible-v17.0"
+# `crucible-v18.0` is a **MAJOR** bump that WITHDRAWS one v17.0 change: the cohort analytic floor and
+# the cohort MC null go back to the raw combiner (the v16.0 book). MAJOR because it changes the
+# cohort verdict function again. No cohort verdict was rendered under v17.0.
+#
+#   * WHY. v17.0's `fitness.joined_book` (removed) used the base book on bars where a member could
+#     not be sized. An offline replay of the recorded us_equity pools (1,000 replicates, same seed)
+#     moved the MC p-value from 0.145 to 0.003 and from 0.53 to 0.003 with the observed statistic
+#     almost unchanged; a size check on the same pool with every member's edge destroyed (random
+#     sign per 21-bar block, 60 trials x 199 replicates) rejected 60/60 at alpha 0.05 under the
+#     spliced book and 1/60 under the raw combiner. Mechanism: the base-only book runs at ~30x the
+#     volatility of the augmented one, so the spliced series is dominated by its base-only bars, and
+#     those bars are dead in the observed panel but live in every bootstrap replicate.
+#   * NOT caught by the v17.0 tests or by a synthetic size check (equal-scale noise, 200 trials: 2%
+#     vs 3%): it needs the real scale mismatch between base sleeves and members.
+#   * KEPT from v17.0: the cohort holdout guard freezes a member the combiner cannot size at weight 0
+#     (no splice involved), and everything outside the cohort path.
+#   * No recorded verdict moved: the four recorded us_equity cohort pools are LOGGED under the v16.0,
+#     v17.0 and v18.0 books (under v17.0 two of them cleared the MC leg and were stopped only by the
+#     holdout guard).
+CRUCIBLE_VERSION = "crucible-v18.0"
 
 # The baseline (pre-gate-repair) system, preserved as a git tag for reproducibility comparisons.
 CRUCIBLE_BASELINE_VERSION = "crucible-v1.0"

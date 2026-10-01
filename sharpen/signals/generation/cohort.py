@@ -38,7 +38,7 @@ import numpy as np
 
 from sharpen.crypto.eval.statistics import excess_kurtosis, skewness
 
-from .fitness import FitnessConfig, _combined_book, _per_period_sharpe, joined_book
+from .fitness import FitnessConfig, _combined_book, _per_period_sharpe
 
 logger = logging.getLogger(__name__)
 
@@ -418,13 +418,10 @@ def evaluate_cohort_analytic(
     # 3. Cohort-only book (units-consistent with SR*_cohort) + base-augmented book (for ΔSR/HLZ).
     cohort_cfg = _with_redundancy(fcfg, ccfg.combiner_redundancy_strength)
     member_returns = {n: pool[n] for n in members}
-    # v17.0: every book admits a member only on bars the combiner can size it (fitness.joined_book).
-    # The raw combiner falls back to equal weight for ALL sleeves while any one member is unusable
-    # (warm-up, or a zero-return stretch), so the cohort books carried an EW-vs-IV reweighting of the
-    # other sleeves on those bars -- the v15.0 degenerate channel, left open on this path.
-    b_cohort_only = joined_book({}, member_returns, ts, cohort_cfg)
+    aug = {**base, **member_returns}
+    b_cohort_only = _combined_book(member_returns, ts, cohort_cfg)
     b_base = _combined_book(base, ts, fcfg)
-    b_aug = joined_book(base, member_returns, ts, cohort_cfg, required_book=b_base)
+    b_aug = _combined_book(aug, ts, cohort_cfg)
 
     # 4. Analytic SR*_cohort floor on the COHORT-ONLY book Sharpe. σ_trials = dispersion of the
     #    standalone Sharpes the selection ranks on (so σ_trials·order-stat estimates E[top-m mean]).

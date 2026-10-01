@@ -108,7 +108,9 @@ def test_versions_are_distinct_and_tagged_form() -> None:
     # v17.0 = the v15.0 audit's "still open" and "not fixed" lists, closed 2026-10-01 (MAJOR: the
     # cohort books use the v15 book, the scorecard gains a phase-robustness leg,
     # one ledger file per substrate — see version.py).
-    assert CRUCIBLE_VERSION == "crucible-v17.0"
+    # v18.0 = v17.0's cohort book WITHDRAWN (MAJOR: the cohort verdict function again). The spliced
+    # book rejected 60/60 no-edge panels built from the real us_equity pool; the raw combiner 1/60.
+    assert CRUCIBLE_VERSION == "crucible-v18.0"
     assert CRUCIBLE_BASELINE_VERSION == "crucible-v1.0"
     assert CRUCIBLE_VERSION != CRUCIBLE_BASELINE_VERSION
 

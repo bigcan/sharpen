@@ -39,7 +39,7 @@ from .cohort import (
     greedy_decorrelated_admission,
     standalone_sharpe_scores,
 )
-from .fitness import FitnessConfig, _combined_book, _per_period_sharpe, joined_book
+from .fitness import FitnessConfig, _combined_book, _per_period_sharpe
 
 logger = logging.getLogger(__name__)
 
@@ -130,12 +130,17 @@ def _cohort_delta_sr(
     sr_base = _per_period_sharpe(b_base[np.isfinite(b_base)])
     if len(members) < ccfg.min_cohort_size or not np.isfinite(sr_base):
         return _NEG_INF, members
-    # v17.0: members join only where the combiner can size them (fitness.joined_book) -- the SAME
-    # functional on the observed panel and on every null replicate. A block bootstrap scatters a
-    # member's warm-up rows, so under the raw combiner the observed statistic carried an EW-fallback
-    # stretch that the null replicates mostly did not.
-    b_aug = joined_book(dict(base), {m: cand[m] for m in members}, timestamps, cohort_cfg,
-                        required_book=b_base)   # no member usable => the base book itself
+    # The RAW combiner, on purpose (crucible-v18.0). v17.0 spliced in the base book on bars where a
+    # member could not be sized ("joined_book"). Measured 2026-10-01 on the real us_equity pool with
+    # every member's edge destroyed (random sign per 21-bar block): that gate rejected 60 of 60
+    # no-edge panels at alpha 0.05; this one rejects 1 of 60. The base-only book runs at ~30x the
+    # volatility of the augmented one (sum-to-one inverse-vol weights), so a spliced series is
+    # dominated by its base-only bars. In the observed panel those bars fall in the base book's own
+    # dead warm-up; in a bootstrap replicate they hold live base returns, so the null statistic
+    # collapsed (about -0.02 against an observed +0.06) and everything looked significant. Any
+    # book that splices two differently-scaled books breaks the observed/null symmetry here.
+    aug = {**dict(base), **{m: np.asarray(cand[m], dtype=np.float64) for m in members}}
+    b_aug = _combined_book(aug, timestamps, cohort_cfg)
     sr_aug = _per_period_sharpe(b_aug[np.isfinite(b_aug)])
     if not np.isfinite(sr_aug):
         return _NEG_INF, members

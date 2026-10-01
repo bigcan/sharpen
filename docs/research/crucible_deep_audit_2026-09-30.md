@@ -144,6 +144,20 @@ Every item in "Still open" and "Not fixed" above is closed; tripwires are `tests
 | `balance_util` build cost | Shareholding grouped once instead of filtered per ticker; bit-identical (pinned against the old loop) |
 | Bridge fetches every series twice | `build_feature_slots(prefetched=...)` reuses the survey's fetch |
 
+**Correction, same day — `crucible-v18.0`.** The cohort-book row above is WITHDRAWN for the analytic
+floor and the MC null (the holdout-guard part stays). An offline replay of the four recorded us_equity
+cohort pools (1,000 replicates, same seed, live store untouched) showed the spliced book moving the MC
+p-value from 0.145 to 0.003 and from 0.53 to 0.003 while the observed statistic barely moved. A size
+check on the same pool with every member's edge destroyed (random sign per 21-bar block; 60 trials of
+199 replicates) rejected **60 of 60** no-edge panels at alpha 0.05 under the spliced book and **1 of
+60** under the raw combiner. Mechanism: the base-only book runs at about 30x the volatility of the
+augmented one (sum-to-one inverse-vol weights), so a spliced series is dominated by its base-only
+bars; in the observed panel those bars sit in the base book's own dead warm-up, in a bootstrap
+replicate they hold live base returns, and the null statistic collapses. The raw combiner's
+equal-weight fallback is the same on both sides, which is why it is calibrated. No verdict moved: all
+four pools are LOGGED under every version. The v17.0 tripwires and an equal-scale synthetic size
+check (2% vs 3%) did not catch it; the real scale mismatch is what exposes it.
+
 Not changed, by decision:
 
 * **The 40 reopened pre-registrations stay open.** Their substrate (us_equity) is refused by the
