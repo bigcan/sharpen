@@ -94,11 +94,13 @@ def evaluate_signal(sig: "Signal", panel: Panel, gates: Gates,
                        min_names_per_day=gates.min_names_per_day,
                        max_ohlc_violations=gates.max_ohlc_violations)
     gross = cap = rob = orth = cpcv = None
+    notes: tuple[str, ...] = ()
     if hy.passed:
         ns = tuple(dict.fromkeys((*sig.spec.neutralization, *gates.neutralization)))
         es, ph = sig.spec.expected_sign, gates.primary_horizon
         mn = gates.min_names_per_day
         scores = compute_scores(sig, panel, ns, winsor_pct=gates.winsor_pct)  # neutralize ONCE
+        notes = _declared_unenforced_notes(scores, panel, gates)
         gross = tier1_gross_power(sig, panel, gates.horizons, primary_horizon=ph,
                                   neutralization=ns, expected_sign=es, scores=scores,
                                   min_names=mn)
@@ -117,13 +119,41 @@ def evaluate_signal(sig: "Signal", panel: Panel, gates: Gates,
                                        expected_sign=es, horizon=ph, scores=scores)
     verdict = "GATE_FAIL" if not hy.passed else "PENDING"
     return SignalScorecard(sig.spec.name, sig.spec.family, sig.spec.content_hash(), hy,
-                           gross, None, float("nan"), verdict, (), capturability=cap,
+                           gross, None, float("nan"), verdict, notes, capturability=cap,
                            robustness=rob, orthogonality=orth, cpcv=cpcv)
+
+
+def _declared_unenforced_notes(scores: np.ndarray, panel: Panel, gates: Gates) -> tuple[str, ...]:
+    """Caveats for the two declared gates-file keys no code enforces (v17.0).
+
+    ``coverage.max_nan_frac`` and ``universe.min_adv_usd`` have been in every gates file since v2.0
+    and were read by nothing (deep audit 2026-09-30, "still unwired"). Enforcing them now would move
+    verdicts recorded under the frozen gates (CRU-1), and the ADV floor would change the universe
+    itself, so they are MEASURED and reported instead: a card that breaches a declared value says so
+    and says the value was not enforced. Neither enters the verdict."""
+    out: list[str] = []
+    active = np.asarray(panel.active, dtype=bool)
+    n_active = int(active.sum())
+    if n_active == 0:
+        return ()
+    max_nan = float(gates.raw["coverage"]["max_nan_frac"])
+    nan_frac = float((~np.isfinite(np.asarray(scores, dtype=np.float64)) & active).sum() / n_active)
+    if nan_frac > max_nan:
+        out.append(f"score is NaN on {nan_frac:.1%} of active name-days > declared "
+                   f"coverage.max_nan_frac {max_nan:.0%} (declared, NOT ENFORCED)")
+    min_adv = float(gates.raw["universe"]["min_adv_usd"])
+    if min_adv > 0.0:
+        adv = np.asarray(panel.adv_usd, dtype=np.float64)
+        thin = float((active & ~(adv >= min_adv)).sum() / n_active)
+        if thin > 0.0:
+            out.append(f"{thin:.1%} of active name-days are below declared universe.min_adv_usd "
+                       f"{min_adv:g} (declared, NOT ENFORCED — the universe builder owns the floor)")
+    return tuple(out)
 
 
 def _finalize(card: SignalScorecard, defl: Deflation | None, gates: Gates,
               panel: Panel, multiplicity: Multiplicity | None = None) -> SignalScorecard:
-    caveats: list[str] = []
+    caveats: list[str] = list(card.caveats)        # v17.0: evaluate_signal's measured notes
     if not panel.meta.get("survivorship_free", False):
         caveats.append("survivorship-biased data — results are UPPER BOUNDS")
 
@@ -172,6 +202,31 @@ def _finalize(card: SignalScorecard, defl: Deflation | None, gates: Gates,
         elif (np.isfinite(card.capturability.cost_wall)
               and card.capturability.cost_wall > gates.cost_wall_caution):
             caveats.append(f"high cost-wall ({card.capturability.cost_wall:.2f})")
+    # v17.0 — the two conventions the legs above fix silently (see eval_harness.Capturability).
+    # PHASE is a gate leg under `require_phase_robust`: the floor must also hold for the median
+    # rebalance phase. LAG is a caveat: it is what a capital decision has to read, not a property of
+    # the signal. Unmeasured (no sweep) is not a failure here -- the phase-0 leg above already gates.
+    phase_ok = True
+    cap = card.capturability
+    if cap is not None and cap.phase_frictionless:
+        ph = np.asarray(cap.phase_frictionless, dtype=np.float64)
+        ph = ph[np.isfinite(ph)]
+        if ph.size:
+            med, n_pos = float(np.median(ph)), int((ph > gates.min_frictionless_sharpe).sum())
+            phase_ok = bool(med > gates.min_frictionless_sharpe)
+            if not phase_ok:
+                caveats.append(f"PHASE-FRAGILE: median frictionless Sharpe over {ph.size} rebalance "
+                               f"phases {med:.3f} <= {gates.min_frictionless_sharpe:g} "
+                               f"({n_pos}/{ph.size} phases clear it; phase 0 = {fric:.3f})")
+            elif np.isfinite(fric) and not fric_ok:
+                caveats.append(f"phase-0 artifact possible: {n_pos}/{ph.size} rebalance phases clear "
+                               f"the frictionless floor (median {med:.3f}) though phase 0 does not")
+    if cap is not None and np.isfinite(cap.lag1_frictionless_sharpe) and np.isfinite(fric) and fric_ok:
+        lag = float(cap.lag1_frictionless_sharpe)
+        if lag <= gates.min_frictionless_sharpe or lag < gates.lag_caution_frac * fric:
+            caveats.append(f"EXECUTION-LAG SENSITIVE: frictionless Sharpe {fric:.3f} -> {lag:.3f} "
+                           f"when entry is one bar late (net@standard "
+                           f"{cap.lag1_net_standard_sharpe:.3f}) — the edge needs the close it reads")
     if (card.orthogonality is not None and np.isfinite(card.orthogonality.max_abs_corr)
             and card.orthogonality.max_abs_corr > 0.7):
         fac = max(card.orthogonality.corr_by_factor.items(),
@@ -217,6 +272,7 @@ def _finalize(card: SignalScorecard, defl: Deflation | None, gates: Gates,
         and (hlz_pass or not gates.require_hlz)
         and np.isfinite(msi) and msi >= gates.min_subperiod_ic_ir
         and fric_ok                                    # F3 — the traded book must make money
+        and (phase_ok or not gates.require_phase_robust)   # v17.0 — ...at the median phase too
         and (net_ok or not gates.require_positive_net_standard)
         and (declared or not require_declared)
     )
@@ -320,6 +376,10 @@ def _card_json(c: SignalScorecard) -> dict:
             "embargo_days": cpcv.embargo_days, "purge_horizon": cpcv.purge_horizon},
         "capturability": None if cap is None else {
             "frictionless_sharpe": _f(cap.frictionless_sharpe), "cost_wall": _f(cap.cost_wall),
+            "phase_frictionless": [_f(x) for x in cap.phase_frictionless],
+            "phase_net_standard": [_f(x) for x in cap.phase_net_standard],
+            "lag1_frictionless_sharpe": _f(cap.lag1_frictionless_sharpe),
+            "lag1_net_standard_sharpe": _f(cap.lag1_net_standard_sharpe),
             "by_cost": {k: {"net_sharpe": _f(v.net_sharpe), "net_pf": _f(v.net_pf),
                             "turnover_ann": _f(v.turnover_ann), "max_dd": _f(v.max_dd)}
                         for k, v in cap.by_cost.items()}},

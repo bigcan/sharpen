@@ -99,7 +99,7 @@ tripwires (`tests/crucible/test_v16_0_*.py`).
 | Scout coverage floor | **`altdata.min_bar_coverage: 0.50`** (gates re-registered) | FRED's ~3y ICE window on a 19y clock, TAIFEX's 3-4 days and a cold T86 store were slots spending LORD++ wealth on near-powerless tests |
 | Historical store | **Repaired** `results/crucible_orchestrator/real` with `crucible_v15_reopen.py` after a dry run and a rehearsal on a copy: 40 untested pre-registrations reopened (verdict → NULL, re-proposable); us_equity LORD++ account compacted 152 → 54 (98 phantom charges; next level 7.0e-06 → 3.6e-05). Backups: `*.pre_v15_reopen.bak` beside the store | The refund is LORD++-valid: no discoveries, and 54 ≥ the 42 real tests, so the real tests' levels plus the refunded stream's future levels still sum to at most W0 |
 
-Still open (not in the delegated list): **shared ledgers** (the ledger's primary key is the formula, so run one
+*(Closed 2026-10-01 in `crucible-v17.0` — see "Follow-up" below.)* Still open (not in the delegated list): **shared ledgers** (the ledger's primary key is the formula, so run one
 `--out` per substrate); **execution convention** (every book enters at the close the signal reads; a one-bar
 lag halves the 5-day reversal IC on Taiwan small-cap — add a lag check before any capital decision); **F3
 capturability** uses one rebalance phase (holder_conc -0.045 at offset 0, positive on 16 of 21 offsets).
@@ -112,6 +112,8 @@ score of the holdout.
 
 ## Not fixed (low / latent)
 
+*(All closed 2026-10-01 in `crucible-v17.0` — see "Follow-up" below.)*
+
 T86 cache key omits the ticker set; turnover annualization hardcoded at 252 (intraday only);
 taiwan_smallcap base book charged the stock-tax cost; `coverage.max_nan_frac` / `universe.min_adv_usd`
 still unwired; WQ101 #29's `min(x, 5)` evaluated as a clamp rather than `ts_min`; GP crossover can splice
@@ -122,12 +124,46 @@ with the raw combiner, so the EW fallback remains in train fitness values and co
 re-audited under the v15 `augmented_book` semantics (under the default `prereg_only` policy train fitness decides no
 verdict and no routing; degenerate genomes are no longer bred).
 
+## Follow-up — `crucible-v17.0` (2026-10-01)
+
+The operator delegated the remainder ("make the best decisions for me and complete all pending tasks").
+Every item in "Still open" and "Not fixed" above is closed; tripwires are `tests/**/test_v17_0_*.py`.
+
+| Item | Resolution |
+|---|---|
+| Shared ledgers | The orchestrator **refuses** a trial ledger that already holds another substrate's rows (`TrialLedger.substrate_row_counts`); `--allow-shared-ledger` keeps an already-shared store usable. The live store `results/crucible_orchestrator/real` is shared (cross_asset 18 rows, us_equity 190) and now needs that flag |
+| Execution convention | Tier-2 capturability reports a one-bar-late book (`lag1_*`). Losing more than `capturability.lag_caution_frac` (0.5) of the frictionless Sharpe, or going non-positive, is caveated `EXECUTION-LAG SENSITIVE`. A caveat, not a gate: execution is venue-specific, like a cost model |
+| F3 one rebalance phase | Capturability reports the frictionless and net Sharpe at every rebalance phase. PROMISING also needs the **median** phase to clear the frictionless floor (`capturability.require_phase_robust`, default on). An added AND, so it cannot create a PROMISING. The phase-0 leg is unchanged, so a phase-0 failure that most phases clear stays LOGGED and is caveated |
+| Cohort path + GP train fitness on the raw combiner | `fitness.joined_book` (augmented_book for several members): a sleeve joins only on bars the combiner can size it. Used by `evaluate_cohort_analytic`, the MC null (observed and every replicate) and the holdout guard (a member unsizeable at the freeze bar is frozen at weight 0). An all-zero cohort now adds exactly 0. **`combination_fitness` keeps the raw combiner, by decision**: the switch was tried and collapsed its `dsr_aug` leg on a short planted panel (0.28-0.97 to 0.00-0.10 at T=520, uplift intact), which would invalidate the power curves measured through it; it decides no verdict under the default policy |
+| T86 cache key omits the ticker set | The store records its ticker set under `_meta` and raises on a wider one; a store without it is read as the default set |
+| Turnover annualized at 252 | `_candidate_returns` / `_overlay_returns` take `periods_per_year` (the generation config's); daily substrates are byte-identical |
+| Taiwan small-cap base book charged the stock tax | `generation.base_cost_bps` (null = `cost_bps`); set 0.0010 for `taiwan_smallcap`, the cost its futures book was measured at. Gates file re-registered; no tick had run on the substrate |
+| `coverage.max_nan_frac` / `universe.min_adv_usd` unwired | **Not enforced, by decision**: enforcing them would move verdicts recorded under the frozen gates, and the ADV floor would change the universe. They are measured, and a breach is caveated "declared, NOT ENFORCED" on the card |
+| WQ101 #29 `min(x, 5)` | Rewritten as `ts_min(x, 5)`, which is what the paper's `min(x, d)` means. The formula text changes, so it hashes as a new, untested hypothesis |
+| GP crossover into coefficient slots | A constant in a value slot is left alone, like a literal slot |
+| `balance_util` build cost | Shareholding grouped once instead of filtered per ticker; bit-identical (pinned against the old loop) |
+| Bridge fetches every series twice | `build_feature_slots(prefetched=...)` reuses the survey's fetch |
+
+Not changed, by decision:
+
+* **The 40 reopened pre-registrations stay open.** Their substrate (us_equity) is refused by the
+  power guard at its live LORD++ level (MDE 2.12 vs ceiling 1.457), so testing them now would spend
+  wealth on near-powerless tests. They remain re-proposable on a substrate with power.
+* **The Taiwan small-cap universe corrections stay opt-in and OFF** on the sealed universe: it is the
+  pre-registration record. Any NEW Taiwan panel uses all of them (recency filter, per-listing
+  segments, stray-row drop, signal age cap, stable ties) under a new universe id.
+
+The recorded scorecard probes were re-scored on v17.0 code (inputs sha256-identical before and after):
+no verdict changed.
+
 ## CRU-1 / CRU-2
 
 No frozen gates file changed (signal_eval `519158fa1450`, taiwan_signal_eval `22a18172be1a`,
 taiwan_smallcap_altdata `0ccf6dd584f0`). v15.0 changed no gates file at all; v16.0 edits three unfrozen
 ones (lockbox, cohort, alt-data), each re-registered in `configs/gates_registry.json` with the decision as
-its reason. The agent view gains one column, `stat_hash` — a hash of the formula text and its declared
+its reason. v17.0 edits one unfrozen file (`taiwan_smallcap_signal_eval.gates.yaml`, `ce5331977919` →
+`25857660472c`, re-registered); the two new capturability keys reach the frozen files through the code
+defaults' deep-merge, so no frozen byte moves. The agent view gains one column, `stat_hash` — a hash of the formula text and its declared
 type, no score. MAJOR bumps: v15.0 changes which hypotheses are tested, the gate's degenerate handling, two
 data inputs and the LORD++ accounting; v16.0 changes the binding LORD++ levels, which substrates are
 mined, the lockbox verdict and the cohort pool.

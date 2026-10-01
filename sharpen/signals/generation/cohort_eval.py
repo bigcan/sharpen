@@ -63,7 +63,12 @@ from .cohort import (
 )
 from .cohort_mc import McNullResult, mc_null_pvalue
 from .evolve import _candidate_returns, _overlay_returns
-from .fitness import FitnessConfig, _combined_book, _combined_book_with_components
+from .fitness import (
+    FitnessConfig,
+    _candidate_usable,
+    _combined_book,
+    _combined_book_with_components,
+)
 
 if TYPE_CHECKING:
     from .base_sleeves import SleeveComponents
@@ -224,6 +229,7 @@ def assemble_candidate_pool(
     returns: dict[str, np.ndarray] = {}
     culled: list[str] = []
     max_turnover = None if fcfg is None else float(fcfg.turnover_soft_cap) * 2.0
+    ppy = 252.0 if fcfg is None else float(fcfg.periods_per_year)   # turnover clock (v17.0)
     for name, formula in formulas.items():
         ct = str(types.get(str(name), _OVERLAY))
         if ct not in (_CROSS_SECTIONAL, _OVERLAY):
@@ -239,11 +245,13 @@ def assemble_candidate_pool(
         try:
             if ct == _CROSS_SECTIONAL:
                 out = _candidate_returns(str(formula), panel, hold_horizon=int(hold_horizon),
-                                         cost_bps=cost_bps, min_names=int(ls_min_names))
+                                         cost_bps=cost_bps, min_names=int(ls_min_names),
+                                         periods_per_year=ppy)
             else:
                 out = _overlay_returns(str(formula), panel, base_book, cost_bps=cost_bps,
                                        base_gross=base_gross, base_cost=base_cost,
-                                       gross_exposure=gross_exposure)   # F14 (unit-gross if None)
+                                       gross_exposure=gross_exposure,   # F14 (unit-gross if None)
+                                       periods_per_year=ppy)
         except Exception as exc:                          # noqa: BLE001 - cull, never kill the tick
             logger.info("cohort pool: %s CULLED (scoring raised %r)", name, exc)
             culled.append(str(name))
@@ -337,10 +345,16 @@ def _cohort_holdout_guard(
     member_ho = {m: np.asarray(pool_ho[m], dtype=np.float64) for m in members}
     aug_cfg = _with_redundancy(fcfg, ccfg.combiner_redundancy_strength)   # cohort book: redundancy ON
 
-    a_aug = _alpha_paths({**dict(base_train), **member_train}, ts_train, aug_cfg)
-    a_base = _alpha_paths(dict(base_train), ts_train, fcfg)
     me = _last_confirmed_month_end_idx(ts_train)   # last CONFIRMED month-end (P2-01: NOT the tail)
+    # v17.0: only members the combiner can SIZE at the freeze bar enter the frozen cohort book; the
+    # rest are frozen at weight 0. One unusable member used to trip the combiner's all-sleeve
+    # equal-weight fallback at that bar, and the holdout was then booked under EW for every sleeve.
+    sized = {m: v for m, v in member_train.items()
+             if bool(_candidate_usable(v, ts_train, aug_cfg)[me])}
+    a_aug = _alpha_paths({**dict(base_train), **sized}, ts_train, aug_cfg)
+    a_base = _alpha_paths(dict(base_train), ts_train, fcfg)
     frozen_aug = {s: float(np.asarray(a_aug[s], dtype=np.float64)[me]) for s in a_aug}
+    frozen_aug.update({m: 0.0 for m in member_train if m not in sized})
     frozen_base = {s: float(np.asarray(a_base[s], dtype=np.float64)[me]) for s in a_base}
 
     book_aug = _frozen_weight_book({**dict(base_ho), **member_ho}, frozen_aug)

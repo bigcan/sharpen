@@ -28,6 +28,7 @@ P0 is the schema + the split; the online-FDR ``fdr_wealth_charged`` column is nu
 from __future__ import annotations
 
 import logging
+import re
 import sqlite3
 from dataclasses import dataclass
 from pathlib import Path
@@ -316,6 +317,27 @@ class TrialLedger:
     def count(self) -> int:
         """Total distinct candidates in the ledger (the cross-run file-drawer N)."""
         return int(self._conn.execute("SELECT COUNT(*) FROM trial_ledger").fetchone()[0])
+
+    def substrate_row_counts(self) -> dict[str, int]:
+        """``{substrate_id: n_rows}`` for rows first seen on an orchestrator tick (run ids are
+        ``tick-<substrate_id>-<ts>``; rows from any other run shape are not counted).
+
+        The primary key is ``candidate_hash`` alone, so one file shared by two substrates makes a
+        formula scored on the first a duplicate on the second (never tested there), and a verdict
+        the second did reach would be dropped by the monotone upsert that freezes a settled row. The
+        orchestrator reads this to refuse a shared file (crucible-v17.0). Counts only — no verdict,
+        score or formula leaves the ledger."""
+        rows = self._conn.execute(
+            "SELECT first_seen_run, COUNT(*) FROM trial_ledger "
+            "WHERE first_seen_run LIKE 'tick-%' GROUP BY first_seen_run").fetchall()
+        out: dict[str, int] = {}
+        for run, n in rows:
+            # tick-<substrate_id>-<YYYY-MM-DD...>: the id is everything up to the timestamp's year.
+            body = str(run)[len("tick-"):]
+            m = re.match(r"(.+?)-\d{4}-\d{2}-\d{2}", body)
+            sid = m.group(1) if m else body
+            out[sid] = out.get(sid, 0) + int(n)
+        return out
 
     def pre_registered_pool(self, run_prefix: str) -> list[tuple[str, str, str]]:
         """Every PRE-REGISTERED candidate first seen on runs starting with ``run_prefix``, as

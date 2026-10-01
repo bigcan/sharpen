@@ -177,6 +177,11 @@ class DataScout:
             n_bars=n,
         )
 
+    def accepted_series(self) -> dict[tuple[str, str], SeriesData]:
+        """The accepted SeriesData of the most recent survey, keyed ``(source_id, series_id)`` — so a
+        caller building feature slots over the same range need not fetch them again."""
+        return dict(self._accepted_series)
+
     def _survey_one(self, connector: DataConnector, ref: SeriesRef, start, end,
                     bars: np.ndarray) -> ScoutFinding:
         prov = None

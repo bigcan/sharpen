@@ -51,6 +51,7 @@ def _report(store_path: Path) -> dict:
     store = json.loads(store_path.read_text(encoding="utf-8"))
     per_ticker: dict[str, int] = {tk: 0 for tk in _DEFAULT_TICKERS}
     days_with_data = 0
+    store.pop("_meta", None)                      # v17.0 reserved key: the store's ticker set, not a day
     for day_rows in store.values():
         if day_rows:
             days_with_data += 1

@@ -233,6 +233,13 @@ def _proxy_base_sleeves(panel: Panel, hold: int = 21) -> dict[str, np.ndarray]:
     return {"tsmom": book(mom), "rates_carry": book(rev)}
 
 
+def foreign_ledger_substrates(ledger: TrialLedger, substrate_id: str) -> dict[str, int]:
+    """``{other_substrate_id: n_rows}`` already in ``ledger`` — empty when the file is this
+    substrate's alone. See the v17.0 note in :func:`_build_substrate`."""
+    return {s: n for s, n in ledger.substrate_row_counts().items()
+            if s != substrate_id and not s.startswith(f"{substrate_id}-")}
+
+
 def _build_substrate(args, cfg, ek, meta, sweep, sweep_hash) -> tuple[Substrate, DataCatalog]:
     """Construct the single substrate for the chosen mode, plus its catalog (for asset classes).
 
@@ -364,8 +371,12 @@ def _build_substrate(args, cfg, ek, meta, sweep, sweep_hash) -> tuple[Substrate,
             # `start=None` lets the sleeve take the PANEL's own first bar (2005) rather than
             # args.start (2008 by default), so the comparator covers every bar the candidate marks.
             base_hold = meta.get("base_hold_horizon") or ek["hold_horizon"]
+            # v17.0: the futures base book pays its own cost (generation.base_cost_bps), not the
+            # candidate's stock-tax cost. None => cost_bps, the pre-v17.0 behaviour.
+            base_cost = meta.get("base_cost_bps")
             base, base_components = taiwan_base_sleeves(
-                panel, hold_horizon=int(base_hold), cost_bps=ek["cost_bps"],
+                panel, hold_horizon=int(base_hold),
+                cost_bps=float(ek["cost_bps"] if base_cost is None else base_cost),
                 start=None, end=args.end, return_components=True)
         elif meta["panel"] == "taiwan":
             import dataclasses
@@ -470,6 +481,24 @@ def _build_substrate(args, cfg, ek, meta, sweep, sweep_hash) -> tuple[Substrate,
 
     ledger = TrialLedger(out_dir / "trial_ledger.db")
     substrate_id = "synthetic" if args.mode == "synthetic" else meta["panel"]
+    # v17.0 — ONE LEDGER FILE PER SUBSTRATE. The ledger's primary key is the candidate hash, so in a
+    # file another substrate has written, that substrate's scored formulas are duplicates here (never
+    # tested on this panel), and the settled row is frozen against a verdict reached here. The
+    # 2026-09-30 deep audit left this as an operating rule ("one --out per substrate"); it is now
+    # refused.
+    others = foreign_ledger_substrates(ledger, substrate_id)
+    if others and not args.allow_shared_ledger:
+        ledger.close()
+        raise SystemExit(
+            f"REFUSED: {out_dir / 'trial_ledger.db'} already holds rows of other substrate(s) "
+            f"{others}. The ledger is keyed by candidate hash alone, so '{substrate_id}' would "
+            "inherit their dedup keys and could not record its own verdict over their rows. Give "
+            "this substrate its own --out, or pass --allow-shared-ledger to keep using a store "
+            "that is already shared.")
+    if others:
+        log.warning("SHARED LEDGER (--allow-shared-ledger): %s also holds %s — formulas scored "
+                    "there are duplicates for '%s'", out_dir / "trial_ledger.db", others,
+                    substrate_id)
     lockbox = None if args.no_lockbox else Lockbox(out_dir / "lockbox.db")
     incubation_criterion = (None if args.no_lockbox
                             else load_incubation_criterion(args.lockbox_config))
@@ -721,6 +750,10 @@ def main() -> int:
                          "+1d but are CAPPED at wall-clock now (never future-dated). DEFAULT (omitted): "
                          "each tick stamps the actual UTC instant it runs.")
     ap.add_argument("--out", default=str(ROOT / "results" / "crucible_orchestrator"))
+    ap.add_argument("--allow-shared-ledger", action="store_true",
+                    help="run on a trial ledger that already holds another substrate's rows "
+                         "(refused by default since crucible-v17.0: the ledger is keyed by "
+                         "candidate hash alone; use one --out per substrate)")
     ap.add_argument("--force", action="store_true",
                     help="run even when generation.enabled is false in the gates")
     ap.add_argument("--no-lockbox", action="store_true",

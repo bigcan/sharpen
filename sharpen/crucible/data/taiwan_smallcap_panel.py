@@ -231,11 +231,18 @@ def balance_util(margin: pd.DataFrame, shareholding: pd.DataFrame, *,
     sh = shareholding.dropna(subset=["total_shares"]).copy()
     sh["stock_id"] = sh["stock_id"].astype(str)
     sh["avail_date"] = pd.to_datetime(sh["avail_date"])
+    # v17.0: the shareholding rows are grouped ONCE. The loop used to filter the whole frame per
+    # ticker (``sh[sh["stock_id"] == tk]``), 192 s of a 217 s panel build. A group holds the same
+    # rows in the same order as that filter, so the sort below sees identical input and the output is
+    # bit-identical (tests/crucible/test_v17_0_data.py).
+    sh_cols = sh[["stock_id", "avail_date", "total_shares"]]
+    sh_by_ticker = {tk: grp[["avail_date", "total_shares"]] for tk, grp in sh_cols.groupby("stock_id")}
     frames = []
     for tk, g in mg.groupby("stock_id"):
-        s = sh[sh["stock_id"] == tk][["avail_date", "total_shares"]].sort_values("avail_date")
-        if s.empty:
+        s = sh_by_ticker.get(tk)
+        if s is None or s.empty:
             continue
+        s = s.sort_values("avail_date")
         g = g.sort_values("date")
         merged = pd.merge_asof(
             g[["date", balance_col]].rename(columns={"date": "avail_date"}),

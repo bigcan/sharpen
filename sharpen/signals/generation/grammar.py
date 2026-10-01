@@ -414,6 +414,12 @@ def crossover(a: AstNode, b: AstNode, rng, *, max_nodes: int = 24,
         slot = _slot_kind_of_child(parent, idx)
         if slot in ("W", "C", "IND"):
             continue                                           # literal slots are not spliced
+        if slot == "V" and sub.kind == NUM:
+            # v17.0: a constant sitting in a value slot is a COEFFICIENT (``0.5 * close``). Its kind is
+            # NUM, so the donor pool below was every literal of ``b`` -- windows, exponents, a zero --
+            # and the splice produced ``20 * close`` or the zero genome ``0 * close``. A coefficient
+            # is left alone, like the literal slots.
+            continue
         want = BOOL if slot == "B" else sub.kind
         # a value slot must receive an ARRAY-producing donor; a scalar (e.g. neg(const))
         # spliced into a cross-sectional/ts op would crash eval. Bool donors may be scalar.

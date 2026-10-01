@@ -17,13 +17,13 @@ from __future__ import annotations
 
 import logging
 import re
-from collections.abc import Sequence
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 
 import numpy as np
 
 from ..catalog import DataCatalog
-from .connector import DataConnector, SeriesRef
+from .connector import DataConnector, SeriesData, SeriesRef
 from .quality_gate import asof_join, assert_asof_join_causal, register_series, validate_series
 
 logger = logging.getLogger(__name__)
@@ -63,8 +63,13 @@ def build_feature_slots(
     catalog: DataCatalog | None = None,
     require_valid: bool = False,
     freshness: str | None = None,
+    prefetched: "Mapping[tuple[str, str], SeriesData] | None" = None,
 ) -> dict[str, np.ndarray]:
     """Fetch → validate → as-of-join each request onto ``bar_dates`` → ``{terminal: (T,) array}``.
+
+    ``prefetched`` (v17.0) maps ``(source_id, series_id)`` to a SeriesData the caller ALREADY fetched
+    for the same ``[start, end]`` (the scout's survey); a series found there is not fetched again.
+    Every gate below still runs on it.
 
     For each series: (1) the terminal must be DSL-legal; (2) :func:`validate_series` runs (a failure
     warns, or raises if ``require_valid``); (3) the release-time :func:`asof_join` binds it to the
@@ -88,7 +93,9 @@ def build_feature_slots(
         if terminal in slots:
             raise ValueError(f"duplicate feature-slot terminal {terminal!r}")
 
-        data = req.connector.fetch(req.ref, start, end)
+        data = (prefetched or {}).get((req.ref.source_id, req.ref.series_id))
+        if data is None:
+            data = req.connector.fetch(req.ref, start, end)
         report = validate_series(data)
         if not report.passed:
             msg = (f"{terminal}: data-quality gate flagged {report.reasons} "

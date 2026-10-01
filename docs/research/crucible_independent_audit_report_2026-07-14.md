@@ -10,6 +10,19 @@ the cost model, and the ledgers.
 against the ledgers and by re-running experiments through the **shipped** code (nothing re-implemented).
 Reproduction scripts are cited per finding; ledger queries are one-liners.
 
+> **ERRATUM 2026-10-01 (AUDIT-F1F2-01, operator decision).** The planted-oracle sentences in §1 (C), §2,
+> findings F1/F2 and the §7 reproduction row — "a perfect weekly-hold oracle fails 0/5", "t 2.92 < 3.0" —
+> **do not reproduce and are withdrawn.** Rebuilt through the shipped funnel
+> (`scripts/research/planted_sweep.py`), the perfect weekly oracle **passes** on the full real substrate
+> (train `marginal_t` 8.608, holdout 3.800; 8.048 / 4.149 on the audit's own 2010–2022 era). The statistic
+> grows as √N against a constant bar of 3.0 and crosses it at about 442–462 bars (~1.8 years); the reported
+> 2.92 corresponds to roughly a tenth of the 4,085-bar panel. Why the original run was short is not
+> established (its script was never committed). Detail: `planted_oracle_reproduction_2026-09-02.md`.
+> **What stands:** F1's sign inversion for diversifiers (a code identity, pinned by
+> `tests/signals/test_tier_c_seals_registered.py`), F4 (`f4_null_grid_reproduction_2026-09-03.md`) and
+> F7's power wall. Those carry the verdict "(A) is unclaimable; stop mining" without the oracle claim.
+> **Cite F4 and F7, never the oracle sentence.** The text below is left as written.
+
 ---
 
 ## 1. Verdict

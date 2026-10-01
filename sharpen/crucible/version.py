@@ -821,7 +821,37 @@ from pathlib import Path
 #   * STORE REPAIR (operator data, not code): results/crucible_orchestrator/real — 40 untested
 #     pre-registrations reopened, us_equity account compacted 152 -> 54 (98 phantom charges); backups
 #     beside the store.
-CRUCIBLE_VERSION = "crucible-v16.0"
+# `crucible-v17.0` is a **MAJOR** bump: everything the 2026-09-30 deep audit listed as "still open" or
+# "not fixed (low / latent)", closed 2026-10-01 under the operator's delegation ("make the best
+# decisions for me and complete all pending tasks"). MAJOR because the cohort books and the
+# scorecard's PROMISING rule change. No frozen gates file changed; the Taiwan
+# small-cap MINING gates file gains `generation.base_cost_bps` and is re-registered (no tick had run
+# on that substrate).
+#
+#   * THE COHORT USES THE v15 BOOK. `fitness.joined_book` admits a sleeve only on bars the
+#     combiner can size it (augmented_book for several members). cohort.py, cohort_mc.py (observed AND
+#     null replicates) and the cohort holdout guard (an unsized member is frozen at weight 0) no longer
+#     carry the combiner's all-sleeve equal-weight fallback. `combination_fitness` KEEPS the raw
+#     combiner by decision: switching it collapsed its dsr_aug leg on a short planted panel and would
+#     invalidate the power curves measured through it (see the note in that function).
+#   * SCORECARD: REBALANCE PHASE + EXECUTION LAG. Tier-2 capturability reports the frictionless / net
+#     Sharpe at every rebalance phase and for a one-bar-late entry. PROMISING also needs the MEDIAN
+#     phase to clear the frictionless floor (`capturability.require_phase_robust`, monotone-stricter);
+#     a large lag loss is a caveat, never a gate. `coverage.max_nan_frac` and `universe.min_adv_usd`
+#     -- declared since v2.0, read by nothing -- are measured and caveated "NOT ENFORCED" (enforcing
+#     them would move verdicts recorded under the frozen gates).
+#   * ONE LEDGER FILE PER SUBSTRATE. The orchestrator refuses a trial ledger that holds another
+#     substrate's rows (`--allow-shared-ledger` keeps an already-shared store usable).
+#   * ENGINE. Turnover is annualized on the substrate's bar clock (was 252 on every clock); GP
+#     crossover leaves a coefficient alone (it spliced windows / zeros into `0.5 * close`); WQ101 #29's
+#     `min(x, 5)` is the 5-day ts_min the paper means, not a clamp at 5.
+#   * DATA. The T86 store records its ticker set and refuses a wider one (its polled days read as "no
+#     row" for the new tickers, silently and permanently); the alt-data bridge reuses the survey's
+#     fetch instead of fetching every accepted series twice; `balance_util` groups shareholding once
+#     (192 s of a 217 s panel build), bit-identical; the Taiwan small-cap futures base book pays
+#     `base_cost_bps` 0.0010, not the candidate's 0.0021 stock-tax cost.
+# Tripwires: tests/**/test_v17_0_*.py.
+CRUCIBLE_VERSION = "crucible-v17.0"
 
 # The baseline (pre-gate-repair) system, preserved as a git tag for reproducibility comparisons.
 CRUCIBLE_BASELINE_VERSION = "crucible-v1.0"

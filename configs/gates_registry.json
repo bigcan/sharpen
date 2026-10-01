@@ -264,9 +264,10 @@
       "reason": "initial registration 2026-09-30 (SharpOps ladder decision item 7): baseline of every gates file as committed; later edits need a re-registration citing a decision"
     },
     "configs/taiwan_smallcap_signal_eval.gates.yaml": {
-      "sha256": "ce53319779197e153c7d077d7e14ad67f9726a58ae554ad2ab457051edeb2667",
-      "registered_on": "2026-09-30",
-      "reason": "initial registration 2026-09-30 (SharpOps ladder decision item 7): baseline of every gates file as committed; later edits need a re-registration citing a decision"
+      "sha256": "25857660472ca75ff6141db597dfb6cb703c5beebc29dc20431ec13b6e3ffe90",
+      "registered_on": "2026-10-01",
+      "reason": "crucible-v17.0: generation.base_cost_bps 0.0010 - the futures base book no longer pays the stock sell tax (deep audit 2026-09-30 'not fixed' item; operator-delegated 2026-10-01). No tick has run on this substrate.",
+      "previous_sha256": "ce53319779197e153c7d077d7e14ad67f9726a58ae554ad2ab457051edeb2667"
     },
     "configs/taiwan_tx_canary.gates.yaml": {
       "sha256": "6c8aa941ff164361e36a992cc6ff9defb48894508bc427bbd0281cb559033fe5",

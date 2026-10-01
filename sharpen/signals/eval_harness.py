@@ -526,6 +526,18 @@ class Capturability:
     by_cost: dict[str, CostResult]
     frictionless_sharpe: float
     cost_wall: float          # frictionless_sharpe - standard-cost net_sharpe
+    # v17.0 — the two conventions the headline numbers above silently fix. Empty / NaN = not measured
+    # (a hand-built Capturability, or hold_horizon 1 for the phase sweep).
+    #   * REBALANCE PHASE. The book above rebalances on rows 0, h, 2h, ...; these are the same book
+    #     started on each of the h possible rows. Measured 2026-09-30 on Taiwan small-cap:
+    #     holder_conc frictionless Sharpe -0.045 at phase 0 and positive on 16 of 21 phases.
+    #   * EXECUTION LAG. The book above enters at the close the signal reads. ``lag1_*`` enters one
+    #     bar later (weights from bar t, return from t+1 to t+1+h) at phase 0. A one-bar lag halved
+    #     the 5-day reversal IC on Taiwan small-cap.
+    phase_frictionless: tuple[float, ...] = ()
+    phase_net_standard: tuple[float, ...] = ()
+    lag1_frictionless_sharpe: float = float("nan")
+    lag1_net_standard_sharpe: float = float("nan")
 
 
 def tier2_capturability(sig: "Signal", panel: Panel, gates, *, neutralization, expected_sign,
@@ -536,17 +548,30 @@ def tier2_capturability(sig: "Signal", panel: Panel, gates, *, neutralization, e
     """
     eff = _neutralized_eff(sig, panel, neutralization, expected_sign, hold_horizon, scores)
     fwd_h = panel.forward_returns(hold_horizon)
-    prev_w = np.zeros(panel.N)
-    gross: list[float] = []
-    turn: list[float] = []
-    for t in range(0, panel.T - hold_horizon, hold_horizon):
-        w = _ls_weights(eff[t], panel.active[t])
-        gross.append(float(np.nansum(w * fwd_h[t])))
-        turn.append(float(np.abs(w - prev_w).sum()))
-        prev_w = w
-    g = np.asarray(gross)
-    tn = np.asarray(turn)
+
+    def _book(offset: int, lag: int) -> tuple[np.ndarray, np.ndarray]:
+        # (gross, turnover) per rebalance: weights formed on row t, held over [t+lag, t+lag+h].
+        prev_w = np.zeros(panel.N)
+        gross: list[float] = []
+        turn: list[float] = []
+        for t in range(offset, panel.T - hold_horizon - lag, hold_horizon):
+            w = _ls_weights(eff[t], panel.active[t])
+            gross.append(float(np.nansum(w * fwd_h[t + lag])))
+            turn.append(float(np.abs(w - prev_w).sum()))
+            prev_w = w
+        return np.asarray(gross), np.asarray(turn)
+
+    g, tn = _book(0, 0)
     ppy = TRADING_DAYS / hold_horizon
+    std_bps = gates.cost_models.get("standard")
+
+    def _pair(gg: np.ndarray, tt: np.ndarray) -> tuple[float, float]:
+        net_std = (_ann_sharpe(gg - tt * float(std_bps), ppy) if std_bps is not None
+                   else float("nan"))
+        return _ann_sharpe(gg, ppy), net_std
+
+    phases = [_pair(g, tn)] + [_pair(*_book(o, 0)) for o in range(1, hold_horizon)]
+    lag_fr, lag_net = _pair(*_book(0, 1))
 
     by_cost: dict[str, CostResult] = {}
     for name, bps in gates.cost_models.items():
@@ -558,7 +583,12 @@ def tier2_capturability(sig: "Signal", panel: Panel, gates, *, neutralization, e
     fr_sh = fr.net_sharpe if fr else _ann_sharpe(g, ppy)
     std = by_cost.get("standard")
     cost_wall = fr_sh - (std.net_sharpe if std else fr_sh)
-    return Capturability(by_cost, fr_sh, cost_wall)
+    multi = hold_horizon > 1
+    return Capturability(
+        by_cost, fr_sh, cost_wall,
+        phase_frictionless=tuple(p[0] for p in phases) if multi else (),
+        phase_net_standard=tuple(p[1] for p in phases) if multi else (),
+        lag1_frictionless_sharpe=lag_fr, lag1_net_standard_sharpe=lag_net)
 
 
 # --------------------------------------------------------------------- Tier 3 ----

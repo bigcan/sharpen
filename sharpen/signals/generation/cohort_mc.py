@@ -39,7 +39,7 @@ from .cohort import (
     greedy_decorrelated_admission,
     standalone_sharpe_scores,
 )
-from .fitness import FitnessConfig, _combined_book, _per_period_sharpe
+from .fitness import FitnessConfig, _combined_book, _per_period_sharpe, joined_book
 
 logger = logging.getLogger(__name__)
 
@@ -130,8 +130,12 @@ def _cohort_delta_sr(
     sr_base = _per_period_sharpe(b_base[np.isfinite(b_base)])
     if len(members) < ccfg.min_cohort_size or not np.isfinite(sr_base):
         return _NEG_INF, members
-    aug = {**dict(base), **{m: np.asarray(cand[m], dtype=np.float64) for m in members}}
-    b_aug = _combined_book(aug, timestamps, cohort_cfg)
+    # v17.0: members join only where the combiner can size them (fitness.joined_book) -- the SAME
+    # functional on the observed panel and on every null replicate. A block bootstrap scatters a
+    # member's warm-up rows, so under the raw combiner the observed statistic carried an EW-fallback
+    # stretch that the null replicates mostly did not.
+    b_aug = joined_book(dict(base), {m: cand[m] for m in members}, timestamps, cohort_cfg,
+                        required_book=b_base)   # no member usable => the base book itself
     sr_aug = _per_period_sharpe(b_aug[np.isfinite(b_aug)])
     if not np.isfinite(sr_aug):
         return _NEG_INF, members

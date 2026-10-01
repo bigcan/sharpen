@@ -37,6 +37,16 @@ _DEFAULTS: dict = {
         # cost-blocked signal stays a real research object and is caveated, not demoted. Turn on for
         # any pathway whose verdicts gate capital. Monotone-STRICTER either way.
         "require_positive_net_standard": False,
+        # v17.0 — REBALANCE PHASE. The frictionless floor is read at rebalance phase 0, one of
+        # `primary_horizon` equally arbitrary start rows. With this on, PROMISING also needs the
+        # MEDIAN frictionless Sharpe across all phases to clear the same floor, so a book that makes
+        # money on one start row and loses on most cannot pass. Only ever an added AND
+        # (monotone-stricter); inherited by the sealed files through the deep-merge.
+        "require_phase_robust": True,
+        # v17.0 — EXECUTION LAG. Caveat (never a gate: execution is venue-specific, like a cost
+        # model) when entering one bar late keeps less than this fraction of the frictionless
+        # Sharpe, or turns it non-positive.
+        "lag_caution_frac": 0.5,
     },
     "neutralization": {"winsor_pct": [0.01, 0.99], "controls": ["sector", "size"]},
     "promotion": {"survivorship_free_required": True, "tier2_audit_required": True},
@@ -80,6 +90,8 @@ class Gates:
     min_frictionless_sharpe: float       # F3 — traded-book floor; PROMISING needs a book that
                                          # makes money at ZERO cost (STRICT >, see _DEFAULTS)
     require_positive_net_standard: bool  # F3 — opt-in: also require net@standard > 0
+    require_phase_robust: bool           # v17.0 — median-over-phases frictionless must clear too
+    lag_caution_frac: float              # v17.0 — one-bar-lag retention below this is caveated
     survivorship_free_required: bool
     tier2_audit_required: bool
     raw: dict
@@ -129,6 +141,8 @@ class Gates:
             min_frictionless_sharpe=float(m["capturability"]["min_frictionless_sharpe"]),
             require_positive_net_standard=bool(
                 m["capturability"]["require_positive_net_standard"]),
+            require_phase_robust=bool(m["capturability"]["require_phase_robust"]),
+            lag_caution_frac=float(m["capturability"]["lag_caution_frac"]),
             survivorship_free_required=bool(m["promotion"]["survivorship_free_required"]),
             tier2_audit_required=bool(m["promotion"]["tier2_audit_required"]),
             raw=m,

@@ -33,6 +33,7 @@ from sharpen.signals.generation.fitness import (
     FitnessConfig,
     _combined_book,
     _per_period_sharpe,
+    joined_book,
 )
 
 _ALPHA = 0.05
@@ -160,9 +161,11 @@ def test_tobs_is_per_period_delta_sr_functional() -> None:
         max_pairwise_corr=ccfg.max_pairwise_corr, max_cohort_size=ccfg.max_cohort_size)
     assert len(members) >= ccfg.min_cohort_size
     cohort_cfg = _with_redundancy(fcfg, ccfg.combiner_redundancy_strength)
-    sr_base = _per_period_sharpe(_combined_book(base_np, ts, fcfg))
-    aug = {**base_np, **{m: cand_np[m] for m in members}}
-    sr_aug = _per_period_sharpe(_combined_book(aug, ts, cohort_cfg))
+    b_base = _combined_book(base_np, ts, fcfg)
+    sr_base = _per_period_sharpe(b_base)
+    # v17.0: members join only on bars the combiner can size them (fitness.joined_book).
+    sr_aug = _per_period_sharpe(joined_book(
+        base_np, {m: cand_np[m] for m in members}, ts, cohort_cfg, required_book=b_base))
     expected = sr_aug - sr_base
 
     assert np.isfinite(r.t_obs)
@@ -171,7 +174,9 @@ def test_tobs_is_per_period_delta_sr_functional() -> None:
 
     # the fixture genuinely distinguishes the two Sharpe conventions: the _ann_sharpe reconstruction
     # is numerically different, so assertion (1) above has teeth (guards "per-period, NOT annualized").
-    ann_expected = (_ann_sharpe(_combined_book(aug, ts, cohort_cfg), fcfg.periods_per_year)
+    b_aug = joined_book(base_np, {m: cand_np[m] for m in members}, ts, cohort_cfg,
+                        required_book=b_base)
+    ann_expected = (_ann_sharpe(b_aug, fcfg.periods_per_year)
                     - _ann_sharpe(_combined_book(base_np, ts, fcfg), fcfg.periods_per_year))
     assert abs(ann_expected - expected) > 1e-6
     assert r.t_obs != pytest.approx(ann_expected, rel=1e-6)

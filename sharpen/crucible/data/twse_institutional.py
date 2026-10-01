@@ -137,6 +137,11 @@ def _taipei_today() -> np.datetime64:
     return np.datetime64(_dt.datetime.now(_dt.timezone(_dt.timedelta(hours=8))).date(), "D")
 
 
+# Reserved store key (never a YYYYMMDD day): {"tickers": [...]} — the ticker set the store's polled
+# days were extracted with. See TwseInstitutionalConnector._check_store_tickers.
+_META_KEY = "_meta"
+
+
 class _AccumulationStore:
     """A tiny, idempotent JSON store — ``"YYYYMMDD" -> {ticker: {field: value}}`` — mirroring
     :class:`~.taifex_positioning._AccumulationStore` but keyed by the T86 FETCH UNIT (a full calendar
@@ -291,7 +296,7 @@ class TwseInstitutionalConnector:
             release_timestamp=np.array(rels, dtype="datetime64[ns]"),
             provenance=self.provenance(ref),
             meta={"n_days_queried": int((hi - lo) / np.timedelta64(1, "D")) + 1,
-                  "n_store_days_total": len(store),
+                  "n_store_days_total": len(store) - (_META_KEY in store),
                   "live_budget_remaining": self._live_budget},
         )
 
@@ -313,12 +318,15 @@ class TwseInstitutionalConnector:
         (ticker, field) fetch calls via the in-memory ``self._loaded`` (one disk read per instance)."""
         if self._loaded is None:
             self._loaded = self._store.load()
+            self._check_store_tickers(self._loaded)
         store = self._loaded
         fetched = 0
         for day in np.arange(lo, hi + np.timedelta64(1, "D"), np.timedelta64(1, "D"))[::-1]:
             if self._live_budget <= 0:
                 break                             # network budget spent — remaining gaps fill next run
             date_str = str(day).replace("-", "")
+            if date_str == _META_KEY:
+                continue
             if date_str in store and not (self._repoll_weekday_empty and not store[date_str]
                                           and np.is_busday(day)):
                 continue                          # already polled (idempotent) — costs no budget
@@ -335,6 +343,30 @@ class TwseInstitutionalConnector:
         if fetched:
             self._store.save(store)
         return store
+
+    def _check_store_tickers(self, store: dict) -> None:
+        """Fail closed when this instance wants a ticker the store was not built with (v17.0).
+
+        A day key means "polled", and a polled day holds only the tickers the polling instance was
+        configured with. An instance with a WIDER ticker set therefore read every stored day as
+        "that ticker had no T86 row" — a silent all-missing history that no later poll would repair,
+        because the day is already marked polled. The store records the ticker set it was built
+        with under ``_meta``; a store written before v17.0 has none and is taken to hold the default
+        set, which is what every caller on record used. A narrower set is fine."""
+        meta = store.get(_META_KEY)
+        if meta is None and not any(rows for rows in store.values()):
+            # Nothing extracted yet (new store, or polled non-trading days only, which hold no
+            # ticker): this instance defines the set.
+            store[_META_KEY] = {"tickers": sorted(self._tickers)}
+            return
+        have = set(meta["tickers"]) if meta is not None else set(_DEFAULT_TICKERS)
+        missing = sorted(set(self._tickers) - have)
+        if missing:
+            raise ValueError(
+                f"twse_inst: store {self._store.path} was built without tickers {missing}; its "
+                "polled days would read as 'no T86 row' for them. Use a separate store_path for "
+                "this ticker set (and backfill it), or keep to the stored set.")
+        store.setdefault(_META_KEY, {"tickers": sorted(have)})
 
     def _fetch_day_live(self, date_str: str) -> dict | None:
         """One live T86 HTTP call for one calendar day (all securities). THREE-state result (C1-06):

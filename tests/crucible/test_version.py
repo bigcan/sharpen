@@ -105,7 +105,10 @@ def test_versions_are_distinct_and_tagged_form() -> None:
     # gate's degenerate channels, two data inputs, the LORD++ accounting — see version.py).
     # v16.0 = the v15.0 audit's operator decisions (MAJOR: sequential LORD++ levels, the live-level
     # power guard, the SPRT lockbox, the cohort pool — see version.py).
-    assert CRUCIBLE_VERSION == "crucible-v16.0"
+    # v17.0 = the v15.0 audit's "still open" and "not fixed" lists, closed 2026-10-01 (MAJOR: the
+    # cohort books use the v15 book, the scorecard gains a phase-robustness leg,
+    # one ledger file per substrate — see version.py).
+    assert CRUCIBLE_VERSION == "crucible-v17.0"
     assert CRUCIBLE_BASELINE_VERSION == "crucible-v1.0"
     assert CRUCIBLE_VERSION != CRUCIBLE_BASELINE_VERSION
 
@@ -184,8 +187,12 @@ def test_smallcap_mining_gates_hash_registered() -> None:
     here gives the miner's own gate the same anti-goal-post-move protection — a threshold moved after
     seeing a mining result trips a red rather than passing silently.
 
-    The three older hashes are asserted unchanged above: wiring a substrate moved no existing gate."""
-    assert gates_hash(SMALLCAP_MINING_GATES) == "ce5331977919"
+    The three older hashes are asserted unchanged above: wiring a substrate moved no existing gate.
+
+    Re-pinned ``ce5331977919`` -> ``25857660472c`` at crucible-v17.0 (2026-10-01): ``generation.base_cost_bps:
+    0.0010`` added, so the TX/TE/TF futures base book stops paying the 0.30% stock sell tax. No
+    threshold moved and no tick had run on this substrate, so no mining result predates the change."""
+    assert gates_hash(SMALLCAP_MINING_GATES) == "25857660472c"
 
 
 def test_gates_files_are_lf_so_the_moat_is_portable() -> None:

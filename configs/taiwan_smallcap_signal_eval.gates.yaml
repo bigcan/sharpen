@@ -82,10 +82,15 @@ generation:                          # Component 3 — the Crucible mining subst
   elite_frac: 0.30
   cost_bps: 0.0021                   # the TAIWAN one-way reality (commission + 0.30% sell tax), NOT
                                      # the 0.0010 US default the `taiwan` ETF cell uses. Charged to
-                                     # the candidate AND the base book on their own turnover. A
-                                     # taxed market is the substrate's defining constraint: pricing
-                                     # a small-cap L/S book at US friction would manufacture edges
-                                     # that cannot be traded here (cf. crucible-v11.0 capturability).
+                                     # the CANDIDATE on its own turnover. A taxed market is the
+                                     # substrate's defining constraint: pricing a small-cap L/S book
+                                     # at US friction would manufacture edges that cannot be traded
+                                     # here (cf. crucible-v11.0 capturability).
+  base_cost_bps: 0.0010              # v17.0: the BASE book is TX/TE/TF FUTURES, which pay no stock
+                                     # sell tax. 0.0010 is the cost this book was measured and chosen
+                                     # at (SR +0.273, see base_sleeves above) and the cost the
+                                     # `taiwan` substrate charges the same book. Until v17.0 the
+                                     # futures book was charged the 0.0021 stock cost.
   ls_min_names: 60                   # min active names for a rank-L/S book. Matches the funnel's
                                      # min_names_per_day, so a day too thin for the funnel to SCORE
                                      # also produces a flat candidate book rather than a 6-name bet.

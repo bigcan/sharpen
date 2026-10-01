@@ -75,6 +75,13 @@ _GEN_DEFAULTS: dict = {
     # marked on the same bars and charged the same cost_bps on their own turnover. Only the cadence
     # differs, which is a property of each strategy, not of the accounting.
     "base_hold_horizon": None,
+    # v17.0 — the BASE book's own one-way cost, decoupled from the candidate's `cost_bps` the same way
+    # `base_hold_horizon` decouples its cadence. None => the base book is charged `cost_bps` (every
+    # config before v17.0). It exists for a substrate whose base book trades a different instrument
+    # than the candidate: taiwan_smallcap's candidate is a taxed stock book (0.0021 incl. the 0.30%
+    # sell tax) and its base book is TX/TE/TF futures, which pay no stock tax — charging the tax to
+    # the futures book understated the comparator.
+    "base_cost_bps": None,
     "pop_size": 200, "n_generations": 40, "rng_seed": 7,
     "elite_frac": 0.30, "cost_bps": 0.0010, "ls_min_names": 6, "max_ast_nodes": 24,
     "turnover_soft_cap": 12.0, "lambda_turnover": 0.05, "lambda_complexity": 0.10,
@@ -108,6 +115,8 @@ def _validate(g: dict) -> None:
     if g["base_hold_horizon"] is not None and int(g["base_hold_horizon"]) < 1:
         raise ValueError("generation.base_hold_horizon must be >= 1 bar (or null to track "
                          "hold_horizon)")
+    if g["base_cost_bps"] is not None and float(g["base_cost_bps"]) < 0.0:
+        raise ValueError("generation.base_cost_bps must be >= 0 (or null to track cost_bps)")
     # GP8-02: the substrate keys are load-bearing — the runner builds the EXACT panel + base book a
     # substrate names, so a config naming an unwired panel/sleeve set is a silent no-op; fail fast.
     panel = str(g["panel"])
@@ -261,4 +270,6 @@ def load_generation_meta(gates_path: str | Path) -> dict:
             "base_sleeves": [str(s) for s in g["base_sleeves"]],
             # None => the runner uses hold_horizon (unchanged for every pre-cont-151 config).
             "base_hold_horizon": (None if g["base_hold_horizon"] is None
-                                  else int(g["base_hold_horizon"]))}
+                                  else int(g["base_hold_horizon"])),
+            # None => the runner charges the base book cost_bps (unchanged for every pre-v17.0 config).
+            "base_cost_bps": (None if g["base_cost_bps"] is None else float(g["base_cost_bps"]))}

@@ -170,7 +170,10 @@ def bridge_altdata_feature_slots(
             terminal = resolve_terminal(ref, aliases)
             req = SlotRequest(connector=connector, ref=ref, terminal=terminal)
             try:
-                built = build_feature_slots([req], bar_dates, start=start, end=end, catalog=None)
+                # v17.0: reuse the SeriesData the survey just fetched for this same [start, end]
+                # (the bridge used to fetch every accepted series twice).
+                built = build_feature_slots([req], bar_dates, start=start, end=end, catalog=None,
+                                            prefetched=scout.accepted_series())
             except AssertionError:
                 raise  # PIT leak — never silently skipped
             except Exception as exc:  # noqa: BLE001 - transport failed closed; degrade to skip

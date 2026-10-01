@@ -128,6 +128,7 @@ class GenerationReport:
 
 def _candidate_returns(formula: str, panel: Panel, *, hold_horizon: int, cost_bps: float,
                        min_names: int, scores: "np.ndarray | None" = None,
+                       periods_per_year: float = 252.0,
                        ) -> tuple[np.ndarray, float] | None:
     """Daily-marked dollar-neutral rank-L/S sleeve return for ``formula`` on ``panel``, NET of
     turnover·bps, plus annualized turnover. Weights are rebalanced every ``hold_horizon`` days
@@ -137,7 +138,11 @@ def _candidate_returns(formula: str, panel: Panel, *, hold_horizon: int, cost_bp
     ``scores`` (optional) is ``eval_on_panel(formula, panel)`` already computed by the caller.
     The daily marking is vectorized (weights only change on rebalance rows, so they are formed there
     and held by index); the per-row ``nansum`` is the same contiguous reduction the former per-day
-    loop ran, so the stream is bit-identical (tests/signals/test_generation_evolve_v15.py)."""
+    loop ran, so the stream is bit-identical (tests/signals/test_generation_evolve_v15.py).
+
+    ``periods_per_year`` (v17.0) is the substrate's bar clock for the turnover annualization. It was
+    hardcoded at 252, so on an hourly panel (5,694 bars/yr) turnover was understated 22.6x against
+    ``turnover_soft_cap``. Default 252 = the daily value; the return stream does not depend on it."""
     if scores is None:
         scores = eval_on_panel(formula, panel)
     if not np.isfinite(scores).any():
@@ -160,7 +165,7 @@ def _candidate_returns(formula: str, panel: Panel, *, hold_horizon: int, cost_bp
     cost = np.zeros(T - 1)
     cost[rebal] = cost_bps * turns
     rets[:T - 1] = np.nansum(held * fwd1[:T - 1], axis=1) - cost
-    ppy = 252.0 / hold_horizon
+    ppy = float(periods_per_year) / hold_horizon
     turnover_ann = float(np.mean(turns) * ppy) if turns.size else 0.0
     return rets, turnover_ann
 
@@ -174,6 +179,7 @@ def _overlay_returns(formula: str, panel: Panel, base_book: np.ndarray, *,
                      base_cost: "np.ndarray | None" = None,
                      gross_exposure: "np.ndarray | None" = None,
                      scores: "np.ndarray | None" = None,
+                     periods_per_year: float = 252.0,
                      ) -> tuple[np.ndarray, float] | None:
     """CR-9 OVERLAY candidate returns: use ``formula`` (a timing signal, typically referencing a
     non-OHLCV feature slot) as a TIME-varying multiplier on the existing combined ``base_book``.
@@ -253,7 +259,8 @@ def _overlay_returns(formula: str, panel: Panel, base_book: np.ndarray, *,
     dm = np.abs(np.diff(m_lag, prepend=0.0))                 # per-bar turnover of the tilt
     # tilted gross − embedded base cost (ALWAYS paid, |m|) − overlay rescale cost at TRUE gross (·G)
     cand = m_lag * b_gross - np.abs(m_lag) * c_base - cost_bps * dm * gross_exp
-    turnover_ann = float(np.nanmean(dm) * 252.0)             # per-bar tilt turnover → annualized (daily)
+    # per-bar tilt turnover → annualized on the substrate's bar clock (v17.0; 252 = daily default)
+    turnover_ann = float(np.nanmean(dm) * float(periods_per_year))
     if not np.isfinite(cand).any():
         return None
     return cand, turnover_ann
@@ -520,9 +527,11 @@ def evolve(
         if is_overlay:
             bb, bg, bc, ge = ctx                                          # type: ignore[misc]
             return _overlay_returns(formula, pnl, bb, cost_bps=cost_bps,
-                                    base_gross=bg, base_cost=bc, gross_exposure=ge, scores=scores)
+                                    base_gross=bg, base_cost=bc, gross_exposure=ge, scores=scores,
+                                    periods_per_year=cfg.periods_per_year)
         return _candidate_returns(formula, pnl, hold_horizon=hold_horizon,
-                                  cost_bps=cost_bps, min_names=ls_min_names, scores=scores)
+                                  cost_bps=cost_bps, min_names=ls_min_names, scores=scores,
+                                  periods_per_year=cfg.periods_per_year)
 
     pop = [parse(f) for f in seed_formulas]
     if not pop:

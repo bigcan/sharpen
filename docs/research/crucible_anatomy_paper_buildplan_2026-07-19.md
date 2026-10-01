@@ -43,6 +43,16 @@ fully measured and is exactly the paper's thesis.
 
 ---
 
+> **CORRECTION 2026-10-01 (AUDIT-F1F2-01, operator decision).** The planted-oracle claim this plan leans on
+> (§1 "weekly oracle fails 0/5", the thesis clause "verified by a planted perfect-foresight oracle that the
+> machine cannot detect", figure F2's "oracle 0/5") **does not reproduce on the full substrate and must not
+> appear in the paper**: the perfect weekly oracle passes at 4,085 bars and fails only below about 1.8 years
+> of data (`planted_oracle_reproduction_2026-09-02.md`). The seal thesis is carried instead by evidence that
+> does reproduce: the F1 sign inversion for diversifiers (code identity), the F4 null grid
+> (`f4_null_grid_reproduction_2026-09-03.md`), the F7 power wall, and the v15 audit's record that
+> pre-registrations were screened rather than tested (`crucible_deep_audit_2026-09-30.md`). F2's oracle
+> half becomes a sample-size curve ("the bar is reached only after N bars"), not a rejection result.
+
 ## 1. Why reframe — and why the reframe is the *stronger* paper
 
 The cont-118 artifact recommended the paper *"disciplined filter → honest 0-PROMISING null → power curves."* The
