@@ -106,6 +106,10 @@ def test_gate_blocks_a_book_that_loses_money_before_costs() -> None:
     assert any("NOT CAPTURABLE" in c for c in out.caveats)
 
 
+def test_gate_passes_a_capturable_signal() -> None:
+    out = _verdict(_card(1.0, net_std=0.5))
+    assert out.verdict == "PROMISING"
+    assert not any("NOT CAPTURABLE" in c for c in out.caveats)
 
 
 def test_exactly_zero_frictionless_is_blocked() -> None:
@@ -170,17 +174,26 @@ def test_opt_in_net_gate_also_fails_closed_when_unmeasured() -> None:
 
 # ---- 3. CRU-1: what this bump changes, and what it must not ------------------
 
-# Every capturability figure recorded by the small/mid-cap campaigns, read from
-# results/taiwan_smallcap_*/scorecard.json on 2026-07-31. (name, frictionless, net@standard,
-# recorded verdict).
-_RECORDED = [
-    ("tw_smallcap_holder_conc",   -0.06042079881329369, -0.815570678173937,  "LOGGED"),
-    ("tw_smallcap_margin_crowd",  -0.3413780069124212,  -1.2074333657355008, "LOGGED"),
-    ("tw_smallcap_st_reversal",   -0.1815470552572751,  -0.8352080671191372, "LOGGED"),
-    ("tw_smallcap_short_interest", 0.0862464733323175,  -0.2876685373849907, "LOGGED"),
+# The capturability figures of the small/mid-cap campaigns' LOGGED scorecards, read from
+# results/taiwan_smallcap_*/scorecard.json on 2026-07-31. (name, frictionless, net@standard).
+_RECORDED_LOGGED = [
+    ("tw_smallcap_holder_conc",   -0.06042079881329369, -0.815570678173937),
+    ("tw_smallcap_margin_crowd",  -0.3413780069124212,  -1.2074333657355008),
+    ("tw_smallcap_st_reversal",   -0.1815470552572751,  -0.8352080671191372),
+    ("tw_smallcap_short_interest", 0.0862464733323175,  -0.2876685373849907),
 ]
 
 
+@pytest.mark.parametrize("name,fric,net", _RECORDED_LOGGED)
+def test_cru1_no_logged_scorecard_is_failed_by_the_gate(name: str, fric: float, net: float) -> None:
+    """The gate is monotone-STRICTER, so it may only demote: no recorded LOGGED card becomes a
+    GATE_FAIL under it.
+
+    These cards clear every other leg by construction, so a row here proves only what the
+    capturability leg does on its own — the recorded runs rejected them on independent grounds
+    (inverted sign, DSR 0.000) that this fixture deliberately does not model.
+    """
+    assert _verdict(_card(fric, net_std=net)).verdict != "GATE_FAIL", name
 
 
 def test_cru1_ivol_is_the_one_recorded_verdict_this_bump_changes() -> None:
