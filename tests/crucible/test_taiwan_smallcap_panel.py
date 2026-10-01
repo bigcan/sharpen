@@ -17,6 +17,8 @@ The load-bearing risks pinned here:
     a future factor, the classic total-return look-ahead.
   * the opt-in age cap (`max_age_days`) is OFF by default, and the default must not move: the
     uncapped join is compared byte for byte against a frozen copy of the pre-cap `asof_grid`.
+  * the opt-in tie-break (`stable_ties`) is OFF by default too. Switched on, two prints of one
+    name that share an avail date resolve to the later one, every time.
 """
 from __future__ import annotations
 
@@ -285,13 +287,15 @@ def test_sector_map_sha_moves_only_with_this_panels_partition(data_dir):
 # Opt-in age cap (`max_age_days`) — off by default, and the default must not move
 # --------------------------------------------------------------------------- #
 def _sealed_asof_grid(events, dates, tickers, value_col, avail_col="avail_date",
-                      id_col="stock_id", *, max_age_days=None):
+                      id_col="stock_id", *, max_age_days=None, stable_ties=False):
     """SEALED REFERENCE — `asof_grid` exactly as it stood before the age cap existed. DO NOT EDIT.
 
-    `max_age_days` is accepted only so this can stand in for `tsp.asof_grid` inside the builder; the
-    default build must never hand a cap to any channel, which the assert enforces.
+    `max_age_days` and `stable_ties` are accepted only so this can stand in for `tsp.asof_grid`
+    inside the builder; the default build must never hand a cap or the stable tie-break to any
+    channel, which the asserts enforce. The body below them is the pre-switch function, untouched.
     """
     assert max_age_days is None, "the default build passed an age cap to a channel"
+    assert stable_ties is False, "the default build asked a channel for the stable tie-break"
     T, N = len(dates), len(tickers)
     grid = np.full((T, N), np.nan, dtype=np.float64)
     if events is None or events.empty or value_col not in events.columns:
@@ -518,3 +522,209 @@ def test_capped_rebuild_on_truncated_source_reproduces_every_past_cell(data_dir,
         np.testing.assert_array_equal(
             np.asarray(past.feature_slots[name]), np.asarray(full.feature_slots[name])[:past.T],
             err_msg=f"capped slot {name} moved at t<=cut when the future was deleted — look-ahead")
+
+
+# --------------------------------------------------------------------------- #
+# Opt-in tie-break (`stable_ties`) — off by default, and the default must not move
+# --------------------------------------------------------------------------- #
+def _later_print_reference(events: pd.DataFrame, dates, tickers, value_col: str) -> np.ndarray:
+    """The as-of grid re-derived with no sort at all: walk the rows in the order given, let a later
+    row overwrite an earlier one with the same (ticker, avail date), then look each bar up."""
+    grid = np.full((len(dates), len(tickers)), np.nan)
+    for j, tk in enumerate(tickers):
+        last: dict[pd.Timestamp, float] = {}
+        for avail, v in events.loc[events["stock_id"] == tk, ["avail_date", value_col]].itertuples(
+                index=False):
+            if pd.notna(avail) and pd.notna(v):
+                last[pd.Timestamp(avail)] = float(v)
+        if not last:
+            continue
+        keys = np.array(sorted(last), dtype="datetime64[ns]")
+        vals = np.array([last[pd.Timestamp(k)] for k in keys])
+        ix = np.searchsorted(keys, dates, side="right") - 1
+        grid[ix >= 0, j] = vals[ix[ix >= 0]]
+    return grid
+
+
+_TIE_WEEKS = 120
+_TIE_DATES = np.array(pd.bdate_range("2018-01-01", periods=_TIE_WEEKS * 5), dtype="datetime64[ns]")
+
+
+def _six_day_weeks() -> pd.DataFrame:
+    """One name printing Monday to Saturday, each print public the next business day — so every
+    Friday and Saturday print share a Monday avail date. Rows are in observation-date order and the
+    value is the row number, so the later print of a tied pair is the larger value."""
+    obs = pd.date_range("2018-01-01", periods=_TIE_WEEKS * 7, freq="D")
+    obs = obs[obs.dayofweek < 6]
+    return pd.DataFrame({"stock_id": "A", "obs": obs, "avail_date": obs + pd.tseries.offsets.BDay(1),
+                         "v": np.arange(len(obs), dtype=np.float64)})
+
+
+def test_two_prints_sharing_an_avail_date_resolve_to_the_later_one():
+    ev = _six_day_weeks()
+    tied = ev[ev.duplicated("avail_date", keep=False)]
+    assert len(tied) == 2 * _TIE_WEEKS and set(tied["obs"].dt.dayofweek) == {4, 5}
+
+    got = tsp.asof_grid(ev, _TIE_DATES, ("A",), "v", stable_ties=True)[:, 0]
+    np.testing.assert_array_equal(got, _later_print_reference(ev, _TIE_DATES, ("A",), "v")[:, 0])
+
+    # ...and spelled out for the tied bars: every Monday carries the SATURDAY print, never Friday's
+    sat = ev[ev["obs"].dt.dayofweek == 5]
+    fri = ev[ev["obs"].dt.dayofweek == 4]
+    mondays = pd.DatetimeIndex(_TIE_DATES).get_indexer(pd.DatetimeIndex(sat["avail_date"]))
+    assert (mondays >= 0).sum() == _TIE_WEEKS - 1, "the last tie falls after the grid, the rest on it"
+    on = mondays >= 0
+    assert (sat["v"].to_numpy() != fri["v"].to_numpy()).all(), "tied prints are indistinguishable"
+    np.testing.assert_array_equal(got[mondays[on]], sat["v"].to_numpy()[on])
+    # untied bars are whatever the default gives: the switch only decides ties
+    untied = np.setdiff1d(np.arange(len(_TIE_DATES)), mondays[on])
+    np.testing.assert_array_equal(
+        got[untied], tsp.asof_grid(ev, _TIE_DATES, ("A",), "v")[untied, 0])
+
+
+def test_stable_ties_follows_row_order_not_value_order():
+    """The winner is the row that comes last in `events`, whatever its value — so a caller that
+    hands rows in observation-date order gets the later-dated print."""
+    ev = _six_day_weeks()
+    flipped = ev.iloc[::-1].reset_index(drop=True)                    # Saturday now precedes Friday
+    got = tsp.asof_grid(flipped, _TIE_DATES, ("A",), "v", stable_ties=True)[:, 0]
+    np.testing.assert_array_equal(
+        got, _later_print_reference(flipped, _TIE_DATES, ("A",), "v")[:, 0])
+    fri = ev[ev["obs"].dt.dayofweek == 4]
+    mondays = pd.DatetimeIndex(_TIE_DATES).get_indexer(pd.DatetimeIndex(fri["avail_date"]))
+    on = mondays >= 0
+    np.testing.assert_array_equal(got[mondays[on]], fri["v"].to_numpy()[on])
+
+
+def test_asof_grid_default_is_the_sealed_join_on_tied_prints():
+    """`stable_ties` off => the pre-switch function byte for byte, on a fixture made of ties."""
+    ev = _six_day_weeks()
+    want = _sealed_asof_grid(ev, _TIE_DATES, ("A",), "v")
+    assert tsp.asof_grid(ev, _TIE_DATES, ("A",), "v").tobytes() == want.tobytes()
+    assert tsp.asof_grid(ev, _TIE_DATES, ("A",), "v", stable_ties=False).tobytes() == want.tobytes()
+
+
+def test_stable_ties_and_the_age_cap_compose():
+    ev = _six_day_weeks()
+    stopped = ev[ev["obs"] < "2019-01-01"]                           # the feed stops; the grid runs on
+    got = tsp.asof_grid(stopped, _TIE_DATES, ("A",), "v", stable_ties=True, max_age_days=10)[:, 0]
+    ref = _later_print_reference(stopped, _TIE_DATES, ("A",), "v")[:, 0]
+    d = pd.DatetimeIndex(_TIE_DATES)
+    old = np.asarray(d > stopped["avail_date"].max() + pd.Timedelta(days=10))
+    assert old.sum() > 50 and np.isnan(got[old]).all()
+    np.testing.assert_array_equal(got[~old], ref[~old])
+
+
+def _add_saturday_sessions(data_dir: Path) -> None:
+    """Give the balance and flow files a make-up Saturday after every Friday, with values unlike
+    any weekday's. The price calendar stays Monday-Friday, so the tie shows on the Monday bar."""
+    ms = pd.read_parquet(data_dir / "margin_short.parquet")
+    sat = ms[pd.to_datetime(ms["date"]).dt.dayofweek == 4].copy()
+    sat["date"] = pd.to_datetime(sat["date"]) + pd.Timedelta(days=1)
+    k = np.arange(len(sat), dtype=np.float64)
+    sat["margin_balance"], sat["short_balance"] = 9e5 + k, 7e5 + k
+    pd.concat([ms, sat], ignore_index=True).to_parquet(data_dir / "margin_short.parquet")
+
+    inst = pd.read_parquet(data_dir / "institutional.parquet")
+    sat = inst[pd.to_datetime(inst["date"]).dt.dayofweek == 4].copy()
+    sat["date"] = pd.to_datetime(sat["date"]) + pd.Timedelta(days=1)
+    sat["avail_date"] = sat["date"] + pd.tseries.offsets.BDay(1)
+    k = np.arange(len(sat), dtype=np.float64)
+    sat["foreign_net"], sat["trust_net"] = 5000.0 + k, -3000.0 - k
+    pd.concat([inst, sat], ignore_index=True).to_parquet(data_dir / "institutional.parquet")
+
+
+def _channel_events(data_dir: Path) -> dict[str, pd.DataFrame]:
+    """The event streams of the four channels whose prints can share an avail date."""
+    margin = pd.read_parquet(data_dir / "margin_short.parquet")
+    shares = pd.read_parquet(data_dir / "shareholding.parquet")
+    inst = pd.read_parquet(data_dir / "institutional.parquet")
+    return {
+        "margin_util": tsp.balance_util(margin, shares, balance_col="margin_balance",
+                                        out_col="margin_util"),
+        "short_util": tsp.balance_util(margin, shares, balance_col="short_balance",
+                                       out_col="short_util"),
+        "foreign_flow": tsp.flow_events(inst, "foreign_net", "foreign_flow"),
+        "trust_flow": tsp.flow_events(inst, "trust_net", "trust_flow"),
+    }
+
+
+def test_default_panel_is_the_sealed_panel_when_prints_tie(data_dir, monkeypatch):
+    _add_saturday_sessions(data_dir)
+    got = tsp.build_taiwan_smallcap_panel(data_dir, channels=tsp.ALL_CHANNELS)
+    assert "stable_ties" not in got.meta, "the default meta gained a key — sealed scorecards move"
+    off = tsp.build_taiwan_smallcap_panel(data_dir, channels=tsp.ALL_CHANNELS, stable_ties=False)
+
+    monkeypatch.setattr(tsp, "asof_grid", _sealed_asof_grid)
+    want = tsp.build_taiwan_smallcap_panel(data_dir, channels=tsp.ALL_CHANNELS)
+    _assert_same_panel(got, want)
+    _assert_same_panel(off, want)
+
+
+def test_stable_ties_panel_carries_the_saturday_print_on_monday(data_dir):
+    _add_saturday_sessions(data_dir)
+    sealed = tsp.build_taiwan_smallcap_panel(data_dir, channels=tsp.ALL_CHANNELS)
+    stable = tsp.build_taiwan_smallcap_panel(data_dir, channels=tsp.ALL_CHANNELS, stable_ties=True)
+    d = pd.DatetimeIndex(stable.dates)
+    monday = np.asarray(d.dayofweek == 0)
+
+    for name, ev in _channel_events(data_dir).items():
+        ties = ev[ev.duplicated(["stock_id", "avail_date"], keep=False)]
+        assert len(ties) >= 2 * 40 * len(_TICKERS), f"{name}: the fixture has no tied prints"
+        slot = stable.feature_slots[name]
+        np.testing.assert_array_equal(
+            slot, _later_print_reference(ev, stable.dates, stable.tickers, name),
+            err_msg=f"{name}: a tied avail date did not resolve to the later print")
+        # a tie can only move the Monday bar; every other cell is the sealed one
+        assert slot[~monday].tobytes() == sealed.feature_slots[name][~monday].tobytes(), name
+
+    # the Saturday balances are the only ones at or above these floors, so a cell names its print
+    shares = 1e8
+    for name, floor in (("margin_util", 9e5), ("short_util", 7e5)):
+        slot = stable.feature_slots[name]
+        live = monday & (d > d[5])
+        assert live.sum() >= 40 and (slot[live] * shares >= floor - 0.5).all(), (
+            f"{name}: a Monday bar is carrying the Friday print")
+        rest = ~monday & np.isfinite(slot[:, 0])
+        assert rest.sum() > 150 and (slot[rest] * shares < floor - 0.5).all()
+
+    # channels without ties, and everything that is not a channel, are untouched
+    for name in ("mrev_yoy", "holder_conc"):
+        assert stable.feature_slots[name].tobytes() == sealed.feature_slots[name].tobytes()
+    for name in ("dates", "open", "high", "low", "close", "volume", "active", "adv_usd",
+                 "sector_id"):
+        assert getattr(stable, name).tobytes() == getattr(sealed, name).tobytes(), f"{name} moved"
+    assert stable.meta["stable_ties"] is True, "a tie-broken panel must say so"
+    assert {k: v for k, v in stable.meta.items() if k != "stable_ties"} == sealed.meta
+
+
+def test_stable_ties_changes_nothing_when_no_prints_tie(data_dir):
+    """The fixture as shipped has no shared avail dates, so the switch must be a no-op on values."""
+    sealed = tsp.build_taiwan_smallcap_panel(data_dir, channels=tsp.ALL_CHANNELS)
+    stable = tsp.build_taiwan_smallcap_panel(data_dir, channels=tsp.ALL_CHANNELS, stable_ties=True)
+    for ev in _channel_events(data_dir).values():
+        assert not ev.duplicated(["stock_id", "avail_date"]).any()
+    for name in tsp.ALL_CHANNELS:
+        assert stable.feature_slots[name].tobytes() == sealed.feature_slots[name].tobytes(), name
+
+
+@pytest.mark.parametrize("bad", [1, 0, "yes", None])
+def test_a_non_bool_tie_break_is_rejected(data_dir, bad):
+    with pytest.raises(TypeError, match="stable_ties must be a bool"):
+        tsp.build_taiwan_smallcap_panel(data_dir, stable_ties=bad)
+
+
+def test_stable_ties_rebuild_on_truncated_source_reproduces_every_past_cell(data_dir, tmp_path):
+    """LEAK-2 for the tie-broken path: delete the future from the SOURCE, rebuild, compare."""
+    _add_saturday_sessions(data_dir)
+    full = tsp.build_taiwan_smallcap_panel(data_dir, channels=tsp.ALL_CHANNELS, stable_ties=True)
+    cut_ix = int(full.T * 0.7)
+    trunc_dir = tmp_path / "as_of"
+    _truncate_source(data_dir, trunc_dir, pd.Timestamp(full.dates[cut_ix]))
+    past = tsp.build_taiwan_smallcap_panel(trunc_dir, channels=tsp.ALL_CHANNELS, stable_ties=True)
+
+    assert past.T == cut_ix + 1 and past.tickers == full.tickers
+    for name in tsp.ALL_CHANNELS:
+        np.testing.assert_array_equal(
+            np.asarray(past.feature_slots[name]), np.asarray(full.feature_slots[name])[:past.T],
+            err_msg=f"tie-broken slot {name} moved at t<=cut when the future was deleted")
