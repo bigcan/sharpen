@@ -14,7 +14,9 @@ import pytest
 
 _MOD_PATH = Path(__file__).resolve().parents[2] / "scripts" / "remote_cmd.py"
 
-paramiko = pytest.importorskip("paramiko", reason="remote_cmd imports paramiko at module level")
+# remote_cmd imports paramiko at module level. Deliberately no importorskip: paramiko is
+# declared (the `deploy` extra) and CI installs it, so a missing install must FAIL these
+# tests rather than silently skip the secret-echo guard.
 
 
 def _load():

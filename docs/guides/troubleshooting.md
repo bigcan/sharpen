@@ -24,7 +24,7 @@ This is the most dangerous class of failure here, because exit code 0 hides it.
 | Symptom | Fix |
 |---|---|
 | `ModuleNotFoundError: sharpen` | `pip install -e ".[dev]"` from the repo root, with the venv active |
-| `ImportError` for `ccxt`, `ib_insync`, `ctrader_open_api` | Install the matching extra: `.[crypto]`, `.[ib]`, `.[ctrader]` |
+| `ImportError` for `ccxt`, `ib_insync`, `ctrader_open_api`, `paramiko` | Install the matching extra: `.[crypto]`, `.[ib]`, `.[ctrader]`, `.[deploy]` |
 | `lancedb` / `jsonschema` missing | They live in the `dev` extra |
 | Python version errors | 3.11+ is required |
 

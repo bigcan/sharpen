@@ -71,6 +71,17 @@ ctrader = [
 distributed = [
     "psycopg[binary]>=3.1",
 ]
+deploy = [
+    # SSH/SFTP for the remote-GPU tooling under scripts/ (deploy_bare_metal, remote_cmd,
+    # fetch_wandb_run, auto_collect_checkpoints, ...), which imports paramiko at MODULE
+    # level. Undeclared until 2026-10-01: tests/test_deploy_excludes_secrets.py imports
+    # deploy_bare_metal to run its packager, and CI -- which installs only what is declared
+    # here -- failed on that import.
+    # Its own extra, not `dev`: a runtime dependency of one optional surface, like psycopg
+    # under `distributed`, rather than test tooling. CI names it alongside `ctrader`.
+    # Floor = first release carrying the Terrapin (CVE-2023-48795) mitigation.
+    "paramiko>=3.4.0",
+]
 dev = [
     "pytest>=7.0",
     # All four declared 2026-09-03 after CI collection failed on them. pytest-asyncio is
