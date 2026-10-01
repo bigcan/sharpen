@@ -132,6 +132,24 @@ night 1/1 ts=... dirty=True mined=True status=OK promising=0 fdr_tests=5 lockbox
 > run where 8/8 candidates were culled at train so `n_holdout_tested` was zero. **Always
 > check `mined=` and `fdr_tests=` before believing a zero.**
 
+### Sharing a search that found nothing
+
+A finished search is worth sharing even when it found nothing. The export writes one file per
+substrate to [`community/ledger/`](../../community/ledger/README.md), with the verdict that reading
+needs: `CLOSED_DECISIVE` when the test could have seen an edge and did not, `OPEN_UNDERPOWERED`
+when it could not tell.
+
+```bash
+python scripts/crucible_community_ledger.py check --substrate us_equity     # before you mine
+python scripts/crucible_export_closed_search.py \
+    --ledger results/crucible_orchestrator/real/trial_ledger.db --out community/ledger/
+```
+
+The file holds counts and dedup hashes, never formulas or scores, and a substrate that holds a
+PROMISING result is left out unless you pass `--include-promising`. The community ledger is advice
+for people: the orchestrator does not read it. See
+[CONTRIBUTING.md](../../CONTRIBUTING.md#share-a-search-that-found-nothing).
+
 ---
 
 ## The anti-oracle moat

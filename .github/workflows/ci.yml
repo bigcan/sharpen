@@ -79,6 +79,14 @@ jobs:
         continue-on-error: true
         run: ruff check .
 
+      # community/ledger/ holds search results other people share by pull request. Check every
+      # file against docs/schemas/community_closed_search.schema.json and for internal
+      # consistency (id matches content, counts add up, verdict follows from them, no local
+      # path), so a malformed entry fails here with its own message. The same check also runs
+      # inside pytest (tests/crucible/test_community_ledger.py).
+      - name: Community ledger (schema and consistency)
+        run: python scripts/crucible_community_ledger.py validate
+
       # Bare `pytest` on purpose. `addopts` in pyproject already deselects `integration`
       # (hits live exchange testnets) and `slow` (shells out to a full synthetic genetic
       # search, twice; several exceed 400 s alone).
