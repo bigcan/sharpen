@@ -406,9 +406,8 @@ def test_write_report_produces_files(tmp_path: Path):
 # ---------------------------------------------------------------------------
 
 def test_run_training_parity_drops_unsupported_flags(monkeypatch, tmp_path: Path):
-    """run_full_pipeline.py rejects --stage and --device. The legacy
-    cmd_template carried both. This test guards against re-adding them by
-    capturing the actual subprocess argv."""
+    """run_full_pipeline.py rejects --device and REQUIRES --stage (2026-09-30, SharpOps P1).
+    Guards the actual subprocess argv: a locked-param train+eval run is l1-multiseed."""
     from scripts import prop_firm_ab_compare as ab
 
     # Minimal env.prop_firm: config so _prep_arm_config doesn't blow up
@@ -435,7 +434,7 @@ def test_run_training_parity_drops_unsupported_flags(monkeypatch, tmp_path: Path
     assert len(captured) == 2  # V7 + RS
     for argv in captured:
         joined = " ".join(argv)
-        assert "--stage" not in joined, f"--stage leaked back into cmd: {joined}"
+        assert argv[argv.index("--stage") + 1] == "l1-multiseed", f"stage missing: {joined}"
         assert "--device" not in joined, f"--device leaked back into cmd: {joined}"
         assert "--steps" in argv
         assert "--seed" in argv

@@ -1,0 +1,54 @@
+{
+ "built_utc": "2026-09-24T00:50:57+00:00",
+ "source": "data\\raw\\equity_panel\\_pit_union_2007.pkl",
+ "source_sha256": "d358dc67897f45fec23ad787a7722960c6b6139e166e4c32f439e78d40c5d619",
+ "panel_sha256": "b3bf8490f1261a701ace17162c6b12656d28bf1ff036e6b0246b979f470478eb",
+ "gates_sha": "77b9a306392784824b5612acf2a428548527222f924fcced4107ef6c279c8f54",
+ "screening_window": [
+  "2012-01-01",
+  "2024-12-31"
+ ],
+ "commit": "205c6852016c777ead398bd82135b0e4833798c0",
+ "dirty": true,
+ "report": {
+  "rows": 3270,
+  "tickers": 688,
+  "calendar_days": 4530,
+  "first_row": "2012-01-03",
+  "last_row": "2024-12-31",
+  "active_names_per_day": 419.9,
+  "clean": {
+   "outliers_repaired": 27094,
+   "stale_flagged": [
+    "AMCR",
+    "COL",
+    "CPWR",
+    "CVG",
+    "EP",
+    "FMCC",
+    "FNMA",
+    "HOT",
+    "MI",
+    "SII",
+    "STI",
+    "SW"
+   ]
+  },
+  "ohlc_violations_before": {
+   "high_lt_max_oc": 0,
+   "low_gt_min_oc": 0,
+   "high_lt_low": 0,
+   "nonpositive_price": 0,
+   "total": 0
+  },
+  "ohlc_bracketed": 0,
+  "ohlc_violations_after": {
+   "high_lt_max_oc": 0,
+   "low_gt_min_oc": 0,
+   "high_lt_low": 0,
+   "nonpositive_price": 0,
+   "total": 0
+  },
+  "unknown_sector_names": 187
+ }
+}

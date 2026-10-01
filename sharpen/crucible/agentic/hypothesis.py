@@ -27,19 +27,24 @@ from dataclasses import dataclass
 from ...signals.generation.grammar import parse, to_formula
 from ...signals.spec import SignalSpec
 from ..ledger import TrialLedger, TrialRecord
-from ..search_memory import semantic_hash
+from ..search_memory import candidate_hash, semantic_hash, sign_folded_formula, statistical_hash
 from .proposer import HypothesisProposal, ProposalContext, Proposer
 
 log = logging.getLogger("crucible.hypothesis")
 
 
-def candidate_hash(formula: str) -> str:
-    """The ledger dedup key for a genome: 12-hex SHA-256 of the CANONICAL formula string.
-
-    Canonical == ``to_formula(parse(formula))`` — the exact string ``evolve`` stores for a scored
-    genome (its ``scored`` dict + the ``generate_alphas`` manifest key on ``c.formula``), so a
-    pre-registered seed dedups against the same-genome survivor the mine later re-derives."""
-    return hashlib.sha256(to_formula(parse(formula)).encode("utf-8")).hexdigest()[:12]
+# `sign_folded_formula` / `candidate_hash` live in `search_memory` (v15.0) so a proposer can compute
+# the Author's dedup keys without importing this module (which imports the proposer). Re-exported here:
+# every existing `from .hypothesis import candidate_hash` keeps working, with ONE definition.
+#
+# Why the sign fold exists (v15.0): every scoring path downstream of the Author — `evolve` (both
+# candidate types), the cohort pool, the lockbox's forward evidence, re-admission — consumes the formula
+# STRING alone and trades it as written, with a ONE-SIDED test. `expected_sign` was stored in the
+# pre-registration and never applied, so a proposal declaring -1 ("a higher value predicts LOWER
+# returns") was scored in the mirror-image direction and could only ever pass if its own registered
+# hypothesis was false. Production evidence (deep audit 2026-09-30): 15 of 53 LLM specs in the
+# taiwan_v2 store declared -1 on an un-negated formula.
+_ = (sign_folded_formula, candidate_hash)
 
 
 @dataclass(frozen=True, slots=True)
@@ -70,7 +75,8 @@ class HypothesisAuthor:
                       = (), panel_n: int = 0,
                       feature_slot_bars: tuple[tuple[str, int], ...] = (),
                       mechanism_nonce: str = "",
-                      killed_scope: str | None = None) -> ProposalContext:
+                      killed_scope: str | None = None,
+                      per_name_slots: tuple[str, ...] = ()) -> ProposalContext:
         """Assemble the :class:`ProposalContext` from ``ledger.agent_view()`` (dedup keys + killed
         families ONLY) + the caller-supplied panel terminals and catalog asset classes. This method
         is the concrete CR-1 boundary: it reads the agent view, never a scored column.
@@ -86,6 +92,8 @@ class HypothesisAuthor:
             killed_families=tuple(view["killed_families"]),
             existing_candidate_hashes=frozenset(view["candidate_hashes"]),
             existing_semantic_hashes=frozenset(view.get("semantic_hashes", ())),
+            existing_stat_hashes=frozenset(view.get("stat_hashes", ())),
+            per_name_slots=tuple(per_name_slots),
             asset_classes=tuple(asset_classes),
             max_proposals=self.max_proposals,
             panel_n=int(panel_n),
@@ -102,6 +110,7 @@ class HypothesisAuthor:
         killed = set(context.killed_families)
         seen_here: set[str] = set()
         sem_seen_here: set[str] = set()
+        stat_seen_here: set[str] = set()
         out: list[PreRegisteredSpec] = []
         raw = self.proposer.propose(context)                  # single proposer call (CR-7 token cost)
         for p in raw:
@@ -109,7 +118,9 @@ class HypothesisAuthor:
                 log.info("drop %s — killed family %r (spec §6)", p.name, p.family)
                 continue
             try:
-                canonical = to_formula(parse(p.formula))     # validate + canonicalize
+                # v15.0: the pre-registered DIRECTION is the tested direction — fold a declared -1
+                # into the formula before it is canonicalized, hashed and locked (see sign_folded_formula).
+                canonical = to_formula(parse(sign_folded_formula(p.formula, p.expected_sign)))
             except Exception as exc:                          # noqa: BLE001 — invalid genome, skip
                 log.warning("drop %s — formula did not parse (%r): %.80s", p.name, exc, p.formula)
                 continue
@@ -130,6 +141,16 @@ class HypothesisAuthor:
             if shash in sem_seen_here:
                 log.info("drop %s — semantic duplicate within batch (sem %s)", p.name, shash)
                 continue
+            # v15.0 STATISTICAL dedup: a formula that differs only by a transform the scored book is
+            # invariant to (rank/scale/affine constants/…, see search_memory.statistical_hash) is the
+            # SAME test — it would be ledgered and charged a second LORD++ level for an identical book.
+            sthash = statistical_hash(canonical, p.candidate_type)
+            if sthash in context.existing_stat_hashes:
+                log.info("drop %s — statistically already scored (v15.0 dedup, stat %s)", p.name, sthash)
+                continue
+            if sthash in stat_seen_here:
+                log.info("drop %s — statistical duplicate within batch (stat %s)", p.name, sthash)
+                continue
             try:
                 spec = self._to_spec(p)
             except ValueError as exc:                         # SignalSpec rejected a field
@@ -137,8 +158,14 @@ class HypothesisAuthor:
                 continue
             seen_here.add(chash)
             sem_seen_here.add(shash)
+            stat_seen_here.add(sthash)
+            rationale = p.economic_rationale
+            if int(p.expected_sign) == -1:
+                rationale = (f"{rationale} [sign-folded v15.0: declared expected_sign=-1 on "
+                             f"`{p.formula}`; the pre-registered, tested formula is its negation]"
+                             ).strip()
             out.append(PreRegisteredSpec(spec=spec, formula=canonical, candidate_hash=chash,
-                                         economic_rationale=p.economic_rationale,
+                                         economic_rationale=rationale,
                                          proposal_ts=proposal_ts))
         self.last_proposal_stats = {"raw": len(raw), "accepted": len(out),
                                     "dropped": len(raw) - len(out)}
@@ -148,10 +175,17 @@ class HypothesisAuthor:
     @staticmethod
     def _to_spec(p: HypothesisProposal) -> SignalSpec:
         """Build the pre-registration :class:`SignalSpec` from a proposal (validates via __post_init__).
-        ``candidate_type`` (CR-9) is set from the proposal and is EXCLUDED from ``content_hash``."""
+        ``candidate_type`` (CR-9) is set from the proposal and is EXCLUDED from ``content_hash``.
+
+        v15.0: ``expected_sign`` is recorded as +1 — the tested formula is PRE-SIGNED (a declared -1 was
+        folded into it by :func:`sign_folded_formula`), matching the WQ101 library's convention. Keeping
+        -1 here next to a negated formula would make any consumer that multiplies by the spec's sign
+        (the scorecard path does) flip it back. A value outside {-1, +1} still fails validation."""
+        if int(p.expected_sign) not in (-1, 1):
+            raise ValueError(f"expected_sign must be -1 or +1 for a pre-registration; got {p.expected_sign!r}")
         return SignalSpec(
             name=p.name, hypothesis=p.hypothesis, family=p.family,
-            expected_sign=p.expected_sign, candidate_type=p.candidate_type)
+            expected_sign=1, candidate_type=p.candidate_type)
 
     # --- CR-2: lock the hash into the ledger before OOS (write side; still no verdict) -------------
     def preregister(self, specs: list[PreRegisteredSpec], *, run_id: str, crucible_version: str,

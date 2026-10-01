@@ -137,6 +137,9 @@ execution:
   venue: none                            # rung-1; "ib" for rung-2 (ADR-5)
   rebalance_cadence: monthly             # MUST match gates.paper_soak.rebalance_cadence
   fill_reference: close
+  # Tier-2 N4 (2026-09-29): declared explicitly. 0 = the legacy drive; the decision lead
+  # (1) is refused here because the rates_carry sleeve's conviction cutoff lag is 0.
+  decision_lead_bars: 0
 
 # ---------- GATES (pre-registered paper_soak; reused — the union replay computes per-class
 # attribution incl. SHY→rates, so the drift gate works unchanged) --------------

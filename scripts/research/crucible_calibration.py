@@ -684,11 +684,11 @@ def _e2_power_curve(cc: CalibConfig, *, t: int, n: int, betas: list[float], n_se
                 continue                                  # degenerate overlay (should not happen)
             cand, turnover = out
             if corrected is not None:
-                # slice to the binding holdout window (candidate warmed up on the full panel above)
-                cand_ho = cand[t - hb:]
-                base_ho = {k2: np.asarray(v)[t - hb:] for k2, v in base.items()}
-                cr = corrected_contract_fitness(cand_ho, base_ho, ts[t - hb:], cc.fit_cfg,
-                                                corrected, lord_level=lord)
+                # v15.0: score EXACTLY as production (evolve) does — the full causal timeline, the
+                # statistic evaluated on the binding holdout rows only (eval_from), so the combiner
+                # enters the holdout warm instead of cold-starting on the slice.
+                cr = corrected_contract_fitness(cand, base, ts, cc.fit_cfg, corrected,
+                                                lord_level=lord, eval_from=t - hb)
                 if cr.passes_corrected:
                     detections += 1
                 if np.isfinite(cr.delta_sr):
@@ -775,11 +775,10 @@ def _xsec_power_curve(cc: CalibConfig, *, t: int, n: int, betas: list[float], n_
             ts = _panel_ts(panel)
             cand, _turn = _xsec_candidate_returns(x, panel, hold_horizon=hold_horizon,
                                                   cost_bps=cost_bps, min_names=min_names)
-            cand_ho = cand[t - hb:]
-            base_ho = {k2: np.asarray(v)[t - hb:] for k2, v in base.items()}
             # Score ONCE with the LORD++ leg held open; every level is then a threshold on p_value.
-            cr = corrected_contract_fitness(cand_ho, base_ho, ts[t - hb:], cc.fit_cfg, corrected,
-                                            lord_level=1.0)
+            # v15.0: full causal timeline + eval_from, exactly as production (see _e2_power_curve).
+            cr = corrected_contract_fitness(cand, base, ts, cc.fit_cfg, corrected,
+                                            lord_level=1.0, eval_from=t - hb)
             non_lord_pass = bool(cr.passes_corrected)
             p = float(cr.p_value)
             for kk, lvl in levels.items():

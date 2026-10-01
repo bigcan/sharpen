@@ -20,6 +20,7 @@ Usage:
 from __future__ import annotations
 
 import argparse
+import dataclasses
 import hashlib
 import json
 import logging
@@ -99,6 +100,22 @@ def _altdata_max_slot_corr(path: "str | Path | None") -> float | None:
         cfg = yaml.safe_load(fh) or {}
     v = (cfg.get("altdata") or {}).get("max_slot_corr")
     return None if v is None else float(v)
+
+
+def _altdata_min_bar_coverage(path: "str | Path | None") -> float | None:
+    """Read ``altdata.min_bar_coverage`` (v15.0) from the alt-data ingest gates — same rules as
+    :func:`_altdata_max_slot_corr` (missing file/key ⇒ ``None`` ⇒ no floor)."""
+    import yaml
+
+    p = Path(path) if path else DEFAULT_ALTDATA_GATES
+    if not p.exists():
+        return None
+    with open(p, encoding="utf-8") as fh:
+        cfg = yaml.safe_load(fh) or {}
+    v = (cfg.get("altdata") or {}).get("min_bar_coverage")
+    return None if v is None else float(v)
+
+
 DEFAULT_CORRECTED_GATES = ROOT / "configs" / "crucible_corrected_contract.gates.yaml"
 DEFAULT_SEARCH_MEMORY_GATES = ROOT / "configs" / "crucible_search_memory.gates.yaml"
 
@@ -263,7 +280,8 @@ def _build_substrate(args, cfg, ek, meta, sweep, sweep_hash) -> tuple[Substrate,
                 bar_end = args.end or np.datetime_as_string(panel.dates.max(), unit="D")
                 slots = bridge_altdata_feature_slots(
                     bar_dates=panel.dates, start=bar_start, end=bar_end, catalog=catalog,
-                    max_slot_corr=_altdata_max_slot_corr(args.altdata_config))
+                    max_slot_corr=_altdata_max_slot_corr(args.altdata_config),
+                    min_bar_coverage=_altdata_min_bar_coverage(args.altdata_config))
                 if slots:
                     panel = dataclasses.replace(
                         panel, feature_slots={**panel.feature_slots, **slots})
@@ -334,7 +352,8 @@ def _build_substrate(args, cfg, ek, meta, sweep, sweep_hash) -> tuple[Substrate,
                 bar_end = args.end or np.datetime_as_string(panel.dates.max(), unit="D")
                 slots = bridge_altdata_feature_slots(
                     bar_dates=panel.dates, start=bar_start, end=bar_end, catalog=catalog,
-                    connectors=taiwan_connectors(), aliases=TAIWAN_ALTDATA_ALIASES)
+                    connectors=taiwan_connectors(), aliases=TAIWAN_ALTDATA_ALIASES,
+                    min_bar_coverage=_altdata_min_bar_coverage(args.altdata_config))
                 if slots:
                     panel = dataclasses.replace(
                         panel, feature_slots={**panel.feature_slots, **slots})
@@ -372,7 +391,8 @@ def _build_substrate(args, cfg, ek, meta, sweep, sweep_hash) -> tuple[Substrate,
                 conns = taiwan_connectors()           # ONE instance set, shared by both shapes below
                 slots = bridge_altdata_feature_slots(
                     bar_dates=panel.dates, start=args.start, end=bar_end, catalog=catalog,
-                    connectors=conns, aliases=TAIWAN_ALTDATA_ALIASES)
+                    connectors=conns, aliases=TAIWAN_ALTDATA_ALIASES,
+                    min_bar_coverage=_altdata_min_bar_coverage(args.altdata_config))
                 # U3a: the SAME T86 observations, assembled the other way up — one (T,N) matrix per
                 # field, columns aligned to panel.tickers — so a per-name institutional-flow
                 # characteristic is reachable by the CROSS-SECTIONAL search (crucible-v7.1), not only
@@ -416,7 +436,8 @@ def _build_substrate(args, cfg, ek, meta, sweep, sweep_hash) -> tuple[Substrate,
             if not args.no_altdata_slots:
                 bar_end = args.end or np.datetime_as_string(panel.dates.max(), unit="D")
                 slots = bridge_altdata_feature_slots(
-                    bar_dates=panel.dates, start=args.start, end=bar_end, catalog=catalog)
+                    bar_dates=panel.dates, start=args.start, end=bar_end, catalog=catalog,
+                    min_bar_coverage=_altdata_min_bar_coverage(args.altdata_config))
                 if slots:
                     panel = dataclasses.replace(
                         panel, feature_slots={**panel.feature_slots, **slots})
@@ -510,7 +531,11 @@ def _build_substrate(args, cfg, ek, meta, sweep, sweep_hash) -> tuple[Substrate,
                     cohort_mc_kwargs=cohort_mc, cohort_gates_hash=cohort_ghash,
                     contract=args.contract, corrected_cfg=corrected_cfg,
                     corrected_gates_hash=corrected_ghash,
-                    search_memory_cfg=sm_cfg, search_memory_gates_hash=sm_ghash)
+                    search_memory_cfg=sm_cfg, search_memory_gates_hash=sm_ghash,
+                    # v15.0: the binding account's (alpha, W0) come from the corrected contract's own
+                    # `online_fdr` block — declared there, previously never read (code defaults ran).
+                    **({"fdr_alpha": corrected_cfg.fdr_alpha, "fdr_w0": corrected_cfg.fdr_w0}
+                       if corrected_cfg is not None else {}))
     return sub, catalog
 
 
@@ -580,16 +605,23 @@ def _tick_timestamps(start_ts: str | None, nights: int) -> list[str]:
     lockbox forward boundary out). Real nightly cadence comes from the OS scheduler invoking this script
     once per night (--nights 1). REPRODUCE / explicit replay (--start-ts given): step +1 calendar day
     per night but NEVER stamp past wall-clock now (cap at now) — a recorded recipe (--start-ts <ts>
-    --nights 1) re-runs bit-identically because a single past ts is returned verbatim, uncapped."""
+    --nights 1) re-runs bit-identically because a single past ts is returned verbatim, uncapped.
+
+    v15.0 — every stamp is DISTINCT. The default branch returned the same ``now`` N times (and the capped
+    branch did for every night past wall-clock), so a ``--nights 4`` burst gave four ticks the same
+    run id (``tick-<sub>-<ts>``), the same derived GP seed, and the same output directory — the second
+    mined tick overwrote the first's manifest and cards. Clashing stamps are now offset by i
+    microseconds from process start: still never ahead of the moment the tick actually runs."""
     now = datetime.now(timezone.utc)
     if not start_ts:
-        return [now.isoformat() for _ in range(nights)]
+        return [(now + timedelta(microseconds=i)).isoformat() for i in range(nights)]
     base = datetime.fromisoformat(start_ts)
     base_cmp = base if base.tzinfo is not None else base.replace(tzinfo=timezone.utc)
     out: list[str] = []
     for i in range(nights):
         stepped_cmp = base_cmp + timedelta(days=i)
-        out.append(now.isoformat() if stepped_cmp > now else (base + timedelta(days=i)).isoformat())
+        out.append((now + timedelta(microseconds=i)).isoformat() if stepped_cmp > now
+                   else (base + timedelta(days=i)).isoformat())
     return out
 
 
@@ -680,6 +712,10 @@ def main() -> int:
                          "oversample x --max-proposals candidates before ranking. 1 = rank only what "
                          "would have been mined anyway (a pure reorder, no extra search).")
     ap.add_argument("--max-candidates", type=int, default=256, help="per-tick candidate cap (CR-7)")
+    ap.add_argument("--offspring-search", choices=("auto", "on", "off"), default="auto",
+                    help="evolved-offspring GP search: auto (default) = skip it exactly when offspring "
+                         "cannot be promoted (corrected contract + prereg_only; every pre-registered "
+                         "verdict is unchanged), on/off = force (crucible-v15.0)")
     ap.add_argument("--start-ts", default=None,
                     help="ISO timestamp base for reproduce/explicit replay only (CR-2/CR-8); nights step "
                          "+1d but are CAPPED at wall-clock now (never future-dated). DEFAULT (omitted): "
@@ -744,6 +780,9 @@ def main() -> int:
         return 1
 
     cfg, ek = load_generation_config(args.config)
+    # v15.0: `auto` lets evolve skip the offspring GP search exactly when no offspring can be promoted
+    # (corrected contract + offspring_policy prereg_only) — pre-registered verdicts are identical.
+    ek["search_offspring"] = {"auto": None, "on": True, "off": False}[args.offspring_search]
     meta = load_generation_meta(args.config)
     if not meta["enabled"] and not args.force:
         log.warning("generation.enabled is false in %s — no-op. Pass --force to run anyway.",
@@ -755,6 +794,10 @@ def main() -> int:
     else:
         power_gate, sweep, sweep_hash = _load_power_guard(
             args.power_gates, force=args.force_underpowered, contract=args.contract)
+        if power_gate is not None and sweep:
+            # v16.0 (POWER-LORD-01 wired): the guard carries its curves so the tick can re-stamp at the
+            # substrate's LIVE LORD++ level before deciding (see orchestrator._restamp_at_level).
+            power_gate = dataclasses.replace(power_gate, sweep=sweep, sweep_hash=sweep_hash)
     sub, catalog = _build_substrate(args, cfg, ek, meta, sweep, sweep_hash)
     out_dir = Path(args.out) / args.mode
     store = OrchestratorStore(out_dir / "orchestrator.db")

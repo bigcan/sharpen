@@ -186,7 +186,10 @@ def test_clean_panel_night_noops_and_conserves_fdr(tmp_path) -> None:
                                tick_ts="2026-07-02T00:00:00+00:00")
     o1 = r1.outcomes[0]
     assert o1.mined and o1.n_preregistered > 0
-    assert o1.fdr_num_tests == o1.n_preregistered              # one FDR test per pre-registered spec
+    # one FDR test per ADJUDICATED pre-registered spec (v15.0: a spec with no decision — here WQ101 #9,
+    # over the shipped contract's 24-node search bound — is NOT_TESTED and charged nothing)
+    assert o1.fdr_num_tests == o1.n_preregistered - o1.result.n_not_tested
+    assert o1.fdr_num_tests > 0
     assert o1.n_promising == 0                                 # noise → the filter holds
 
     r2 = run_orchestrator_tick(substrates=[sub], store=store, gates_path=GATES,
@@ -219,7 +222,7 @@ def test_new_data_night_remines_and_charges_fdr(tmp_path) -> None:
     # every pre-registered spec mined this night has a non-null fdr_wealth_charged in the ledger
     charged = sub.ledger._conn.execute(
         "SELECT COUNT(*) FROM trial_ledger WHERE fdr_wealth_charged IS NOT NULL").fetchone()[0]
-    assert charged >= o2.n_preregistered
+    assert charged >= o2.n_preregistered - o2.result.n_not_tested    # v15.0: adjudicated specs only
 
 
 @pytest.mark.slow

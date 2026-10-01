@@ -15,10 +15,13 @@ Design (see ``.agent/artifacts/multi_asset_allocator_architecture.md``):
     byte-matching ``xsec_momentum_falsification.vol_scaled_weights``. ``vol_ary`` is a
     dedicated CAUSAL realized-vol input (uses returns ``<= t-1``); decoupling it from
     ``tech_ary`` ordering keeps live-parity robust.
-  - **Accounting copied verbatim** from ``CryptoPerpEnv``: fixed entry-notional PnL
+  - **Accounting copied** from ``CryptoPerpEnv``: fixed entry-notional PnL
     (SHORT-ACCT — shorts never accrue notional_debt), vectorized realize/cost paths,
     proportional gross-exposure cap. Funding generalizes to a per-bar ``carry`` accrual
-    (v1 ships carry = 0, TSMOM-only; ADR-6).
+    (v1 shipped carry = 0; ADR-6). An opt-in financing leg sets carry = -rf plus a borrow
+    fee on shorts (``sharpen.data.financing``, TAILWIND Tier-2 N2). An add books the
+    share-weighted VWAP as its entry price (TAILWIND Tier-2 T4-10, fixed here first and
+    then in ``CryptoPerpEnv``, which had used the notional-weighted mean).
   - **Reward = DSR(portfolio step return) - turnover_penalty * sum|Δw|** (reuses the
     shared Moody-Saffell ``DSRCalculator``); ``reward_type`` falls back to a Sortino or
     simple return signal.
@@ -77,6 +80,7 @@ class MultiAssetAllocatorEnv(gym.Env):
         carry_ary: np.ndarray,           # (T, N) — per-bar carry return to a long unit
         volume_ary: np.ndarray,          # (T, N) — per-bar DOLLAR volume (shares×price); slippage participation denominator (F1)
         timestamps: np.ndarray,          # (T,) — UTC epoch seconds (int64)
+        borrow_ary: Optional[np.ndarray] = None,  # (T, N) — per-bar borrow fee on SHORT notional (>= 0); None = no borrow
         initial_capital: float = 100_000.0,
         taker_fee_pct: float = 0.0002,           # 2 bps (liquid futures/ETF)
         slippage_base_bps: float = 1.0,
@@ -113,12 +117,17 @@ class MultiAssetAllocatorEnv(gym.Env):
                           ("volume_ary", volume_ary)):
             assert arr.shape == (T, n_assets), f"{name} must be (T, N) == {(T, n_assets)}"
         assert timestamps.shape == (T,), "timestamps must be (T,)"
+        if borrow_ary is not None:
+            assert borrow_ary.shape == (T, n_assets), f"borrow_ary must be (T, N) == {(T, n_assets)}"
+            assert np.all(np.isfinite(borrow_ary)) and np.all(borrow_ary >= 0.0), \
+                "borrow_ary must be finite and >= 0 (a fee on short notional)"
 
         # --- Store data arrays ---
         self.price_ary = price_ary.astype(np.float64)
         self.tech_ary = tech_ary.astype(np.float32)
         self.vol_ary = vol_ary.astype(np.float64)
         self.carry_ary = carry_ary.astype(np.float64)
+        self.borrow_ary = None if borrow_ary is None else borrow_ary.astype(np.float64)
         self.volume_ary = volume_ary.astype(np.float64)
         self.timestamps = timestamps.astype(np.int64)
 
@@ -260,7 +269,7 @@ class MultiAssetAllocatorEnv(gym.Env):
         )
 
         # --- Apply carry on OLD positions BEFORE rebalance (matches exchange order) ---
-        carry_pnl = self._apply_carry(price)
+        carry_pnl = self._apply_carry(prev_price)
         self.cumulative_carry += carry_pnl
         self.margin_balance += carry_pnl
 
@@ -411,7 +420,7 @@ class MultiAssetAllocatorEnv(gym.Env):
         return result
 
     # -----------------------------------------------------------------------
-    # PnL calculations (copied verbatim from CryptoPerpEnv — SHORT-ACCT safe)
+    # PnL calculations (from CryptoPerpEnv — SHORT-ACCT safe; adds book a share-weighted VWAP)
     # -----------------------------------------------------------------------
     def _calc_unrealized_pnl(self, current_price: np.ndarray) -> np.ndarray:
         """Per-asset unrealized PnL on fixed entry notionals:
@@ -477,10 +486,13 @@ class MultiAssetAllocatorEnv(gym.Env):
             added_notional = np.abs(delta_weights[increased]) * portfolio_value
             old_notional = self.entry_notionals[increased]
             new_notional = old_notional + added_notional
-            self.entry_prices[increased] = (
-                self.entry_prices[increased] * old_notional
-                + current_price[increased] * added_notional
-            ) / (new_notional + 1e-10)
+            # Share-weighted VWAP: the price at which the combined shares cost new_notional,
+            # so new_notional / entry_price stays the share count every P&L term assumes. The
+            # notional-weighted arithmetic mean over-states it whenever the fill prices differ
+            # (arithmetic >= harmonic mean): longs were under-, shorts over-credited (T4-10).
+            shares = (old_notional / (self.entry_prices[increased] + 1e-10)
+                      + added_notional / (current_price[increased] + 1e-10))
+            self.entry_prices[increased] = new_notional / (shares + 1e-10)
             self.entry_notionals[increased] = new_notional
 
         reduced = ~closed & ~from_flat & ~flipped & ~increased & (abs_new < abs_old)
@@ -526,24 +538,32 @@ class MultiAssetAllocatorEnv(gym.Env):
         return total_fees, total_slippage
 
     # -----------------------------------------------------------------------
-    # Carry (generalizes funding; v1 ships carry = 0 — ADR-6)
+    # Carry / financing (generalizes funding; zero unless a financing leg is wired)
     # -----------------------------------------------------------------------
-    def _apply_carry(self, price: np.ndarray) -> float:
-        """Accrue per-bar carry on open positions.
+    def _apply_carry(self, prev_price: np.ndarray) -> float:
+        """Accrue carry and borrow on the positions held over the interval ``(t-1, t]``.
 
-        ``carry_ary[t, i]`` is the per-bar carry return earned by a LONG unit of
-        notional: a long position EARNS positive carry, a short position pays it.
-        Charged on the current notional value (entry_notional × price_ratio), matching
-        the funding mechanics it generalizes. v1 ships ``carry_ary = 0`` (TSMOM-only),
-        so this is a no-op until carry data is wired in v1.1.
+        ``carry_ary[t, i]`` is the carry return a LONG unit of notional earns over the interval
+        ending at bar ``t``: a long position earns it and a short position pays it.
+        ``borrow_ary[t, i]`` (if given) is a fee charged on SHORT notional only.
+
+        Both are charged on the notional each position carried INTO the interval, marked at
+        ``prev_price`` (entry_notional × prev_price / entry_price). That is how daily interest
+        accrues on a balance held overnight, and it makes a long whose asset earns exactly the
+        cash rate net to zero under ``carry = -rf``. The financing leg sets
+        ``carry_ary = -rf`` (``sharpen.data.financing``). Without it ``carry_ary = 0``, so this
+        is a no-op and every unfinanced result is unchanged.
         """
         carry_rates = self.carry_ary[self.step_idx]
         active = (np.abs(self.positions) >= 1e-8) & (np.abs(self.entry_prices) >= 1e-10)
         if not active.any():
             return 0.0
-        current_notional = self.entry_notionals[active] * (price[active] / self.entry_prices[active])
-        carry_pnl = np.sign(self.positions[active]) * current_notional * carry_rates[active]
-        return float(carry_pnl.sum())
+        notional = self.entry_notionals[active] * (prev_price[active] / self.entry_prices[active])
+        carry_pnl = float((np.sign(self.positions[active]) * notional * carry_rates[active]).sum())
+        if self.borrow_ary is not None:
+            short = self.positions[active] < 0.0
+            carry_pnl -= float((notional[short] * self.borrow_ary[self.step_idx][active][short]).sum())
+        return carry_pnl
 
     # -----------------------------------------------------------------------
     # Reward

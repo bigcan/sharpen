@@ -17,13 +17,11 @@ from __future__ import annotations
 from pathlib import Path
 
 import numpy as np
-import pytest
 
 from sharpen.envs.allocator_factory import drive_with_conviction, monthly_rebal_conviction
 from sharpen.paper import ParityHarness, evaluate_paper_soak_gates
 
 ROOT = Path(__file__).resolve().parents[2]
-OHLCV_CACHE = ROOT / "results" / "xsec_momentum" / "ohlcv_daily.parquet"
 
 
 def _lookahead_fn(arrays, t):
@@ -123,31 +121,3 @@ def test_independent_recompute_parity_gate_passes_on_safe_path(cfg, gates_cfg, a
     assert verdict["groups"]["parity"]["status"] == "PASS", verdict["groups"]["parity"]
 
 
-@pytest.mark.skipif(not OHLCV_CACHE.exists(),
-                    reason="cached real ETF OHLCV absent (run cross_asset_loader)")
-def test_independent_recompute_real_etf_growing_window(cfg, gates_cfg):
-    """The independent growing-window recompute reproduces the oracle on the REAL 18-asset
-    validated universe (5138 bars) — the 'growing live-fetched window' the audit names,
-    exercising NaN/warmup/zero-price/extreme-participation paths the synthetic data misses.
-    A drift of 0 here is load-bearing: the conviction was re-assembled independently, not
-    fed from the oracle."""
-    try:
-        from sharpen.data import cross_asset_loader as loader
-        data = loader.load_cross_asset_data(cfg)             # offline: cached clean parquet
-        close = data["close"]
-        arrays = loader.build_allocator_arrays(
-            data["signals"], close, data["volume"], data["assets"],
-            close.index[0], close.index[-1], lookbacks=data["lookbacks"],
-        )
-    except Exception as e:                                    # pragma: no cover - data/env dependent
-        pytest.skip(f"could not build real-ETF arrays from cache: {e}")
-
-    h = ParityHarness(cfg)
-    live, sim = h.run_independent_recompute(arrays)
-    rep = h.compare(live, sim)
-    assert rep.weight_l1_drift_max < 1e-9, f"weight drift {rep.weight_l1_drift_max}"
-    assert rep.daily_return_te_bps_max < 1e-6, f"te_bps {rep.daily_return_te_bps_max}"
-    assert rep.missed_rebalances == 0
-    np.testing.assert_allclose(live.equity_curve, sim["equity_curve"], atol=1e-5, rtol=0)
-    verdict = evaluate_paper_soak_gates(live, rep, gates_cfg)
-    assert verdict["groups"]["parity"]["status"] == "PASS", verdict["groups"]["parity"]

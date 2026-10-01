@@ -1,0 +1,23 @@
+# Planted-signal ladder, STANDARDIZED inputs (follow-up to full-codebase audit 2026-09-23, section 3.7).
+# Same synthetic markets, budget and SAC stack as slot_a/b/c (seeds 1-2 pair with P05_s1/P05_s2); the ONLY change is
+# features.raw_channel_norm: ema_z (log_return + parkinson channels through EMA-Z -> tanh instead of raw ~1e-3).
+# Question: was the raw-scale return channel why SAC could not learn IC 0.05?
+# Reading, fixed before any result (Z05 = 5 seeds at IC 0.05; SE = sharpe_se, ~0.71 on the full 2y test):
+#   BLOCKER CONFIRMED  >= 4/5 Z05 arms with corr(action, signal) > 0 AND SAC Sharpe > 2 SE, and the
+#                      Z00 control not > +2 SE with positive corr -> standardize the handler, re-test real data.
+#   STRUCTURAL         <= 1/5 pass -> input scale was not the blocker; RL-for-discovery stays closed.
+#   PARTIAL            2-3/5 -> scale matters but learning is seed-dependent; more seeds / smaller net before any real-data spend.
+#   Secondary: Z15 SAC/oracle fraction vs 13% raw (P15_s1).
+# Diagnostic on SYNTHETIC data, not a SharpOps strategy run: no manifest, no gates, no capital.
+# Launch: python scripts/deploy_bare_metal.py --script scripts/research/rl_planted_signal/launch_fleet.py
+#   --config configs/rl_planted_signal/std_slot_a.yaml --instance gpuhub-1 --gpu 0 --no_kill
+out_root: results/rl_planted_signal/std_slot_a
+n_base_bars: 200000
+data_seed: 11
+datasets: {ic015: 0.15, ic005: 0.05, ic000: 0.0}
+threads_per_arm: 8
+stagger_seconds: 60
+arms:
+  - {name: Z15_s1, data: ic015, overrides: {seed: 1, raw_channel_norm: ema_z}}
+  - {name: Z05_s1, data: ic005, overrides: {seed: 1, raw_channel_norm: ema_z}}
+  - {name: Z00_s1, data: ic000, overrides: {seed: 1, raw_channel_norm: ema_z}}

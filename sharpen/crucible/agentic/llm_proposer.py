@@ -63,6 +63,14 @@ Formula language (a typed DSL over cross-sectional/time-series operators — the
   terminal (never wrapped in rank — it is a single broadcast series, not cross-sectional), e.g.
   delta(fred:DGS10, 20) or decay_linear(cot:comm_net, 10).
 
+SIGN CONVENTION (binding — the test is one-sided in the declared direction):
+  Every formula is traded as written. A cross_sectional book goes LONG the names with the HIGHEST
+  formula values and SHORT the lowest; an overlay tilts the book UP when the formula is high.
+  expected_sign = +1 means "a higher formula value predicts HIGHER future returns (or a better bar
+  for the book)"; expected_sign = -1 means it predicts LOWER, and the system then trades the NEGATED
+  formula. So a reversal written as rank(delta(close, 5)) must carry expected_sign = -1 (or be written
+  -rank(delta(close, 5)) with expected_sign = +1) — never both negations at once.
+
 Diversity is the point: propose hypotheses that differ in ECONOMIC MECHANISM (carry, momentum,
 mean-reversion, positioning extremes, macro regime shifts, sentiment/attention, fundamental drift,
 liquidity/flow) rather than near-duplicate variants of the same idea with a different window. Name
@@ -127,10 +135,17 @@ def _render_context(context: ProposalContext) -> str:
     slot bar COUNTS, and a rotating entropy token."""
     slots = set(context.feature_slots())
     ohlcv = [t for t in context.available_terminals if t not in slots]
-    lines = [
-        f"Available OHLCV/derived terminals: {', '.join(ohlcv) or '(none)'}",
-        f"Available non-OHLCV feature slots (overlay-eligible only): {', '.join(sorted(slots)) or '(none)'}",
-    ]
+    per_name = slots & set(context.per_name_slots)
+    lines = [f"Available OHLCV/derived terminals: {', '.join(ohlcv) or '(none)'}"]
+    if per_name:
+        lines.append("Available BROADCAST feature slots (one value per bar; overlay-eligible only): "
+                     f"{', '.join(sorted(slots - per_name)) or '(none)'}")
+        lines.append("Available PER-NAME feature slots (a value per name per bar; eligible for a "
+                     "cross_sectional formula inside rank(...), or as an overlay on their "
+                     f"cross-sectional average): {', '.join(sorted(per_name))}")
+    else:
+        lines.append(f"Available non-OHLCV feature slots (overlay-eligible only): "
+                     f"{', '.join(sorted(slots)) or '(none)'}")
     if context.feature_slot_bars:
         depth = ", ".join(f"{name}({bars})" for name, bars in context.feature_slot_bars)
         lines.append("Feature-slot history depth (bars available per slot; prefer deeper slots — they "
@@ -258,7 +273,14 @@ class LlmProposer:
             return []
 
         out: list[HypothesisProposal] = []
+        if not isinstance(raw_items, list):               # v15.0: a dict/int payload used to raise
+            logger.warning("LlmProposer: proposals payload is %s, not a list — proposing nothing",
+                           type(raw_items).__name__)
+            return []
         for item in raw_items[: context.max_proposals]:
+            if not isinstance(item, dict):
+                logger.warning("LlmProposer: dropping non-object proposal %r", item)
+                continue
             try:
                 if any(f not in item for f in _REQUIRED_FIELDS):
                     raise KeyError("missing required field")

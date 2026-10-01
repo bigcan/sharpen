@@ -35,6 +35,7 @@ from pathlib import Path
 import numpy as np
 import pandas as pd
 
+from sharpen.utils.compat_pickle import load_compat
 from sharpen.data import cross_asset_loader as cal
 from sharpen.signals.features import Panel
 
@@ -178,7 +179,7 @@ def build_pit_panel(
     if cache_path.exists() and not force:
         log.info("loading cached panel %s", cache_path)
         with open(cache_path, "rb") as fh:
-            return pickle.load(fh)
+            return load_compat(fh)       # pre-rename caches (finrl_pro_ds.*) load again
 
     snap_dates, snap_members, union = load_membership(members_csv, start=start)
     fetch_start = fetch_start or str(pd.Timestamp(start) - pd.DateOffset(years=1))[:10]

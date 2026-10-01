@@ -52,6 +52,8 @@ class DiscoveryCard:
     # lockbox (CR-8) — forward incubation; not built until P4, so a card is never yet human-eligible
     incubation_status: str = INCUBATION_PENDING
     incubation_forward_sharpe: float | None = None
+    # crucible-v16.0: the forward Sharpe DIFFERENCE an ``sprt`` lockbox entry is judged on
+    incubation_forward_delta_sr: float | None = None
     eligible_for_human_gate: bool = False
 
     # narrative — the ONLY field the agent authors; verdict fields above are untouchable

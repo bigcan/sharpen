@@ -41,6 +41,7 @@ from sharpen.data.cross_asset_loader import (
     build_two_sleeve_arrays,
     load_two_sleeve_data,
 )
+from sharpen.envs.allocator_factory import execution_stamp
 from sharpen.paper import (
     TwoSleeveExecutor,
     evaluate_paper_soak_gates,
@@ -166,6 +167,7 @@ def main() -> int:
     verdict["validation_meta"] = {
         "config": str(args.config),
         "gates": str(gates_path),
+        "execution_stamp": execution_stamp(config),     # lead + financing (Tier-2 N4)
         "data_start": str(start_ts.date()),
         "data_end": str(end_ts.date()),
         "n_bars": int(len(data["close"])),

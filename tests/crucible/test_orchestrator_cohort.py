@@ -75,7 +75,7 @@ def test_cohort_tick_folds_outcome_charges_fdr_and_writes_card(tmp_path) -> None
     o = res.outcomes[0]
     assert o.mined and len(o.cohort_cards) == 1              # a cohort formed from the 5-slot pool
     # ADR-4: exactly ONE extra online-FDR test beyond the per-candidate charges (the cohort test).
-    assert o.fdr_num_tests == o.n_preregistered + 1
+    assert o.fdr_num_tests == o.n_preregistered - o.result.n_not_tested + 1   # v15.0: adjudicated + cohort
     assert o.n_cohort_promising == sum(1 for c in o.cohort_cards if c.verdict == "PROMISING")
     # manifest provenance (pinned typed fields) + card written to disk beside the discovery cards.
     card = o.cohort_cards[0]
@@ -96,4 +96,4 @@ def test_cohort_disabled_charges_no_extra_fdr_test(tmp_path) -> None:
                                 tick_ts="2026-07-04T00:00:00+00:00")
     o = res.outcomes[0]
     assert o.mined and o.cohort_cards == [] and o.n_cohort_promising == 0
-    assert o.fdr_num_tests == o.n_preregistered          # no +1 cohort test
+    assert o.fdr_num_tests == o.n_preregistered - o.result.n_not_tested   # no +1 cohort test (v15.0)

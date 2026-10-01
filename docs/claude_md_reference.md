@@ -57,7 +57,7 @@ sharpen/
     library/_alpha_dsl.py          # WQ101-style alpha DSL primitives
     features.py                    # Panel (OHLCV + feature_slots for macro/positioning, added P1a)
     spec.py                        # SignalSpec, content_hash
-  crucible/                        # Crucible agentic alpha-mining platform (crucible-v14.1) -- see dedicated section below
+  crucible/                        # Crucible agentic alpha-mining platform (crucible-v16.0) -- see dedicated section below
     agentic/                       # Proposer/Author/DataScout -- agent proposes, statistics dispose (CR-1)
     data/                          # Free-data connectors: FRED, CFTC COT, EDGAR, GDELT, Stooq, TWSE, TAIFEX
     governance/                    # Survivor -> Tier-2 handoff pipeline (never runs the audit itself)
@@ -67,7 +67,7 @@ sharpen/
     ledger.py                      # Split trial ledger -- agent-blind verdicts, agent-visible dedup view
     manifest.py                    # RunManifest -- version + gates_hash + data_snapshot_hash + rng_seeds
     reproduce.py                   # `crucible reproduce <run_id>` -- re-executes, asserts bit-identical
-    version.py                     # Current: crucible-v14.0
+    version.py                     # Current: crucible-v16.0
 scripts/
 configs/
 tests/
@@ -132,7 +132,7 @@ docker/live/
 
 ## Crucible Alpha-Mining Architecture (full)
 
-**Purpose:** `sharpen/crucible/` (current: `crucible-v14.0`, see `version.py`) is a continuous agentic alpha-discovery system built on top of the existing `sharpen/signals/` DSL + T0-T5 deflated evaluation funnel (not a replacement). Falsification-first pipeline: ACQUIRE (free data connectors) -> HYPOTHESIZE (agent proposes pre-registered specs, blind to verdicts) -> MINE (DSL/genetic search) -> DEFLATE (T0-T5 gates) -> COMBINE + forward-incubate in a **lockbox** on data that postdates the hypothesis timestamp, before any human-initiated Tier-2 audit. Value proposition is the *filter*, not idea supply: rigorous statistical gatekeeping (pre-registration, split-ledger anti-oracle, per-substrate online-FDR) across capacity-constrained free data domains (FRED/ALFRED macro, CFTC COT positioning, SEC EDGAR fundamentals, GDELT sentiment, Stooq global market, TWSE/TAIFEX Taiwan). P0-P5 roadmap shipped (see below); zero PROMISING survivors have cleared the lockbox as of `crucible-v13.1`.
+**Purpose:** `sharpen/crucible/` (current: `crucible-v16.0`, see `version.py`) is a continuous agentic alpha-discovery system built on top of the existing `sharpen/signals/` DSL + T0-T5 deflated evaluation funnel (not a replacement). Falsification-first pipeline: ACQUIRE (free data connectors) -> HYPOTHESIZE (agent proposes pre-registered specs, blind to verdicts) -> MINE (DSL/genetic search) -> DEFLATE (T0-T5 gates) -> COMBINE + forward-incubate in a **lockbox** on data that postdates the hypothesis timestamp, before any human-initiated Tier-2 audit. Value proposition is the *filter*, not idea supply: rigorous statistical gatekeeping (pre-registration, split-ledger anti-oracle, per-substrate online-FDR) across capacity-constrained free data domains (FRED/ALFRED macro, CFTC COT positioning, SEC EDGAR fundamentals, GDELT sentiment, Stooq global market, TWSE/TAIFEX Taiwan). P0-P5 roadmap shipped (see below); zero PROMISING survivors have cleared the lockbox as of `crucible-v16.0` (deep audit + operator decisions 2026-09-30: `docs/research/crucible_deep_audit_2026-09-30.md`).
 
 ### Subpackages
 
@@ -196,7 +196,8 @@ python scripts/backup_crucible_ledger.py                     # ledger snapshot
 | File | Gates |
 |------|-------|
 | `configs/crucible_cohort.gates.yaml` | Opt-in (`enabled: false` by default). Admission: `min_cohort_size`, `max_cohort_size`, `max_pairwise_corr`. Selection-aware MC null: `alpha_cohort`, `mc_n_replicates`, `mc_block_length`. Separate file by design (ADR-1) -- keeps the main funnel `gates_hash` frozen. |
-| `configs/crucible_lockbox.gates.yaml` | Forward incubation: `incubation.min_forward_bars` (~63, one quarter), `incubation.min_forward_sharpe` (~0.30 floor). Separate file by design (ADR-2), same reason. |
+| `configs/crucible_lockbox.gates.yaml` | Forward incubation. Since `crucible-v16.0`: `incubation.test: sprt` — Wald SPRT on the forward Sharpe DIFFERENCE of the augmented vs base book (`alpha` 0.10, `beta` 0.20, `delta_sr_h1` 0.30, no verdict before `min_forward_bars` 63, cap `max_forward_bars` 756 ⇒ INCONCLUSIVE; `block_bars`, `calib_bars`). `min_forward_sharpe` (0.30) is the legacy `fixed` rule, kept for entries enrolled under it. Separate file by design (ADR-2), same reason. |
+| `configs/crucible_power.gates.yaml` / `us_equity_power.gates.yaml` | Substrate-power guard. Since `crucible-v16.0` the stamp is re-read at the substrate's LIVE LORD++ level (POWER-LORD-01), selecting the calibration row by level; the tick's per-spec levels are sequential (`fdr.LordSequence`). |
 
 ### Maturity (P0-P5 roadmap, all shipped)
 

@@ -275,3 +275,29 @@ def test_two_sleeve_soak_gates_evaluate(paper2_cfg, gates_cfg, bundle):
     assert verdict["groups"]["risk"]["status"] == "PASS", verdict["groups"]["risk"]
     # per-class attribution (incl. SHY→rates) is present for the drift gate.
     assert "rates" in verdict["summary"]["class_pnl"]
+
+
+def test_forward_path_attaches_sleeve_pnl_for_the_soak(paper2_cfg, gates_cfg, bundle):
+    """Audit T4-12b: run_independent_recompute is the path the soak scores, so it must carry
+    per-sleeve P&L. The safe forward assembly reproduces the batch book, so its attribution
+    equals the batch one, and the scored verdict's sleeve_attribution check passes."""
+    exe = TwoSleeveExecutor(paper2_cfg)
+    live, sim = exe.run_independent_recompute(bundle)
+    batch, _ = exe.run(bundle)
+    assert live.sleeve_pnl is not None and set(live.sleeve_pnl) == set(exe.sleeve_names)
+    assert live.sleeve_pnl == pytest.approx(batch.sleeve_pnl, abs=1e-12)
+    verdict = evaluate_paper_soak_gates(live, exe.compare(live, sim), gates_cfg,
+                                        executor_sleeves=list(exe.sleeve_names))
+    assert verdict["groups"]["drift"]["checks"]["sleeve_attribution"]["status"] == "PASS"
+
+
+def test_replay_carries_actual_notional_gross(paper2_cfg, gates_cfg, bundle):
+    """Audit T4-12a: the scored trajectory carries the book's actual notional gross, which
+    drifts away from the labels, and the soak's gross kill is read on it."""
+    exe = TwoSleeveExecutor(paper2_cfg)
+    live, sim = exe.run_independent_recompute(bundle)
+    assert live.notional_gross is not None and len(live.notional_gross) == live.n_steps
+    assert np.all(np.isfinite(live.notional_gross))
+    assert np.abs(live.notional_gross - live.gross_exposure).max() > 1e-6
+    v = evaluate_paper_soak_gates(live, exe.compare(live, sim), gates_cfg)
+    assert v["groups"]["risk"]["checks"]["max_gross_exposure"]["basis"] == "notional"

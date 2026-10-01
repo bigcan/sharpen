@@ -129,11 +129,28 @@ class ScoutReport:
         return "\n".join(lines)
 
 
+def _bar_coverage(data: SeriesData, bars: np.ndarray) -> float:
+    """Share of ``bars`` on or after the series' FIRST public release — the bars on which an as-of
+    join can carry a value at all."""
+    first_release = np.min(np.asarray(data.release_timestamp, dtype="datetime64[ns]"))
+    b = np.asarray(bars, dtype="datetime64[ns]")
+    return float((b >= first_release).mean()) if b.size else 0.0
+
+
 class DataScout:
     """Surveys free-data connectors and proves each series PIT-clean before it can be trusted (§7.1)."""
 
-    def __init__(self, connectors: list[DataConnector]) -> None:
+    def __init__(self, connectors: list[DataConnector], *,
+                 min_bar_coverage: float | None = None) -> None:
         self._connectors = list(connectors)
+        # v15.0 — reject a series available on too small a share of the bar calendar. The scout used to
+        # reject only n_obs == 0, so BAMLH0A0HYM2 (FRED now serves ~3 years of ICE data) was accepted on
+        # a 2007-2026 clock, TAIFEX with 3-4 days, a cold T86 store with ~90 days. Each accepted slot
+        # spawns one pre-registered spec per overlay template, and every spec charges a LORD++ test —
+        # so a near-empty series spends online-FDR wealth on tests with almost no power, and takes
+        # proposal slots from series with real history. ``None`` (default) = no floor (back-compat); the
+        # value comes from ``configs/crucible_altdata.gates.yaml::altdata.min_bar_coverage``.
+        self._min_bar_coverage = min_bar_coverage
         # Accepted SeriesData retained from the most recent survey, keyed (source_id, series_id), so
         # register_accepted() can register WITHOUT re-fetching. Cleared at the start of each survey.
         self._accepted_series: dict[tuple[str, str], SeriesData] = {}
@@ -185,6 +202,11 @@ class DataScout:
                 reasons.append(f"as-of-join LEAK: {exc}")
         elif data.n_obs == 0:
             reasons.append("no observations in range")
+        if self._min_bar_coverage is not None and data.n_obs and bars.shape[0]:
+            cov = _bar_coverage(data, bars)
+            if cov < self._min_bar_coverage:
+                reasons.append(f"covers {cov:.1%} of the bar calendar < min_bar_coverage "
+                               f"{self._min_bar_coverage:.0%}")
 
         accepted = not reasons
         if accepted:

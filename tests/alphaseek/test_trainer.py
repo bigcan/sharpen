@@ -254,6 +254,19 @@ class TestAlphaSeekTrainer:
         assert "win_rate" in metrics
         assert "hold_rate" in metrics
 
+    def test_train_restores_the_callers_grad_mode(self):
+        """train() toggles torch's GLOBAL grad mode; it must hand back what it found. It used to
+        return with gradients disabled, which broke 11 unrelated agent tests run after it."""
+        import torch
+
+        for before in (True, False):
+            torch.set_grad_enabled(before)
+            try:
+                self._make_trainer(num_sims=4).train(break_step=20)
+                assert torch.is_grad_enabled() is before
+            finally:
+                torch.set_grad_enabled(True)
+
     def test_evaluation_metrics(self):
         trainer = self._make_trainer(num_sims=4)
         trainer.train(break_step=50)

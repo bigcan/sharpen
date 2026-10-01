@@ -187,6 +187,24 @@ env:
   circuit_breaker_threshold: 0.1
   random_start: false
 
+# ---------- FINANCING (Tier-2 2026-09-29 N2: the S1 "cost of carry omitted") -----------------
+# The book is self-funded and net long (~+0.55x net at ~2.2x gross), so every certifying Sharpe,
+# DSR and P(pass) is on EXCESS-of-T-bill returns. Each position accrues carry = -rf (a long pays
+# the 3m bill rate, a short earns it), which charges the book -net*rf, plus a borrow fee on
+# short notional. Accrual is act/360 on calendar days at the yield known at the prior close,
+# on the notional carried into the bar (sharpen/data/financing.py). The rate comes from the
+# DATA-CLEAN'd 3m leg (^IRX) of the pinned research curve
+# (results/carry_falsification/yahoo_curve.parquet).
+# Prop CFD account: the balance earns nothing, so rf*net is a FLOOR on the drag; venue swap
+# markups and spreads are X4 (venue port), not modelled.
+# The gates-file declaration of this model is an operator item (N2 [operator]); not done here.
+# Set model: none to reproduce the unfinanced numbers (e.g. executor DSR 0.967).
+financing:
+  model: tbill                           # none (carry = 0) | tbill
+  tenor: 3m                              # Treasury-curve tenor used as the cash rate
+  day_count: 360                         # act/360 (money-market convention of the bill yield)
+  short_borrow_bps: 25                   # annual borrow fee on short notional (GC ETF borrow)
+
 # ---------- EXECUTION (rung-1 paper-sim; identical to own-capital) ------------------------------
 execution:
   shadow: linear_core_tailwind           # momentum + defensive fund-of-funds (NOT rl)
@@ -194,6 +212,12 @@ execution:
   venue: none                            # rung-1; "ib" for rung-2
   rebalance_cadence: monthly             # MUST match gates.paper_soak.rebalance_cadence
   fill_reference: close
+  # 2026-09-29 (full-codebase audit R-3): decide a bar early so the month-end rebalance fills
+  # at the month-end close (the validated research convention) instead of the next month's
+  # first close. Causal: the drive reads rows whose data ends one bar before the fill, and it
+  # refuses sleeves without a tripwire-proven cutoff (allocator_factory.decision_lead_bars).
+  # Set 0 to reproduce pre-fix executor numbers (e.g. the recorded DSR 0.871).
+  decision_lead_bars: 1
 
 # ---------- RISK (v2 §8.3 paper-deploy contract) ------------------------------------------
 # NUMERIC thresholds are NOT authored here — they live in the .gates file under

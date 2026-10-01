@@ -74,7 +74,9 @@ def test_cohort_disabled_is_noop_and_manifest_byte_identical(tmp_path) -> None:
     r_off = _run(tmp_path, "b.db", cohort_cfg=_CCFG,
                  cohort_mc_kwargs={**_MC, "enabled": False}, cohort_gates_hash="cccc")
     assert r_absent.cohort_cards == [] and r_off.cohort_cards == []
-    assert r_absent.manifest.extra == {} and r_off.manifest.extra == {}
+    # v15.0: `extra` now always records whether each type's offspring search ran; the cohort must still
+    # never write into it (its provenance lives in typed fields), and absent == disabled byte-for-byte.
+    assert set(r_absent.manifest.extra) == set(r_off.manifest.extra) == {"offspring_searched"}
     assert r_absent.manifest.content_hash() == r_off.manifest.content_hash()   # byte-identical
 
 
@@ -87,7 +89,7 @@ def test_cohort_enabled_attaches_card_and_manifest_provenance(tmp_path) -> None:
     assert card.funnel_gates_hash == "ffff" and card.cohort_gates_hash == "dd563b4b4f7c"
     assert card.incubation_status == "PENDING_P4" and card.eligible_for_human_gate is False
     # cohort provenance pinned into the reproduce contract (typed manifest fields, not `extra`)
-    assert r.manifest.extra == {}
+    assert set(r.manifest.extra) == {"offspring_searched"}     # v15.0 sidecar only — no cohort key
     assert r.manifest.cohort_gates_hash == "dd563b4b4f7c"
     assert r.manifest.cohort_verdicts == {card.cohort_hash: card.verdict}
     assert r.manifest.cohort_card_hashes == {card.cohort_hash: card.content_hash()}

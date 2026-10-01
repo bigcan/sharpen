@@ -1,0 +1,53 @@
+# ============================================================================
+# DATA INTEGRITY — close-aware panel gate (TAILWIND Tier-2 N8 / T1-02), 2026-09-30
+# ============================================================================
+# Read by sharpen/data/panel_integrity.py. A SINGLE incident fails the panel. Calibrated so the
+# three real 18-ETF caches PASS and all eight T1-02 injected corruptions FAIL
+# (tests/real_data/test_panel_integrity.py). Measured on the real caches 2026-09-30:
+#   max |daily return| 28.5% (SLV) · longest flat run 4 closes (UUP) · 0 gaps inside a series ·
+#   index == NYSE calendar · closest >=10% reversal ratio 0.21 (EEM 2008-11-13) ·
+#   cross-vintage max |return diff| 2.9e-6, max log-ratio drift 2.2e-6.
+data_integrity:
+  schema: data_integrity/v1
+  close_panel:
+    split_abs_ret: 0.40                  # |daily return| above this = unadjusted split / bad print
+    spike_min_abs_ret: 0.10              # a round trip needs a move at least this large ...
+    spike_roundtrip_frac: 0.10           # ... reversed next session: |2-day compound| <= this x |move|.
+                                         # Real >=10% reversals: min ratio 0.21 (EEM 2008-11-13); an injected
+                                         # close spike leaves only the true 2-day move (ratio <~0.07 at 15%)
+    suspect_print_sigma: 8.0             # DIAGNOSTIC ONLY (reported, never fails): |close - neighbour midpoint|
+                                         # in robust daily sigmas. Real caches: UUP 2007-06-20 16.3 (a 4,300-share
+                                         # print at the low, round trip nets ~0) and LQD 2008-09-29 9.4 (genuine TARP-day
+                                         # dislocation, 787k shares) - so it cannot be a gate.
+    # Detection (300 random single-close injections on the real panel): +15% 80%, -25% 91%, +10% 29%.
+    # Misses are spikes on already-volatile days; the diagnostic above lists most of them.
+    max_flat_run_bars: 5                 # identical consecutive closes; real max 4, T1-02 injects 6 and 20
+    max_inner_gap_bars: 0                # any NaN between a ticker's first and last valid close
+    require_nyse_calendar: true          # index must equal sharpen.data.trading_calendar sessions
+    first_valid_tolerance_sessions: 5    # first close may lag the declared inception by this much
+    last_valid_lag_sessions: 0           # every ticker must print on the panel's last session
+  cross_vintage:
+    max_abs_return_diff: 1.0e-4          # same universe, two vintages: daily returns must agree
+    max_log_ratio_drift: 1.0e-4          # and the per-ticker price ratio must be constant
+  universes:
+    tailwind_18etf:                      # the TAILWIND / cross-asset momentum universe
+      tickers: [SPY, QQQ, IWM, EFA, EEM, TLT, IEF, LQD, GLD, SLV, DBC, USO, DBA, UUP, FXE, FXY, FXB, FXA]
+      first_valid:                       # observed inception in every real cache (panel start 2006-01-03)
+        SPY: '2006-01-03'
+        QQQ: '2006-01-03'
+        IWM: '2006-01-03'
+        EFA: '2006-01-03'
+        EEM: '2006-01-03'
+        TLT: '2006-01-03'
+        IEF: '2006-01-03'
+        LQD: '2006-01-03'
+        GLD: '2006-01-03'
+        SLV: '2006-04-28'
+        DBC: '2006-02-06'
+        USO: '2006-04-10'
+        DBA: '2007-01-05'
+        UUP: '2007-03-01'
+        FXE: '2006-01-03'
+        FXY: '2007-02-13'
+        FXB: '2006-06-26'
+        FXA: '2006-06-26'

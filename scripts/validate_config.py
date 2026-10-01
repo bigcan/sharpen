@@ -601,7 +601,7 @@ def check_hpo(cfg: dict, r: ValidationResult) -> None:
             r.fail(f"hpo.{key} missing — HPO budget must be declared (SharpOps §4)")
 
     # Training-health hard-fail thresholds expected in gates
-    gates = cfg.get("gates", {})
+    gates = _load_ensemble_gates_overlay(cfg)   # inline + ensemble.gates_file (T7-P09)
     health_keys = ("entropy_floor", "q_div_max", "action_sat_max")
     missing = [k for k in health_keys if k not in gates]
     if missing:
@@ -700,15 +700,18 @@ def _training_budget_multiplicity(cfg: dict, total_steps) -> tuple[float, float,
 
 
 def _check_multiplicity(cfg: dict, total_steps, label: str, r: ValidationResult) -> None:
-    """Training-budget multiplicity gate. >50x = REJECT overfit cliff; <15x =
-    under-trained WARN (acceptable only when L1 N>=10 is the real filter)."""
+    """Training-budget multiplicity (SharpOps §3.5), ADVISORY. >50x and <15x WARN.
+
+    The >50x REJECT was demoted to WARN on 2026-09-30 (Protocol v2 audit §6 item 10,
+    docs/sharpops_promotion_standard.md): every §3.5 calibration anchor is leak-era, so the
+    band is unvalidated guidance, not evidence that a budget overfits."""
     m = _training_budget_multiplicity(cfg, total_steps)
     if m is None:
         return
     mult, bars, basis = m
     msg = f"{label} budget multiplicity {mult:.1f}x ({basis}, {bars:.0f} train bars)"
     if mult > 50.0:
-        r.fail(f"{msg} — exceeds 50x REJECT cliff (decision_training_budget_multiplicity_rule §3.5)")
+        r.warn(f"{msg} — above 50x; §3.5 is unvalidated (leak-era) guidance, not a gate")
     elif mult > 40.0:
         r.warn(f"{msg} — above [15,40] productive band, approaching 50x reject cliff")
     elif mult >= 15.0:
@@ -718,6 +721,82 @@ def _check_multiplicity(cfg: dict, total_steps, label: str, r: ValidationResult)
             f"{msg} — below [15,40] band (under-trained); acceptable per §3.5 only when "
             "the L1 N>=10 multiseed is the real validation filter"
         )
+
+
+def _is_linear_core_allocator(cfg: dict) -> bool:
+    """A book driven by the frozen linear core (``execution.shadow: linear_core_*``) through the
+    multi-asset allocator env: the paper/rung-1 TAILWIND and two-/multi-sleeve books."""
+    shadow = str((cfg.get("execution") or {}).get("shadow", ""))
+    return (cfg.get("env") or {}).get("type") == "multi_asset_allocator" and shadow.startswith("linear_core")
+
+
+def check_decision_lead(cfg: dict, r: ValidationResult) -> None:
+    """``execution.decision_lead_bars`` on a linear-core allocator book (TAILWIND Tier-2 N4).
+
+    The key picks WHICH book the drive trades: 1 decides a bar early so the month-end rebalance
+    fills at the month-end close, 0 is the legacy drive, one close later. At run time an absent
+    key silently means 0, which is how a certified book and a wired book came apart (T6-15), so
+    a linear-core book must declare it. The value must be the integer 0 or 1 (the run-time
+    parser rejects anything else). A lead also needs every allocator sleeve's conviction to be
+    causal at t-1: a sleeve whose builder declares a 0 cutoff lag (``rates_carry``) would be
+    read on the bar being filled (LEAK-2). The drive refuses it at run time; this FAILs it first.
+    """
+    if not _is_linear_core_allocator(cfg):
+        return
+    execution = cfg.get("execution") or {}
+    if "decision_lead_bars" not in execution:
+        r.fail("execution.decision_lead_bars missing on a linear-core allocator book: declare 1 "
+               "(decide a bar early, fill at the month-end close) or 0 (legacy drive, one close "
+               "later). Absent silently runs the legacy drive (TAILWIND Tier-2 N4).")
+        return
+    lead = execution["decision_lead_bars"]
+    if isinstance(lead, bool) or not isinstance(lead, int) or lead not in (0, 1):
+        r.fail(f"execution.decision_lead_bars must be the integer 0 or 1, got {lead!r}")
+        return
+    if lead == 1:
+        from sharpen.data.cross_asset_loader import CONVICTION_CUTOFF_LAG, _sleeve_specs
+        try:
+            specs = _sleeve_specs(cfg)
+        except (KeyError, ValueError) as exc:
+            r.fail(f"execution.decision_lead_bars: 1 but the sleeves do not resolve: {exc}")
+            return
+        lag0 = [name for name, sig, _ in specs if CONVICTION_CUTOFF_LAG.get(sig, 0) < 1]
+        if lag0:
+            r.fail(f"execution.decision_lead_bars: 1 with sleeve(s) {lag0} whose conviction "
+                   f"cutoff lag is 0 (no current-bar tripwire): deciding a bar early would read "
+                   f"the bar being filled (LEAK-2). Set 0 or drop the sleeve.")
+            return
+    r.ok(f"execution.decision_lead_bars = {lead} (linear-core drive)")
+
+
+def check_financing_block(cfg: dict, r: ValidationResult) -> None:
+    """``financing:`` (TAILWIND Tier-2 N2): parse it exactly as the loader does, so a malformed
+    block FAILs here rather than at run time. A financing leg declared on a path that does not
+    carry it FAILs too: only the linear-core allocator loader wires it, and the single-sleeve
+    loader refuses it. Return-stream sleeves are combined at the return level and stay
+    unfinanced, which is a WARN."""
+    if "financing" not in cfg:
+        return
+    from sharpen.data.financing import financing_spec
+    try:
+        spec = financing_spec(cfg)
+    except ValueError as exc:
+        r.fail(f"financing: {exc}")
+        return
+    if not spec.enabled:
+        r.ok("financing.model = none (unfinanced: carry 0)")
+        return
+    if not _is_linear_core_allocator(cfg):
+        r.fail("financing: declared, but only the linear-core allocator path (execution.shadow: "
+               "linear_core_*) wires it; this config would run unfinanced")
+        return
+    streams = sorted(name for name, spec_ in (cfg.get("sleeves") or {}).items()
+                     if str((spec_ or {}).get("type", "allocator")) == "return_stream")
+    if streams:
+        r.warn(f"financing: return_stream sleeve(s) {streams} are combined at the return level "
+               f"and are NOT financed")
+    r.ok(f"financing = {spec.model} {spec.tenor} act/{spec.day_count} + "
+         f"{spec.short_borrow_bps:g} bp short borrow")
 
 
 def check_execution_cost_realism(cfg: dict, stage: str, r: ValidationResult) -> None:
@@ -889,12 +968,21 @@ def check_drift_safemode_gates(cfg: dict, r: ValidationResult) -> None:
     See the SharpOps v2.2 drift/safe-mode decision note.
     """
     prop_firm = _is_prop_firm(cfg)
+    # INLINE on purpose: the live engine (live_engine.py:123-124, :286) and the forward runner
+    # (forward_runner.py:574, :594) read config["gates"] INLINE; an ensemble.gates_file key is
+    # invisible to them, so the overlay here would PASS a control the runtime lacks (T7-P09
+    # applies only to checks whose consumers merge the overlay: hpo, l1-multiseed, wf).
     gates = cfg.get("gates", {}) or {}
     drift_gates = gates.get("drift") or {}
     safe_gates = gates.get("safe_mode") or {}
 
     missing_drift = [k for k in _V22_DRIFT_GATE_KEYS if k not in drift_gates]
-    missing_safe = [k for k in _V22_SAFE_MODE_KEYS if k not in safe_gates]
+    # A linear-core book runs through sharpen/paper/forward_runner.py, which consumes only
+    # crit_triggers_flatten of the safe-mode keys; requiring the lockout keys there would
+    # contradict check_linear_controls_consumed, which FAILs them as declared-but-unconsumed.
+    safe_required = (("crit_triggers_flatten",) if _is_linear_core_allocator(cfg)
+                     else _V22_SAFE_MODE_KEYS)
+    missing_safe = [k for k in safe_required if k not in safe_gates]
 
     if missing_drift:
         msg = (
@@ -913,7 +1001,7 @@ def check_drift_safemode_gates(cfg: dict, r: ValidationResult) -> None:
         )
         r.fail(msg) if prop_firm else r.warn(msg)
     else:
-        r.ok(f"gates.safe_mode has all {len(_V22_SAFE_MODE_KEYS)} v2.2 keys")
+        r.ok(f"gates.safe_mode has all {len(safe_required)} required v2.2 key(s)")
 
     # Sanity on declared thresholds when present.
     if all(k in drift_gates for k in ("deadband_frac_warn", "deadband_frac_crit")):
@@ -988,7 +1076,7 @@ def check_drift_safemode_gates(cfg: dict, r: ValidationResult) -> None:
 
 
 def check_l1_multiseed(cfg: dict, r: ValidationResult) -> None:
-    gates = cfg.get("gates", {})
+    gates = _load_ensemble_gates_overlay(cfg)   # inline + ensemble.gates_file (T7-P09)
     seeds = gates.get("l1_seeds", 5)
     if seeds < 3:
         r.fail(f"gates.l1_seeds={seeds} — must be >=3 (SharpOps §4 stage 2)")
@@ -1031,7 +1119,10 @@ def _load_ensemble_gates_overlay(cfg: dict) -> dict:
         return gates
     gates_path = Path(gates_file)
     if not gates_path.is_absolute():
-        gates_path = Path.cwd() / gates_path
+        # cwd first (unchanged behaviour), then the repo root (Tier-2 T7-P09): cwd-only silently
+        # dropped the overlay whenever the validator ran from any other directory.
+        cwd_path = Path.cwd() / gates_path
+        gates_path = cwd_path if cwd_path.exists() else Path(__file__).resolve().parents[1] / gates_path
     if not gates_path.exists():
         return gates
     try:
@@ -1444,7 +1535,7 @@ def _check_stress_gate_keys(gates: dict, r: ValidationResult) -> None:
 
 
 def check_wf(cfg: dict, r: ValidationResult) -> None:
-    gates = cfg.get("gates", {})
+    gates = _load_ensemble_gates_overlay(cfg)   # inline + ensemble.gates_file (T7-P09)
     if gates.get("wf_windows", 4) < 4:
         r.fail("gates.wf_windows < 4 (SharpOps §4 stage 3)")
     # X3 stress gate keys live in the standalone <ws>_ensemble.gates.yaml overlay
@@ -1491,7 +1582,14 @@ def check_paper_deploy(cfg: dict, r: ValidationResult) -> None:
     challenge = cfg.get("challenge", {}) or {}
     phase = challenge.get("phase")  # honored regardless of `enabled`
     eod_trailing = bool(risk.get("eod_trailing_drawdown"))
-    if phase == "funded":
+    if _is_linear_core_allocator(cfg):
+        # The linear-core run path (sharpen/paper/forward_runner.py) kills on drawdown from
+        # PaperState's TRAILING peak, which is stricter than a static-from-initial rule, and does
+        # not read risk.static_peak. Requiring it here would contradict
+        # check_linear_controls_consumed, which FAILs a declared static_peak=true (2026-09-30).
+        r.ok("linear-core book: drawdown kill is trailing (stricter than static); "
+             "risk.static_peak is not required")
+    elif phase == "funded":
         # FTMO funded: trailing peak baked into `risk.static_peak=false`.
         # Velotrade funded: trailing enforced live-side via
         # `risk.eod_trailing_drawdown=true` while `risk.static_peak=true`
@@ -1660,6 +1758,80 @@ def check_static_peak_consistency(cfg: dict, r: ValidationResult) -> None:
             f"env.risk.static_peak={env_val!r} != risk.static_peak={live_val!r}. "
             "Train-time wrapper and live-engine must agree (project_ftmo_risk_manager_fix.md S422)."
         )
+
+
+# Controls a linear-core book may declare that NOTHING on its run path reads (TAILWIND Tier-2
+# N3 / T6-09). Each entry: dotted key -> (value that is a lie, or None = any value, why).
+# Keep in sync with sharpen/paper/forward_runner.py; tests/sharpops/test_validator_controls.py
+# pins the consumed side by grepping the runner.
+_LINEAR_PATH_UNCONSUMED = {
+    "risk.static_peak": (True, "the forward runner's drawdown kill measures from PaperState's "
+                               "TRAILING peak; a static peak is not implemented on this path"),
+    "safety.flatten_on_kill_file": (False, "the forward runner ALWAYS flattens on a kill; false "
+                                           "is not honoured"),
+    "gates.safe_mode.crit_repeat_window_hours": (None, "the CRIT lockout exists only in the RL "
+                                                       "live engine (kill_file.py)"),
+    "gates.safe_mode.crit_repeat_count_before_lockout": (None, "the CRIT lockout exists only in "
+                                                               "the RL live engine (kill_file.py)"),
+    "gates.drift.feature_variance_veto": (None, "the feature-variance veto exists only in the "
+                                                "RL live engine"),
+}
+_UNSET = object()
+
+
+def _dotted(cfg: dict, key: str):
+    node = cfg
+    for part in key.split("."):
+        if not isinstance(node, dict) or part not in node:
+            return _UNSET
+        node = node[part]
+    return node
+
+
+def check_linear_controls_consumed(cfg: dict, r: ValidationResult) -> None:
+    """A linear-core book must not declare a control its run path does not consume (TAILWIND
+    Tier-2 N3 / T6-09): a declared-but-unconsumed safeguard is false assurance, and the old
+    validator reported these as a PASS. FAILs at paper-deploy; silent for other books."""
+    if not _is_linear_core_allocator(cfg):
+        return
+    bad = []
+    for key, (lie, why) in _LINEAR_PATH_UNCONSUMED.items():
+        val = _dotted(cfg, key)
+        if val is _UNSET:
+            continue
+        if lie is None or val == lie:
+            bad.append(f"{key}={val!r}: {why}")
+    if bad:
+        r.fail("linear-core book declares control(s) its run path does not consume "
+               "(remove them, or wire a consumer first): " + "; ".join(bad))
+    else:
+        r.ok("linear-core book declares no unconsumed controls")
+
+
+# Keys that appear in configs but that NO code reads (Protocol v2 audit 2026-09-29 §4). They
+# look like gates and are not; WARN wherever they appear (a FAIL would break every dormant RL
+# config for a key that never did anything).
+_UNREAD_KEYS = {
+    "hpo_pf_floor": "no code reads it; the HPO objective is not gated by it",
+    "wf_pf_floor": "no code reads it; bar-level PF is retired as a gate (promotion standard §3)",
+    "recent_oos_days": "no code reads it; the 60-day rule is replaced by the forward e-process",
+}
+
+
+def _find_keys(node, names, prefix=""):
+    if isinstance(node, dict):
+        for k, v in node.items():
+            path = f"{prefix}{k}"
+            if k in names:
+                yield path, k
+            yield from _find_keys(v, names, path + ".")
+
+
+def check_unread_keys(cfg: dict, r: ValidationResult) -> None:
+    """WARN on config keys that look like gates but are read by no code."""
+    hits = list(_find_keys(cfg, set(_UNREAD_KEYS)))
+    for path, k in hits:
+        r.warn(f"{path} is declared but NOT ENFORCED: {_UNREAD_KEYS[k]}")
 
 
 def check_drift_baseline_manifest_schema(cfg: dict, r: ValidationResult) -> None:
@@ -1893,6 +2065,10 @@ def check_v23_agreement_decay_gates(cfg: dict, r: ValidationResult) -> None:
     if rule not in _CONSENSUS_RULES:
         return  # non-consensus rule → tracker is no-op; gates are advisory
 
+    # INLINE on purpose: the live engine (live_engine.py:123-124, :286) and the forward runner
+    # (forward_runner.py:574, :594) read config["gates"] INLINE; an ensemble.gates_file key is
+    # invisible to them, so the overlay here would PASS a control the runtime lacks (T7-P09
+    # applies only to checks whose consumers merge the overlay: hpo, l1-multiseed, wf).
     gates = cfg.get("gates", {}) or {}
     drift_gates = gates.get("drift") or {}
 
@@ -1963,6 +2139,10 @@ def check_retrain_gate(cfg: dict, r: ValidationResult) -> None:
     prop_firm = _is_prop_firm(cfg)
 
     # --- gates.retrain.cost_drift_* (consumed by the live CostDriftTracker) ---
+    # INLINE on purpose: the live engine (live_engine.py:123-124, :286) and the forward runner
+    # (forward_runner.py:574, :594) read config["gates"] INLINE; an ensemble.gates_file key is
+    # invisible to them, so the overlay here would PASS a control the runtime lacks (T7-P09
+    # applies only to checks whose consumers merge the overlay: hpo, l1-multiseed, wf).
     retrain_gates = (cfg.get("gates", {}) or {}).get("retrain") or {}
     if not retrain_gates:
         if prop_firm:
@@ -2157,22 +2337,25 @@ def check_obs_noise_gate(cfg: dict, r: ValidationResult) -> None:
 
 
 STAGE_CHECKS = {
-    "data-prep": [],
-    "hpo": [check_hpo],
-    "l1-multiseed": [check_l1_multiseed],
+    "data-prep": [check_unread_keys],
+    "hpo": [check_hpo, check_unread_keys],
+    "l1-multiseed": [check_l1_multiseed, check_unread_keys],
     "ensemble-confirm": [
         check_ensemble_confirm,
         check_sensitivity_audit,
         check_drift_safemode_gates,
         check_report_schema,
+        check_unread_keys,
     ],
-    "wf": [check_wf, check_obs_noise_gate],
-    "oos": [],
+    "wf": [check_wf, check_obs_noise_gate, check_unread_keys],
+    "oos": [check_unread_keys],
     "paper-deploy": [
         check_paper_deploy,
         check_turnover_limit_explicit,
         check_drift_safemode_gates,
         check_report_schema,
+        check_linear_controls_consumed,
+        check_unread_keys,
     ],
 }
 
@@ -2481,6 +2664,8 @@ def validate(config_path: Path, stage: str, overlays: list[str] | None = None) -
     check_data_manifest(cfg, stage, r)
     check_execution_cost_realism(cfg, stage, r)
     check_execution_overlay_gates(cfg, r)
+    check_decision_lead(cfg, r)
+    check_financing_block(cfg, r)
     check_wandb_consolidation(cfg, stage, r)
 
     for check in STAGE_CHECKS[stage]:

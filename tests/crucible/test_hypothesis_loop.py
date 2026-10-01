@@ -98,8 +98,8 @@ def test_agent_view_exposes_no_score_columns(tmp_path) -> None:
     # ``semantic_hash`` (U4) is a dedup key: a hash of the commutative-canonical AST, derived from the
     # formula text alone. The U4 SCORE columns (rejection_class / implied_mde_at_test) are asserted
     # absent by the _FORBIDDEN check above and by tests/crucible/test_search_memory_u4.py.
-    assert set(TrialLedger.agent_view_columns()) == {"candidate_hash", "semantic_hash",
-                                                     "candidate_type", "family"}
+    assert set(TrialLedger.agent_view_columns()) == {"candidate_hash", "semantic_hash", "stat_hash",
+                                                     "candidate_type", "family"}  # v15.0: stat_hash = 3rd DEDUP key (formula text only)
 
 
 def test_proposal_context_carries_no_scores_even_with_scored_ledger(tmp_path) -> None:
@@ -164,8 +164,11 @@ def test_ledger_duplicate_deduped_before_compute(tmp_path) -> None:
     chash = candidate_hash("rank(close)")
     ledger.record(TrialRecord(candidate_hash=chash, crucible_version="v", family="101alpha",
                               verdict="LOGGED"))
+    # expected_sign +1: the SAME hypothesis as the ledgered row. (Before v15.0 this fixture declared -1,
+    # which the Author ignored; a -1 declaration now pre-registers the NEGATED formula — the
+    # opposite-direction hypothesis — so it is deliberately not a duplicate. See test_v15_0_sign.py.)
     proposer = RecordingProposer(to_emit=[
-        HypothesisProposal("cs-dup", "h", "101alpha", -1, "cross_sectional", "rank(close)"),
+        HypothesisProposal("cs-dup", "h", "101alpha", 1, "cross_sectional", "rank(close)"),
         HypothesisProposal("cs-new", "h", "101alpha", 1, "cross_sectional", "rank(volume)"),
     ])
     author = HypothesisAuthor(proposer, ledger)

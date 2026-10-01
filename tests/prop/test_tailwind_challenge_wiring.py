@@ -64,10 +64,11 @@ def baseline_mod():
 # The binding end-to-end check
 # ---------------------------------------------------------------------------------------
 def test_paper_deploy_stage_has_no_failures():
-    """`validate_config --stage paper-deploy` must report zero FAIL lines.
-
-    This is the gap-closure assertion. WARNs are tolerated (gates.retrain and retrain_policy
-    are still open and are WARN-by-design for this release cycle).
+    """`validate_config --stage paper-deploy` reports exactly ONE FAIL: the declared-but-
+    unconsumed controls (2026-09-30, TAILWIND Tier-2 N3 / T6-09). The config claims a static
+    peak, a CRIT lockout and a feature-variance veto that the linear-core run path does not
+    implement. Any OTHER failure is a regression. WARNs are tolerated (gates.retrain and
+    retrain_policy are still open and are WARN-by-design for this release cycle).
     """
     proc = subprocess.run(
         [sys.executable, "scripts/validate_config.py",
@@ -76,8 +77,11 @@ def test_paper_deploy_stage_has_no_failures():
     )
     out = proc.stdout + proc.stderr
     failures = [ln.strip() for ln in out.splitlines() if ln.strip().startswith("FAIL")]
-    assert not failures, "paper-deploy FAILs regressed:\n" + "\n".join(failures)
-    assert "status=FAIL" not in out
+    unconsumed = [f for f in failures if "does not consume" in f]
+    assert len(failures) == len(unconsumed) == 1, "paper-deploy FAILs regressed:\n" + "\n".join(failures)
+    for key in ("risk.static_peak", "crit_repeat_window_hours", "crit_repeat_count_before_lockout",
+                "feature_variance_veto"):
+        assert key in unconsumed[0]
 
 
 # ---------------------------------------------------------------------------------------

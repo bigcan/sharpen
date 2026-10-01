@@ -100,6 +100,29 @@ def _safe_corr(a: np.ndarray, b: np.ndarray, window: int) -> float | None:
     return float(np.corrcoef(a, b)[0, 1])
 
 
+def _sleeve_attribution_check(live: LiveTrajectory, required: bool,
+                              executor_sleeves: Sequence[str] | None) -> dict:
+    """``drift.sleeve_attribution_required`` (audit T4-12b). A multi-sleeve book must carry a
+    finite per-SLEEVE P&L (``live.sleeve_pnl``) for every sleeve it ran. Per-class P&L cannot
+    stand in for it, because the sleeves trade the same classes. A single-sleeve book is
+    attributed per asset class (``class_pnl``), the ``cross_asset_momentum`` contract.
+
+    The sleeve set is ``executor_sleeves`` when the caller passes it, so a scored path that
+    forgets to attach ``sleeve_pnl`` FAILs. Without it, the keys of ``live.sleeve_pnl`` are
+    used, and a book that carries none is treated as single-sleeve."""
+    sleeves = sorted(executor_sleeves if executor_sleeves is not None else (live.sleeve_pnl or {}))
+    if len(sleeves) >= 2:
+        pnl = dict(live.sleeve_pnl or {})
+        missing = [s for s in sleeves if s not in pnl or not math.isfinite(float(pnl[s]))]
+        basis = "sleeve"
+    else:
+        missing = [] if live.class_pnl else ["class_pnl"]
+        basis = "class"
+    present = not missing
+    return {"value": present, "threshold": required, "op": "present", "basis": basis,
+            "missing": missing, "status": PASS if (present or not required) else FAIL}
+
+
 def evaluate_paper_soak_gates(
     live: LiveTrajectory,
     parity: ParityReport,
@@ -153,7 +176,9 @@ def evaluate_paper_soak_gates(
     risk_checks = {
         "max_drawdown_pct": _check(live.max_drawdown_pct(), risk["max_drawdown_kill_pct"],
                                    "<=", unit="%"),
-        "max_gross_exposure": _check(live.max_gross_exposure(), risk["max_gross_exposure"], "<="),
+        # Actual notional when the path records it (audit T4-12a); ``basis`` says which.
+        "max_gross_exposure": {**_check(live.max_gross_exposure(), risk["max_gross_exposure"],
+                                         "<="), "basis": live.gross_basis},
         # worst single-day loss magnitude must stay under the halt threshold.
         "daily_loss_pct": _check(abs(min(live.min_daily_return_pct(), 0.0)),
                                  risk["daily_loss_halt_pct"], "<=", unit="%"),
@@ -177,16 +202,12 @@ def evaluate_paper_soak_gates(
     else:
         corr_check = {"value": float(corr), "threshold": float(drift["max_corr_to_spy"]),
                       "op": "abs<=", "status": PASS if abs(corr) <= float(drift["max_corr_to_spy"]) else FAIL}
-    sleeve_required = bool(drift.get("sleeve_attribution_required", False))
-    sleeve_present = len(live.class_pnl) > 0
     drift_checks = {
         "corr_to_spy": corr_check,
         "max_single_class_pnl_share": _check(live.max_single_class_pnl_share(),
                                              drift["max_single_class_pnl_share"], "<="),
-        "sleeve_attribution": {
-            "value": sleeve_present, "threshold": sleeve_required, "op": "present",
-            "status": PASS if (sleeve_present or not sleeve_required) else FAIL,
-        },
+        "sleeve_attribution": _sleeve_attribution_check(
+            live, bool(drift.get("sleeve_attribution_required", False)), executor_sleeves),
     }
 
     # diversification (MS-ADR-7): each return-stream sleeve (e.g. VRP) must stay
@@ -360,6 +381,7 @@ def evaluate_paper_soak_gates(
             if len(live.equity_curve) > 1 else 0.0,
             "max_drawdown_pct": live.max_drawdown_pct(),
             "max_gross_exposure": live.max_gross_exposure(),
+            "gross_basis": live.gross_basis,
             "weight_l1_drift_max": parity.weight_l1_drift_max,
             "daily_return_te_bps_max": parity.daily_return_te_bps_max,
             "cost_drift_ratio": parity.cost_drift_ratio,
@@ -455,7 +477,7 @@ class PaperMetrics:
             for name, desc in {
                 "equity": "Paper book equity (USD)",
                 "drawdown_pct": "Drawdown from peak (%)",
-                "gross_exposure": "Gross exposure (sum|w|)",
+                "gross_exposure": "Gross exposure (actual notional / equity; labels if absent)",
                 "daily_return_pct": "Latest daily return (%)",
                 "weight_l1_drift": "Parity: sum|w_live - w_sim| (max over window)",
                 "daily_return_te_bps": "Parity: |live-sim| daily return TE (bps, max)",

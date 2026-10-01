@@ -1,0 +1,61 @@
+{
+ "built_utc": "2026-09-24T05:45:30+00:00",
+ "mode": "screening",
+ "smoke": false,
+ "corpus": "C:\\FinRL\\FinRL-Pro_DS\\data\\atl_jev\\corpus\\screening",
+ "corpus_stamp": {
+  "mode": "screening",
+  "since": "2011-09-17T00:00:00+00:00",
+  "until": "2025-01-01T00:00:00+00:00",
+  "rows": [
+   "2012-01-01",
+   "2024-12-31"
+  ],
+  "form": "8-K",
+  "doc_types": [
+   "8-K",
+   "EX-99.1",
+   "EX-99.01",
+   "EX-99"
+  ],
+  "max_chars": 24000,
+  "questionnaire_hash": "3fc01888e31f",
+  "pipeline_sha": "4877e0f424a1"
+ },
+ "gates_sha": "77b9a306392784824b5612acf2a428548527222f924fcced4107ef6c279c8f54",
+ "questionnaire": {
+  "version": "v1",
+  "hash": "3fc01888e31f"
+ },
+ "model_requested": "jev-latest",
+ "commit": "85a15a461f0b2e4ca544c2788d7874e672c030f6",
+ "dirty": true,
+ "status": "COMPLETE",
+ "stats": {
+  "filings": 24676,
+  "scored": 24654,
+  "empty_text": 22,
+  "questions": 140614,
+  "served_models": {
+   "jev-1.13.0": 140614
+  }
+ },
+ "jev_usage": {
+  "requests": 24457,
+  "questions_sent": 139582,
+  "cache_hits": 424480,
+  "input_tokens": 156532104,
+  "output_tokens": 2401647,
+  "retries": 129,
+  "latency_s": {
+   "p50": 0.937,
+   "p90": 1.188,
+   "max": 21.937
+  },
+  "served_models": {
+   "jev-1.13.0": 564062
+  },
+  "cost_usd": 6.574348368
+ },
+ "elapsed_min": 67.9
+}

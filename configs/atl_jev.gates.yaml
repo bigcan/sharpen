@@ -1,0 +1,104 @@
+# Pre-registered decision rules for the ATL x Jev workstream
+# (docs/research/atl_jev_strategy_plan_2026-09-23.md). Phase 0 section written 2026-09-23 BEFORE any
+# probe ran. NEVER hardcode these numbers in code or scripts (CLAUDE.md): the phase-0 scripts load this
+# file and stamp its sha256 into every artifact, so an edit after the fact is visible.
+# The funnel verdict itself (P1) stays on the frozen configs/signal_eval.gates.yaml — nothing here
+# loosens or replaces it. Phase 1 appends its own section (questionnaire, trial budget, P3/P4 bars).
+
+jev:
+  model: jev-latest                  # requested alias; the SERVED version (e.g. jev-1.13.0) is recorded
+                                     # on every cached answer (plan C6) — a change is a new trial
+  price_usd_per_m_input: 0.042       # list price 2026-09, output tokens free (cost accounting, not a gate)
+  max_questions_per_request: 64
+  concurrency: 8
+  max_retries: 4
+
+phase0:
+  cutoff_probe:                      # plan C1 — empirical knowledge cutoff T_c
+    start_month: "2018-01"
+    end_month: "2026-08"
+    extra_top_names: 70              # SPY + ATL DJIA-30 + the next N largest S&P 500 names
+    polarity_seed: 20260923          # each item asks "higher" or "lower" at random => chance = 0.5
+    changepoint: two_segment_binomial_mle
+    min_segment_months: 6            # neither segment shorter than this
+    bootstrap_reps: 500              # resample tickers => CI on T_c
+    known_margin: 0.05               # pre-T_c segment counts as KNOWLEDGE only if its accuracy
+                                     # 95% CI lower bound exceeds 0.5 + known_margin
+    embargo_months: 1                # clean window starts at T_c + embargo
+  identification_probe:              # plan C3 — can Jev name the filer from anonymized text?
+    n_filings: 200
+    n_candidates: 10                 # true filer + 9 same-sector decoys => chance = 0.10
+    period_start: "2019-01-01"
+    period_end: "2025-12-31"
+    max_chars: 24000                 # ~6k tokens of cleaned text per filing
+    max_top1_accuracy: 0.20          # above this (2x chance) => anonymized filings are IDENTIFIABLE
+    sample_seed: 20260923
+  power_check:                       # plan K2 — can the frozen funnel detect a plausible text signal?
+    target_ics: [0.01, 0.02, 0.03, 0.05, 0.08]
+    seeds: 8
+    horizon_days: 5                  # frozen gates' primary horizon
+    coverage: 0.33                   # share of names carrying an active event score on a given day
+                                     # (quarterly event, ~21-trading-day decay window)
+    n_hypotheses: 8                  # Phase-1 trial budget the deflation is charged against
+    null_signals_per_batch: 7        # batch = 1 planted + 7 nulls, mirroring 8 tried variants
+    min_detection_rate: 0.80         # MDE80 = smallest planted IC detected (PROMISING) >= this often
+    plausible_ic_max: 0.03           # ASSUMPTION: upper end of a plausible 5d rank IC for a large-cap
+                                     # filing-text signal; K2 fires if MDE80 exceeds it on BOTH universes
+    djia_whatif_min_names: 8         # exploratory what-if ONLY (DJIA-30 fails the frozen T0 breadth
+                                     # floor of 50 by construction); never a verdict gate
+  feasibility:                       # plan K0
+    max_corpus_cost_usd: 500
+    max_corpus_wallclock_hours: 168
+    corpus_filings_estimate: 100000  # S&P 500 8-K + EX-99 corpus, re-estimated from measured tokens
+
+# ---------------------------------------------------------------------------------------------------------
+# Phase 1 — pre-registration (docs/research/atl_jev_prereg.md; research: docs/research/atl_jev_phase1_research.md).
+# Appended 2026-09-23 BEFORE the instrument check and BEFORE any filing is scored for the strategy. The phase-0
+# section above is unchanged. questionnaire.hash is filled in once the instrument check passes; the Phase-3
+# scorer must refuse to run unless it equals sharpen.jev.questionnaire.questionnaire_hash().
+phase1:
+  questionnaire:
+    version: v1
+    hash: 3fc01888e31f               # frozen after the instrument check passed (results/atl_jev/phase1/); a test
+                                     # and the Phase-3 scorer both require it to equal questionnaire_hash()
+  instrument_check:                  # validity of the INSTRUMENT only — no return is read; runs before the freeze
+    window: ["2019-01-01", "2023-12-31"]   # screening era only: the clean window stays untouched
+    n_earnings: 40                   # Item 2.02 releases (EX-99.1)
+    n_events: 20                     # 8-Ks with an ADVERSE_ITEMS item and no 2.02
+    sample_seed: 20260924
+    min_answer_std: 0.10             # a question whose mapped answers barely vary carries no information
+    min_n_for_std: 10                # below this many answers the std rule is reported, not applied
+    max_guidance_conflict_frac: 0.10 # share of releases where E1 and E2 are BOTH answered yes (p > 0.5)
+  universe: sp500_pit
+  screening_window: ["2012-01-01", "2024-12-31"]   # contaminated era (Phase 0 C1/C3): screening only, UPPER BOUND
+  clean_window: ["2025-02-01", "2026-09-22"]       # adopted T_c 2025-01 + 1-month embargo; ONE pre-registered look
+  filings:
+    max_chars: 24000                 # masked document text per filing
+  n_hypotheses: 8                    # deflation floor = the trial budget announced in the plan (5 signals used)
+  release_row:                       # LEAK-2 (prereg §3), read by sharpen.jev.release
+    timezone: America/New_York       # DST-aware local exchange time
+    cutoff: "15:30"                  # accepted before this on a trading day -> that day's row; else the next trading day
+  construction:                      # daily-signal rules (prereg §4), read by the Phase-2 signal builder
+    surprise: latest_in_window       # the most recent earnings release within hold_days
+    tone: latest_in_window
+    quality: min_in_window           # the MOST ADVERSE in-window filing: a later routine filing (e.g. a 1.02
+                                     # refinancing) must not erase an earlier impairment or one-off flag
+    same_row: mean                   # several in-scope filings released on one row are averaged
+    composite: mean_of_blocks        # mean of the available block scores; NaN when none
+  signals:                           # all registered with expected_sign = +1 (question signs applied in the score)
+    - {name: jev-comp-63, blocks: [surprise, tone, quality], hold_days: 63, primary: true}
+    - {name: jev-comp-21, blocks: [surprise, tone, quality], hold_days: 21}
+    - {name: jev-surprise-63, blocks: [surprise], hold_days: 63}
+    - {name: jev-toneinfl-63, blocks: [tone], hold_days: 63}
+    - {name: jev-quality-63, blocks: [quality], hold_days: 63}
+  p2_placebo:                        # shuffled-firm placebo: scores permuted across same-day filers
+    permutations: 200
+    max_p: 0.05                      # the real IC must beat the placebo distribution at this level
+  p3_baseline:                       # Jev must add information beyond the non-LLM text baselines (B1)
+    min_marginal_t: 2.0              # Newey-West t of the Jev coefficient in daily Fama-MacBeth regressions
+    nw_lags: 5
+  p4_clean_window:                   # the single clean-window look (P4)
+    min_ic_t: 2.0                    # 5d IC t-stat on the clean window
+    min_frictionless_sharpe: 0.0     # long-short book must make money before costs
+    min_filing_accepted: "2025-01-01"  # adopted T_c: only filings accepted on/after it feed P4 (a Dec-2024 score
+                                       # held into Feb-2025 rows would carry the contaminated boundary year in)

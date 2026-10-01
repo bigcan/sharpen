@@ -35,6 +35,13 @@ P(pass): the executor's combined series is already sized by the real config leve
 rescaling is what the research-basis render needed to reach a target vol from its 6.92%
 native series; the executor series is already at its real production sizing).
 
+FINANCING (2026-09-29, Tier-2 N2): :func:`build_executor_series` honours the config's
+``financing:`` block. The challenge config declares ``model: tbill`` (carry = -rf on every
+position plus a short-borrow fee), so the series is the EXCESS-of-T-bill return and both the
+DSR and :func:`recompute_p_pass` score it. For a prop account, whose balance earns nothing,
+rf*net is a FLOOR on the financing drag. Set ``financing: {model: none}`` to reproduce the
+unfinanced numbers. The JSON stamps the lead and the model used (``execution_stamp``).
+
 Emits ``results/tailwind_v1/executor_recompute.json``.
 """
 from __future__ import annotations
@@ -66,12 +73,19 @@ from sharpen.data.cross_asset_loader import (  # noqa: E402
     build_two_sleeve_arrays,
     load_two_sleeve_data,
 )
+from sharpen.data.panel_integrity import PanelIntegrityError, require_ok  # noqa: E402
+from sharpen.envs.allocator_factory import execution_stamp  # noqa: E402
 from sharpen.paper import TwoSleeveExecutor  # noqa: E402
 from sharpen.prop.challenge_simulator import FirmRules, SizingPolicy  # noqa: E402
 
 ANN = mom.ANN
 CHALLENGE_CFG = ROOT / "configs" / "tailwind_v1_challenge.yaml"
 OWN_CAPITAL_GATES = ROOT / "configs" / "tailwind_v1.gates.yaml"
+
+
+def _refs() -> dict:
+    """Recorded references (Tier-2 N14: no literal in code). A missing key raises."""
+    return _yaml.safe_load(OWN_CAPITAL_GATES.read_text(encoding="utf-8"))["recorded_references"]
 
 
 def sh(s: pd.Series) -> float:
@@ -86,6 +100,10 @@ def build_executor_series(cfg: dict) -> tuple[pd.Series, dict, dict]:
     ``MultiAssetAllocatorEnv`` + ``PaperState`` apply, not an approximation of them."""
     data = load_two_sleeve_data(cfg, force_refetch=False, require_fresh=False)
     close = data["close"]
+    # N8: a capital script reads the manifest status and gates its panel before computing.
+    if (data.get("manifest") or {}).get("status") != "PASS":
+        raise PanelIntegrityError(f"executor cache manifest status {(data.get('manifest') or {}).get('status')!r}")
+    require_ok(close, "executor panel", universe="tailwind_18etf")
     bundle = build_two_sleeve_arrays(data, close.index[0], close.index[-1])
 
     ex = TwoSleeveExecutor(cfg)
@@ -146,7 +164,7 @@ def recompute_dsr(exec_net: pd.Series) -> dict:
         "min_dsr": min_dsr,
         "pass": dsr_pass,
         "research_basis_for_comparison": {
-            "honest_dsr_n24": 0.896,
+            "honest_dsr_n24": float(_refs()["research_honest_dsr"]),
             "source": "results/tailwind_v1/audit_tailwind.json (F_deflated_sharpe)",
         },
         "note": ("Same 18-book momentum selection surface + n_trials as the research-basis "
@@ -163,7 +181,9 @@ def recompute_p_pass(exec_net: pd.Series) -> dict:
     ``tailwind_forward_path_render.py`` uses, with NO additional vol-rescaling -- the
     executor series is already at its real production sizing (env.target_vol_asset /
     lev_cap / max_gross_exposure), unlike the research basis which needs rescaling from
-    its native 6.92% vol to reach a target."""
+    its native 6.92% vol to reach a target. Pass the FINANCED series (a config with a
+    ``financing:`` block): the unfinanced one finances the book's net long for free,
+    which no prop account does."""
     gates = _yaml.safe_load(tfr.CHALLENGE_GATES.read_text(encoding="utf-8"))
     cg = gates["challenge_pass_gate"]
     risk = gates["paper_soak"]["risk"]
@@ -183,7 +203,8 @@ def recompute_p_pass(exec_net: pd.Series) -> dict:
     max_needless = float(fpr["max_needless_share"])
     max_days = int(fpr["render_horizon_days"])
 
-    policy = SizingPolicy(vol_multiplier=1.0)  # already sized -- no rescale
+    policy = SizingPolicy(vol_multiplier=1.0,  # already sized -- no rescale
+                          intraday_mae_mult=float(cg["intraday_mae_mult"]))   # N14: gates, not a default
     firm_rules = FirmRules(name="FTMO_step1_firm", profit_target=target_step1,
                            max_total_dd=firm_dd, daily_loss_limit=firm_daily,
                            max_days=None, min_trading_days=min_days, dd_mode=hard["dd_mode"])
@@ -244,6 +265,7 @@ def main() -> dict:
     out: dict = {
         "book": "tailwind-v1 executor path (momentum TSMOM + BAB defensive, TwoSleeveExecutor)",
         "config": str(CHALLENGE_CFG.relative_to(ROOT)).replace("\\", "/"),
+        "execution_stamp": execution_stamp(cfg),     # lead + financing (Tier-2 N4)
         "data_range": {"start": str(exec_net.index[0].date()), "end": str(exec_net.index[-1].date()),
                        "n_days": len(exec_net)},
         "executor_book": {
@@ -252,7 +274,8 @@ def main() -> dict:
             "sharpe": round(mom.sharpe(exec_net), 4),
             "max_dd_pct": round(max_dd * 100, 2),
             "predicted_vol_pct_from_sizing_reconciliation": round(
-                0.0334 * float(cfg["env"]["max_gross_exposure"]) * 100, 2),
+                float(_refs()["executor_vol_per_unit_max_gross"])
+                * float(cfg["env"]["max_gross_exposure"]) * 100, 2),
             "env_levers": {k: cfg["env"][k] for k in
                           ("target_vol_asset", "lev_cap", "max_gross_exposure",
                            "taker_fee", "slippage_base_bps", "slippage_impact_bps")},
@@ -276,7 +299,7 @@ def main() -> dict:
         "p_pass_challenge_gate_pass": pp_pass,
         "dsr_executor_vs_research": {
             "executor": out["dsr_executor_path"]["dsr_at_pre_registered_N"],
-            "research_honest": 0.896,
+            "research_honest": float(_refs()["research_honest_dsr"]),
         },
         "p_pass_executor_vs_research": {
             "executor_disjoint": out["p_pass_executor_path"]["p_pass_disjoint_windows"],
@@ -302,7 +325,7 @@ def main() -> dict:
     d = out["dsr_executor_path"]
     print(f"DSR(N={d['n_trials_pre_registered']}) executor = {d['dsr_at_pre_registered_N']}  "
           f"(min {d['min_dsr']})  -> {'PASS' if d['pass'] else 'FAIL'}   "
-          f"[research-basis honest DSR = 0.896]")
+          f"[research-basis honest DSR = {_refs()['research_honest_dsr']}]")
     p = out["p_pass_executor_path"]
     print(f"P(pass) executor disjoint = {p['p_pass_disjoint_windows']}  "
           f"(n={p['n_disjoint_challenges']}, gate {p['min_p_pass_gate']})  "

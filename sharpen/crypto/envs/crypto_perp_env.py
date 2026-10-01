@@ -144,7 +144,9 @@ class CryptoPerpEnv(gym.Env):
         )
 
         # --- Pre-compute asset availability mask (C2: zero-price protection) ---
-        self._asset_available = self.price_ary > 1e-10  # (T, n_assets)
+        self._asset_available = self.price_ary > 1e-10  # (T, n_assets); NaN -> False
+        # Last valid price per asset: the mark for a holding carried through a halt.
+        self._last_mark = np.zeros(n_assets, dtype=np.float64)
 
         # --- Pre-allocated working arrays (OPT: avoid per-step allocations) ---
         self._obs_buffer = np.empty(self.obs_dim, dtype=np.float32)
@@ -188,6 +190,8 @@ class CryptoPerpEnv(gym.Env):
         self.positions[:] = 0.0
         self.entry_prices[:] = 0.0
         self.entry_notionals[:] = 0.0
+        self._last_mark = np.where(
+            self._asset_available[self.step_idx], self.price_ary[self.step_idx], 0.0)
         self.realized_pnl = 0.0
         self.cumulative_fees = 0.0
         self.cumulative_funding = 0.0
@@ -221,11 +225,22 @@ class CryptoPerpEnv(gym.Env):
 
         # --- Advance to next bar ---
         self.step_idx += 1
-        price = self.price_ary[self.step_idx]
 
-        # --- C2: Zero out actions for assets with invalid/zero prices ---
-        target_weights[~self._asset_available[self.step_idx]] = 0.0
-        prev_price = self.price_ary[self.step_idx - 1]
+        # --- C2 + halt carry (as CryptoPerpSwingEnv's S531 F1) ---
+        # A bar whose price is not > 1e-10 (zero, negative, NaN) is a halt. A flat asset
+        # cannot be opened into it; a held one is carried (no trade possible) and marked
+        # at its LAST VALID price, so the halt books no P&L. Every price below is that
+        # mark, which equals the bar's price wherever the asset is available. Zeroing every
+        # halted target instead CLOSED held positions at price 0: long -100% of notional,
+        # short +100%.
+        available = self._asset_available[self.step_idx]
+        holding = np.abs(self.positions) > 1e-8
+        target_weights[~available & ~holding] = 0.0
+        halted_holding = ~available & holding
+        target_weights[halted_holding] = self.positions[halted_holding]
+        prev_price = self._last_mark.copy()   # marks through the previous bar
+        self._last_mark = np.where(available, self.price_ary[self.step_idx], self._last_mark)
+        price = self._last_mark.copy()
 
         # --- Calculate portfolio value BEFORE this bar's price move ---
         # Use prev_price to capture true pre-bar state so price-driven
@@ -467,7 +482,7 @@ class CryptoPerpEnv(gym.Env):
         """Update entry prices and notionals for position changes.
 
         Tracks fixed entry notionals so PnL is independent of margin changes.
-        For increased positions, compute weighted average entry price/notional.
+        For increased positions, sum the notionals and book the share-weighted VWAP.
         For reduced positions, scale down notional proportionally.
         For new positions (from flat or flipped), set fresh entry.
 
@@ -503,10 +518,13 @@ class CryptoPerpEnv(gym.Env):
             added_notional = np.abs(delta_weights[increased]) * portfolio_value
             old_notional = self.entry_notionals[increased]
             new_notional = old_notional + added_notional
-            self.entry_prices[increased] = (
-                self.entry_prices[increased] * old_notional
-                + current_price[increased] * added_notional
-            ) / (new_notional + 1e-10)
+            # Share-weighted VWAP: the price at which the combined shares cost new_notional,
+            # so new_notional / entry_price stays the share count every P&L term assumes. The
+            # notional-weighted arithmetic mean over-states it whenever the fill prices differ
+            # (arithmetic >= harmonic mean): longs were under-, shorts over-credited (T4-10).
+            shares = (old_notional / (self.entry_prices[increased] + 1e-10)
+                      + added_notional / (current_price[increased] + 1e-10))
+            self.entry_prices[increased] = new_notional / (shares + 1e-10)
             self.entry_notionals[increased] = new_notional
 
         # Case 5: Position reduced (same sign, smaller magnitude)
@@ -577,7 +595,9 @@ class CryptoPerpEnv(gym.Env):
         Vectorized for training performance (called millions of times by SB3).
         """
         funding_rates = self.funding_rate_ary[self.step_idx]
-        active = (np.abs(self.positions) >= 1e-8) & (np.abs(self.entry_prices) >= 1e-10)
+        # A halted asset settles no funding (a carried holding is marked, not traded).
+        active = ((np.abs(self.positions) >= 1e-8) & (np.abs(self.entry_prices) >= 1e-10)
+                  & self._asset_available[self.step_idx])
         if not active.any():
             return 0.0
         current_notional = self.entry_notionals[active] * (price[active] / self.entry_prices[active])
@@ -659,8 +679,7 @@ class CryptoPerpEnv(gym.Env):
             self._cached_abs_positions = None
         else:
             # Fallback for reset() path where step() hasn't run yet
-            price = self.price_ary[self.step_idx]
-            unrealized = self._calc_unrealized_pnl(price)
+            unrealized = self._calc_unrealized_pnl(self._last_mark)
             portfolio_value = self.margin_balance + unrealized.sum()
             abs_pos = np.abs(self.positions)
 
@@ -740,8 +759,7 @@ class CryptoPerpEnv(gym.Env):
 
     def get_portfolio_summary(self) -> dict:
         """Get current portfolio state summary."""
-        price = self.price_ary[self.step_idx]
-        unrealized = self._calc_unrealized_pnl(price)
+        unrealized = self._calc_unrealized_pnl(self._last_mark)
         portfolio_value = self.margin_balance + unrealized.sum()
 
         abs_w = np.abs(self.positions)

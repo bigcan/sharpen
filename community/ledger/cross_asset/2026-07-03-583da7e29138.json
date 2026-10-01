@@ -1,0 +1,110 @@
+{
+  "export_id": "583da7e29138",
+  "hypotheses": {
+    "by_type": {
+      "cross_sectional": 7,
+      "overlay": 10,
+      "unknown": 0
+    },
+    "count": 17,
+    "semantic_hashes": [
+      "04d7915bc4e4",
+      "0ac0a6e71edd",
+      "176908b21dde",
+      "2b114d48c6f8",
+      "389594465735",
+      "550daae7e6ca",
+      "57e273a924a7",
+      "6744a737ef1a",
+      "76441de75264",
+      "81d26105f0f9",
+      "8daad6a6e8a7",
+      "b2b6c14984dd",
+      "cf20fe6f8dbc",
+      "d68e5f23f1c8",
+      "eb002ec98d51",
+      "fb378f468a45",
+      "fd1be4c0073a"
+    ]
+  },
+  "kind": "crucible_closed_search",
+  "power": {
+    "decisive_mde_multiple": 1.0,
+    "economic_floor": 0.1,
+    "economic_floor_gates_hash": "519158fa1450",
+    "economic_floor_source": "generation.min_combination_uplift",
+    "mde_at_test_max": null,
+    "mde_at_test_min": null,
+    "mde_source": "none",
+    "mde_substrate": null,
+    "mde_unmeasured_ticks": 1
+  },
+  "provenance": {
+    "cohort_gates_hashes": [],
+    "contracts": [
+      "shipped"
+    ],
+    "corrected_gates_hashes": [],
+    "crucible_versions": [
+      "crucible-v2.6"
+    ],
+    "data_snapshot_hashes": [
+      "a73b707cbf86"
+    ],
+    "first_date": "2026-07-03",
+    "gates_hashes": [
+      "519158fa1450"
+    ],
+    "last_date": "2026-07-03",
+    "manifest_hashes": [
+      "8a3c84844980"
+    ],
+    "proposers": [
+      "library-seed-v1"
+    ],
+    "runs": 1,
+    "search_memory_gates_hashes": [],
+    "source": "trial_ledger"
+  },
+  "rejections": {
+    "decisive": 0,
+    "unclassified": null,
+    "underpowered": 0
+  },
+  "schema_version": 1,
+  "substrate": {
+    "data_end": "2026-07-03",
+    "data_sources": [
+      "Yahoo Finance daily bars"
+    ],
+    "data_start": "2008-01-01",
+    "id": "cross_asset",
+    "search_space": "library seed formulas plus genetic offspring; 21-day hold",
+    "universe": "18 US-listed ETFs across equity, rates, commodity and FX"
+  },
+  "ticks": {
+    "cohort_only": 0,
+    "errors": 0,
+    "idle": 0,
+    "mined": 1,
+    "no_score": 0,
+    "screened_only": 0,
+    "screened_unknown": 1,
+    "tested": 0,
+    "total": 1,
+    "underpowered_skips": 0
+  },
+  "trials": {
+    "holdout_count_complete": false,
+    "holdout_tested": null,
+    "preregistered": 20,
+    "promising": 0,
+    "recorded": 40,
+    "scored": 20
+  },
+  "verdict": "OPEN_UNDERPOWERED",
+  "verdict_reasons": [
+    "holdout_count_not_recorded",
+    "power_not_measured"
+  ]
+}

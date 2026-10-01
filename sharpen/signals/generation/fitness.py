@@ -42,7 +42,7 @@ from sharpen.crypto.eval.statistics import (
     excess_kurtosis,
     skewness,
 )
-from sharpen.envs.allocator_factory import dynamic_sleeve_alphas
+from sharpen.envs.allocator_factory import _monthly_held, _trailing_ann_vol, dynamic_sleeve_alphas
 
 from ..eval_harness import _ann_sharpe, _contiguous_runs
 
@@ -131,6 +131,49 @@ def _combined_book(returns: Mapping[str, np.ndarray], timestamps: np.ndarray,
     a = np.stack([np.asarray(alphas[s], dtype=np.float64) for s in names], axis=1)   # (K,S)
     r = np.stack([np.asarray(returns[s], dtype=np.float64) for s in names], axis=1)   # (K,S)
     return np.nansum(a * r, axis=1)                                                   # (K,)
+
+
+# The usability floor `dynamic_sleeve_alphas` applies to a sleeve's trailing annualized vol (its
+# `vol_floor` default — `_combined_book` never overrides it). Mirrored here so the candidate-usable mask
+# below is the combiner's own rule; tests/crucible/test_v15_0_contract.py pins the two equal.
+_COMBINER_VOL_FLOOR = 1e-4
+
+
+def _candidate_usable(cand: np.ndarray, timestamps: np.ndarray, cfg: FitnessConfig) -> np.ndarray:
+    """Per-bar mask: does the combiner have a USABLE trailing vol for ``cand`` at bar k — the same
+    ``_trailing_ann_vol`` (+ month-end hold) and floor ``dynamic_sleeve_alphas`` applies internally."""
+    sig = _trailing_ann_vol(np.asarray(cand, dtype=np.float64), window=cfg.combiner_window,
+                            min_periods=cfg.combiner_min_periods)
+    if cfg.combiner_monthly_meta:
+        sig = _monthly_held(sig, timestamps)
+    return np.isfinite(sig) & (sig > _COMBINER_VOL_FLOOR)
+
+
+def augmented_book(base_returns: Mapping[str, np.ndarray], cand_returns: np.ndarray,
+                   timestamps: np.ndarray, cfg: FitnessConfig,
+                   base_book: "np.ndarray | None" = None) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+    """``(b_base, b_aug, cand_usable)`` — the base book and the book WITH the candidate, where the
+    candidate JOINS only on bars the combiner can size it (crucible-v15.0).
+
+    Why not just ``_combined_book(base + candidate)``: the combiner's fallback when ANY sleeve's
+    trailing vol is unusable (warm-up NaN, or <= floor — e.g. a stretch of zero returns) is equal weight
+    for EVERY sleeve. On such bars the "augmented" book is equal-weight(base) while the base book is
+    inverse-vol(base), so the marginal statistic measured EW-vs-IV weighting of the BASE, not the
+    candidate. The deep audit measured the consequences through the shipped scorer: an all-zero
+    candidate passed the full corrected contract in 0.3-2.3% of draws, a constant positive stream passed
+    outright (z=3.47), and an all-NaN candidate cleared the three cheap guards 41/200 times. On a bar
+    where the candidate is unusable the augmented book IS the base book, so the candidate contributes
+    exactly nothing there — which is also what "adding it to the book" means economically.
+
+    On bars where the candidate is usable the result is bit-identical to ``_combined_book`` of the
+    augmented sleeve set."""
+    base = {str(k): np.asarray(v, dtype=np.float64) for k, v in base_returns.items()}
+    cand = np.asarray(cand_returns, dtype=np.float64)
+    b_base = (_combined_book(base, timestamps, cfg) if base_book is None
+              else np.asarray(base_book, dtype=np.float64))
+    b_aug_raw = _combined_book({**base, _CAND: cand}, timestamps, cfg)
+    usable = _candidate_usable(cand, timestamps, cfg)
+    return b_base, np.where(usable, b_aug_raw, b_base), usable
 
 
 def _combined_book_with_components(
@@ -281,6 +324,7 @@ def combination_fitness(
     turnover_ann: float,
     n_nodes: int,
     trial_sharpe_pool: "list[float] | None" = None,
+    base_book: "np.ndarray | None" = None,
 ) -> FitnessResult:
     """Score a candidate by its net-deflated marginal contribution to the combined book.
 
@@ -297,11 +341,16 @@ def combination_fitness(
     Three calibration fixes vs the shipped gate (Tier-2): the HLZ hurdle is on the MARGINAL
     contribution ``b_aug − b_base`` (GP4-03), not the candidate's standalone strength; a candidate
     collinear with a base sleeve (``max |corr| > max_base_corr``) is rejected (GP4-01); and the
-    deflation uses the search dispersion pool (GP4-02)."""
+    deflation uses the search dispersion pool (GP4-02).
+
+    ``base_book`` (optional) is ``_combined_book(base_returns, timestamps, cfg)`` precomputed by a
+    caller that scores many candidates against ONE base (``evolve`` — it is identical for every genome
+    on a split). Pure memoization: when omitted it is computed here exactly as before."""
     base = {str(k): np.asarray(v, dtype=np.float64) for k, v in base_returns.items()}
     aug = {**base, _CAND: np.asarray(cand_returns, dtype=np.float64)}
 
-    b_base = _combined_book(base, timestamps, cfg)
+    b_base = (_combined_book(base, timestamps, cfg) if base_book is None
+              else np.asarray(base_book, dtype=np.float64))
     b_aug = _combined_book(aug, timestamps, cfg)
 
     paths = _cpcv_index_paths(b_aug.size, cfg.n_groups, cfg.k_test, cfg.embargo, cfg.purge_horizon)

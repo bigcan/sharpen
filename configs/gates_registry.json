@@ -1,0 +1,332 @@
+{
+  "schema": "gates_registry/v1",
+  "files": {
+    "configs/alphaseek_v3.gates.yaml": {
+      "sha256": "f512dfc0745550fe2620a4e80fc95da1c8eb3a0a968cbf7f7871c067dad658a7",
+      "registered_on": "2026-09-30",
+      "reason": "initial registration 2026-09-30 (SharpOps ladder decision item 7): baseline of every gates file as committed; later edits need a re-registration citing a decision"
+    },
+    "configs/atl_jev.gates.yaml": {
+      "sha256": "77b9a306392784824b5612acf2a428548527222f924fcced4107ef6c279c8f54",
+      "registered_on": "2026-09-30",
+      "reason": "initial registration 2026-09-30 (SharpOps ladder decision item 7): baseline of every gates file as committed; later edits need a re-registration citing a decision"
+    },
+    "configs/ballast_v1.gates.yaml": {
+      "sha256": "3b5101a7dd68ab660ce6bca75f5af7c1e04f8e890a1268a2d7038efb73d0b309",
+      "registered_on": "2026-09-30",
+      "reason": "initial registration 2026-09-30 (SharpOps ladder decision item 7): baseline of every gates file as committed; later edits need a re-registration citing a decision"
+    },
+    "configs/country_momentum.gates.yaml": {
+      "sha256": "c2b1b45c40228385675cdc636a3d1040640dbcd121b44b8e996f5c11cbd1518b",
+      "registered_on": "2026-09-30",
+      "reason": "initial registration 2026-09-30 (SharpOps ladder decision item 7): baseline of every gates file as committed; later edits need a re-registration citing a decision"
+    },
+    "configs/cross_asset_h1_signal_eval.gates.yaml": {
+      "sha256": "8ec4820b3983b1ded8f715b366a8d0ae5aaee96d6ab2b134c76e140138cf90a4",
+      "registered_on": "2026-09-30",
+      "reason": "initial registration 2026-09-30 (SharpOps ladder decision item 7): baseline of every gates file as committed; later edits need a re-registration citing a decision"
+    },
+    "configs/cross_asset_momentum.gates.yaml": {
+      "sha256": "fdb806627c5059e4d09480e6ef629213419a4345f01444367019c7142430b35b",
+      "registered_on": "2026-09-30",
+      "reason": "initial registration 2026-09-30 (SharpOps ladder decision item 7): baseline of every gates file as committed; later edits need a re-registration citing a decision"
+    },
+    "configs/crucible_altdata.gates.yaml": {
+      "sha256": "28db215e08e4b6533d8c8fdd643a66c20c32ebc3134087ae981edf58b70f579a",
+      "registered_on": "2026-09-30",
+      "reason": "crucible-v16.0 operator decisions (delegated by the operator 2026-09-30; docs/research/crucible_deep_audit_2026-09-30.md): lockbox -> Wald SPRT on the forward Sharpe difference (the fixed 63-bar marginal-Sharpe rule was a sign-inverted coin flip); cohort enforce_funnel_feasibility false (consistent with v15: pre-registrations are tested, not screened); scout altdata.min_bar_coverage 0.50",
+      "previous_sha256": "3e32b813caf2380c84c73023548b3f530e64d67fe81b43564853d74b8ed93642"
+    },
+    "configs/crucible_calibration.gates.yaml": {
+      "sha256": "edb180dfce5abda12e9ec2f1873623c74857ddff07d8e4d2cebb47fe913213bf",
+      "registered_on": "2026-09-30",
+      "reason": "initial registration 2026-09-30 (SharpOps ladder decision item 7): baseline of every gates file as committed; later edits need a re-registration citing a decision"
+    },
+    "configs/crucible_calibration_crossmarket.gates.yaml": {
+      "sha256": "1fefc4bed902a241102039ba5503123b39fe6181127def0291902f2f5830f043",
+      "registered_on": "2026-09-30",
+      "reason": "initial registration 2026-09-30 (SharpOps ladder decision item 7): baseline of every gates file as committed; later edits need a re-registration citing a decision"
+    },
+    "configs/crucible_calibration_deep.gates.yaml": {
+      "sha256": "dd586bdc7bacad0c75bcc3015705bea0fe0db2188f420e7ad6416ad6758c7c9d",
+      "registered_on": "2026-09-30",
+      "reason": "initial registration 2026-09-30 (SharpOps ladder decision item 7): baseline of every gates file as committed; later edits need a re-registration citing a decision"
+    },
+    "configs/crucible_calibration_intraday.gates.yaml": {
+      "sha256": "58f4290196bf8309e14b95cdf31b7c761320f1d970c2224ce69000d3c814c87e",
+      "registered_on": "2026-09-30",
+      "reason": "initial registration 2026-09-30 (SharpOps ladder decision item 7): baseline of every gates file as committed; later edits need a re-registration citing a decision"
+    },
+    "configs/crucible_calibration_intraday_corrected.gates.yaml": {
+      "sha256": "73e80cff615b9368e03dc39233174b0e04e338b5aa7f86d4fdb086fdc07985f2",
+      "registered_on": "2026-09-30",
+      "reason": "initial registration 2026-09-30 (SharpOps ladder decision item 7): baseline of every gates file as committed; later edits need a re-registration citing a decision"
+    },
+    "configs/crucible_cohort.gates.yaml": {
+      "sha256": "743803453a2634c878685695e8b94ca49d1736eaf69e9458aa0eee4943bc269d",
+      "registered_on": "2026-09-30",
+      "reason": "crucible-v16.0 operator decisions (delegated by the operator 2026-09-30; docs/research/crucible_deep_audit_2026-09-30.md): lockbox -> Wald SPRT on the forward Sharpe difference (the fixed 63-bar marginal-Sharpe rule was a sign-inverted coin flip); cohort enforce_funnel_feasibility false (consistent with v15: pre-registrations are tested, not screened); scout altdata.min_bar_coverage 0.50",
+      "previous_sha256": "8da0722fa4ddb301ead0d445d9d65dab500c45d8578621856fd3bb81bfcde3e6"
+    },
+    "configs/crucible_corrected_contract.gates.yaml": {
+      "sha256": "d1523707b860513079d7312f1f9bbd3fbd09a3bfce078b9c6dc4c4b4458a6f03",
+      "registered_on": "2026-09-30",
+      "reason": "initial registration 2026-09-30 (SharpOps ladder decision item 7): baseline of every gates file as committed; later edits need a re-registration citing a decision"
+    },
+    "configs/crucible_lockbox.gates.yaml": {
+      "sha256": "aada955153b3330c8aa87284dd3c45d859612dbf9589b6b5180c074154234370",
+      "registered_on": "2026-09-30",
+      "reason": "crucible-v16.0 operator decisions (delegated by the operator 2026-09-30; docs/research/crucible_deep_audit_2026-09-30.md): lockbox -> Wald SPRT on the forward Sharpe difference (the fixed 63-bar marginal-Sharpe rule was a sign-inverted coin flip); cohort enforce_funnel_feasibility false (consistent with v15: pre-registrations are tested, not screened); scout altdata.min_bar_coverage 0.50",
+      "previous_sha256": "8f8a7a4879e30ef12adca3e6b79d1b36c7b670d892024832eda51e7256797ea3"
+    },
+    "configs/crucible_multiplicity.gates.yaml": {
+      "sha256": "a7604a06bf9343b519031e0be43ff00ad0ded6a40679b18d14c75c3d9ed37f76",
+      "registered_on": "2026-09-30",
+      "reason": "initial registration 2026-09-30 (SharpOps ladder decision item 7): baseline of every gates file as committed; later edits need a re-registration citing a decision"
+    },
+    "configs/crucible_power.gates.yaml": {
+      "sha256": "d5367ef306a9e32405163f365bb20d4915a235cfddf5c29acda55daaa83e94b8",
+      "registered_on": "2026-09-30",
+      "reason": "initial registration 2026-09-30 (SharpOps ladder decision item 7): baseline of every gates file as committed; later edits need a re-registration citing a decision"
+    },
+    "configs/crucible_search_memory.gates.yaml": {
+      "sha256": "26a0f6433347b6a79c23e16ca8a8332f0b293220577a7d43462a8f5c4e9cbadb",
+      "registered_on": "2026-09-30",
+      "reason": "initial registration 2026-09-30 (SharpOps ladder decision item 7): baseline of every gates file as committed; later edits need a re-registration citing a decision"
+    },
+    "configs/crypto_xsec.gates.yaml": {
+      "sha256": "8f5bc9e364026fc3e42069d209686b4bc901aed8fa8aefbe0de3d389faa18b26",
+      "registered_on": "2026-09-30",
+      "reason": "initial registration 2026-09-30 (SharpOps ladder decision item 7): baseline of every gates file as committed; later edits need a re-registration citing a decision"
+    },
+    "configs/data_integrity.gates.yaml": {
+      "sha256": "c2e71ac8fcc51a849b72aa09dcab92c0177443c4f2264aedff7c8a4a15e5741c",
+      "registered_on": "2026-09-30",
+      "reason": "2026-09-30 new (operator: 'do N8 and N13'): TAILWIND Tier-2 N8 close-aware panel integrity gate; calibrated so the 3 real 18-ETF caches PASS and all 8 T1-02 injections FAIL"
+    },
+    "configs/execution_overlay.gates.yaml": {
+      "sha256": "2bb1aebd2dbe397c483f2201921c623474248ab75dcb043b57b3180029eb8ce1",
+      "registered_on": "2026-09-30",
+      "reason": "initial registration 2026-09-30 (SharpOps ladder decision item 7): baseline of every gates file as committed; later edits need a re-registration citing a decision"
+    },
+    "configs/funding_arb_dsac_velotrade_wf.gates.yaml": {
+      "sha256": "d55c8a727468e5eb7b32691159226d94c1828e18dbb7d166f9940a2ff0e11fbb",
+      "registered_on": "2026-09-30",
+      "reason": "initial registration 2026-09-30 (SharpOps ladder decision item 7): baseline of every gates file as committed; later edits need a re-registration citing a decision"
+    },
+    "configs/gmgp1_btc_feature_ablation.gates.yaml": {
+      "sha256": "cb8c48f262a588e40f8006b16a06313aa5507c68f2d9b2f8d228617017c15bf3",
+      "registered_on": "2026-09-30",
+      "reason": "initial registration 2026-09-30 (SharpOps ladder decision item 7): baseline of every gates file as committed; later edits need a re-registration citing a decision"
+    },
+    "configs/gmgp1_btc_velotrade_ensemble.gates.yaml": {
+      "sha256": "0a5cf80ec6d3a6203015cfb471f9c690c114d9a648d20afc8bad3a0c2ef27d0f",
+      "registered_on": "2026-09-30",
+      "reason": "initial registration 2026-09-30 (SharpOps ladder decision item 7): baseline of every gates file as committed; later edits need a re-registration citing a decision"
+    },
+    "configs/gmgp1_btc_x2deleak_canary_ensemble.gates.yaml": {
+      "sha256": "9d073c18b3f3bcc7a0d85a54264aba7bb7443cea1a23fc6c2320e3e929f00bd2",
+      "registered_on": "2026-09-30",
+      "reason": "initial registration 2026-09-30 (SharpOps ladder decision item 7): baseline of every gates file as committed; later edits need a re-registration citing a decision"
+    },
+    "configs/gmgp1_data_window_study.gates.yaml": {
+      "sha256": "08d07c61a0ef58ed4621967bf1080019aad4ded886d0a6f7c5f581d80b9257c0",
+      "registered_on": "2026-09-30",
+      "reason": "initial registration 2026-09-30 (SharpOps ladder decision item 7): baseline of every gates file as committed; later edits need a re-registration citing a decision"
+    },
+    "configs/gmgp1_eurusd_oanda_ensemble.gates.yaml": {
+      "sha256": "039f951a919def5cac42c038a3fcb605825c62319f40345a9e05f47703006c92",
+      "registered_on": "2026-09-30",
+      "reason": "initial registration 2026-09-30 (SharpOps ladder decision item 7): baseline of every gates file as committed; later edits need a re-registration citing a decision"
+    },
+    "configs/gmgp1_gold_steadystate_ensemble.gates.yaml": {
+      "sha256": "0aaa7cb1e2c8aee3c311badce55203d82d3bbe56fc621e906aeb98a4ed8ff033",
+      "registered_on": "2026-09-30",
+      "reason": "initial registration 2026-09-30 (SharpOps ladder decision item 7): baseline of every gates file as committed; later edits need a re-registration citing a decision"
+    },
+    "configs/gmgp1_volume_study.gates.yaml": {
+      "sha256": "c1abee13fe255ae353fac4df333d6d4ffd352d639d9d2c736a5373b3a3baa1ed",
+      "registered_on": "2026-10-01",
+      "reason": "2026-10-01: plan_file made home-relative (comment-grade metadata, no threshold changed) so the published bytes match the registered hash; the publish filter rewrote the absolute path and broke the registry check in the public build",
+      "previous_sha256": "52529a9967bfeb76056ed728f0f6cb075e2140ba2e17e558248304fae65edb29"
+    },
+    "configs/gmgp1_volume_study_v2.gates.yaml": {
+      "sha256": "fab7c53365960485f103401d28b9dd09836e5297b9acff7d007b9df049ff4587",
+      "registered_on": "2026-09-30",
+      "reason": "initial registration 2026-09-30 (SharpOps ladder decision item 7): baseline of every gates file as committed; later edits need a re-registration citing a decision"
+    },
+    "configs/gmgp1_xauusd_ensemble.gates.yaml": {
+      "sha256": "5a7c3dfdbb7b6cdba91dcee131a8b2cbef05493e7c16dc3c5ccec8644a472181",
+      "registered_on": "2026-09-30",
+      "reason": "initial registration 2026-09-30 (SharpOps ladder decision item 7): baseline of every gates file as committed; later edits need a re-registration citing a decision"
+    },
+    "configs/gmgp1_xauusd_extended_ensemble.gates.yaml": {
+      "sha256": "a33198a96b6ce28860dfb8b06950c283e6bd2f2cde5c312a5c30578664913381",
+      "registered_on": "2026-09-30",
+      "reason": "initial registration 2026-09-30 (SharpOps ladder decision item 7): baseline of every gates file as committed; later edits need a re-registration citing a decision"
+    },
+    "configs/intraday_fx_signal_eval.gates.yaml": {
+      "sha256": "83ffe83380fcd38e4b272e9b8edc471f2d91e2c12d2f5b57ce2d7b661d0c30b2",
+      "registered_on": "2026-09-30",
+      "reason": "initial registration 2026-09-30 (SharpOps ladder decision item 7): baseline of every gates file as committed; later edits need a re-registration citing a decision"
+    },
+    "configs/intraday_signal_eval.gates.yaml": {
+      "sha256": "c168e8665c7d5b84eb824be904463d14fca2c78df74ae4b6407da184a1a3e6b8",
+      "registered_on": "2026-09-30",
+      "reason": "initial registration 2026-09-30 (SharpOps ladder decision item 7): baseline of every gates file as committed; later edits need a re-registration citing a decision"
+    },
+    "configs/options_vol_harvest.gates.yaml": {
+      "sha256": "5cee821afe7557d5d04995251b56027e3cd691e2cb11c29ea3bb5c12c544bafd",
+      "registered_on": "2026-09-30",
+      "reason": "initial registration 2026-09-30 (SharpOps ladder decision item 7): baseline of every gates file as committed; later edits need a re-registration citing a decision"
+    },
+    "configs/prism_regime_eval.gates.yaml": {
+      "sha256": "ad4ebb12efda9e25cb19d90d44f9789492ac44fd524765317b580ee7948d5d26",
+      "registered_on": "2026-09-30",
+      "reason": "initial registration 2026-09-30 (SharpOps ladder decision item 7): baseline of every gates file as committed; later edits need a re-registration citing a decision"
+    },
+    "configs/scalp_eval.gates.yaml": {
+      "sha256": "968cd7d037d16508cda98c1b32bb9738b6fa498bb521185d7d3cfcdc1972fa56",
+      "registered_on": "2026-09-30",
+      "reason": "initial registration 2026-09-30 (SharpOps ladder decision item 7): baseline of every gates file as committed; later edits need a re-registration citing a decision"
+    },
+    "configs/sg1_btc_velotrade_ensemble.gates.yaml": {
+      "sha256": "107303a9949787abc7d436c1b481f11a29697bc8b4b46e235141b4e8df276d60",
+      "registered_on": "2026-09-30",
+      "reason": "initial registration 2026-09-30 (SharpOps ladder decision item 7): baseline of every gates file as committed; later edits need a re-registration citing a decision"
+    },
+    "configs/sg1_eurusd_hyper_growth_ensemble.gates.yaml": {
+      "sha256": "809c1d8333b07cd6ec597b675bf9eaa4346ac45b178618d4a80e2b17b08f88e6",
+      "registered_on": "2026-09-30",
+      "reason": "initial registration 2026-09-30 (SharpOps ladder decision item 7): baseline of every gates file as committed; later edits need a re-registration citing a decision"
+    },
+    "configs/sg1_xauusd_ensemble.gates.yaml": {
+      "sha256": "235e0e6b552e24cc63edda0e87a000f65217a38d728274cbeeb9415723e42c6c",
+      "registered_on": "2026-09-30",
+      "reason": "initial registration 2026-09-30 (SharpOps ladder decision item 7): baseline of every gates file as committed; later edits need a re-registration citing a decision"
+    },
+    "configs/sg1_xauusd_volume_study_v2.gates.yaml": {
+      "sha256": "fc84c111763f2916a5b5467576121c281d122e5994146d346359a1c70163a4bc",
+      "registered_on": "2026-09-30",
+      "reason": "initial registration 2026-09-30 (SharpOps ladder decision item 7): baseline of every gates file as committed; later edits need a re-registration citing a decision"
+    },
+    "configs/sg1_xauusd_volume_study_v2_phase2_ensemble.gates.yaml": {
+      "sha256": "d7a7e3b00f3c06f04584b1ba36a3828159d4e9d3a26cc8564cd1683b708010b5",
+      "registered_on": "2026-09-30",
+      "reason": "initial registration 2026-09-30 (SharpOps ladder decision item 7): baseline of every gates file as committed; later edits need a re-registration citing a decision"
+    },
+    "configs/sharpops_ladder.gates.yaml": {
+      "sha256": "b164ba548718545946e9d115ba4fa906d943c548937a875905368c165ce53c9e",
+      "registered_on": "2026-09-30",
+      "reason": "2026-09-30 Math check: e-process daily_loss_bound 0.10 -> 0.05 (0.10 capped the bet; measured power) + reachability table; same session as adoption",
+      "previous_sha256": "083891d290677db4edfa0d89e9f70d7cfca6e8fe147ec9da86bc156ac0e64952"
+    },
+    "configs/signal_eval.gates.yaml": {
+      "sha256": "519158fa14507b4c7f6d4070cf43ca08e1541bea05a9a79491e297b371459468",
+      "registered_on": "2026-09-30",
+      "reason": "initial registration 2026-09-30 (SharpOps ladder decision item 7): baseline of every gates file as committed; later edits need a re-registration citing a decision"
+    },
+    "configs/tailwind_v1.gates.yaml": {
+      "sha256": "9738d741410aaa4bbc416ebb8da32d685fa11df3dd3dbad984c8c40a7e70693e",
+      "registered_on": "2026-09-30",
+      "reason": "2026-09-30 operator-approved (chat: 'do N9 and N14'): N9 PBO restated on Sharpe (0.5902; 0.0009 marked a mean-metric artifact); N14 thresholds moved out of code unchanged (audit_book, recorded_references, a2/render vol tolerances, intraday_mae_mult)",
+      "previous_sha256": "d3089076f40ce76df8ffb5145147c6c3c98f24d4e028b42bf21cc8c964874f0e"
+    },
+    "configs/tailwind_v1_challenge.gates.yaml": {
+      "sha256": "cb00e19d3b38f0759fac344c0e4757ebdc821181252e7d27cf66d0d9a41bcf38",
+      "registered_on": "2026-09-30",
+      "reason": "initial registration 2026-09-30 (SharpOps ladder decision item 7): baseline of every gates file as committed; later edits need a re-registration citing a decision"
+    },
+    "configs/tailwind_v1_challenge_v2.gates.yaml": {
+      "sha256": "4d247c7b43a7ed63f933ae37159e1f6d19698108a269e0f8a1150f87a5dc0274",
+      "registered_on": "2026-09-30",
+      "reason": "2026-09-30 operator-approved (chat: 'do N9 and N14'): N9 PBO restated on Sharpe (0.5902; 0.0009 marked a mean-metric artifact); N14 thresholds moved out of code unchanged (audit_book, recorded_references, a2/render vol tolerances, intraday_mae_mult)",
+      "previous_sha256": "6d92a3523d33e56d191b091713dad0465564fe080769592930d3eff54d288825"
+    },
+    "configs/tailwind_v1_stage4.gates.yaml": {
+      "sha256": "c5b9905e21e2c96afc61c610e73896c03dd0702204855c77fe288c0535956aff",
+      "registered_on": "2026-09-30",
+      "reason": "initial registration 2026-09-30 (SharpOps ladder decision item 7): baseline of every gates file as committed; later edits need a re-registration citing a decision"
+    },
+    "configs/taiwan_signal_eval.gates.yaml": {
+      "sha256": "22a18172be1af89520aee444560bf91c88aecc9a5c9c28813dcc8c81f2857c19",
+      "registered_on": "2026-09-30",
+      "reason": "initial registration 2026-09-30 (SharpOps ladder decision item 7): baseline of every gates file as committed; later edits need a re-registration citing a decision"
+    },
+    "configs/taiwan_smallcap_altdata.gates.yaml": {
+      "sha256": "0ccf6dd584f028c3b9935ca081655649ed2f957d79d7cde19bebc4cbb8f23633",
+      "registered_on": "2026-09-30",
+      "reason": "initial registration 2026-09-30 (SharpOps ladder decision item 7): baseline of every gates file as committed; later edits need a re-registration citing a decision"
+    },
+    "configs/taiwan_smallcap_price.gates.yaml": {
+      "sha256": "0a6cc2bef1195e4430e8f1760c2f6c9e9c1ad478331aa52f9f63f71f4a86eff5",
+      "registered_on": "2026-09-30",
+      "reason": "initial registration 2026-09-30 (SharpOps ladder decision item 7): baseline of every gates file as committed; later edits need a re-registration citing a decision"
+    },
+    "configs/taiwan_smallcap_signal_eval.gates.yaml": {
+      "sha256": "ce53319779197e153c7d077d7e14ad67f9726a58ae554ad2ab457051edeb2667",
+      "registered_on": "2026-09-30",
+      "reason": "initial registration 2026-09-30 (SharpOps ladder decision item 7): baseline of every gates file as committed; later edits need a re-registration citing a decision"
+    },
+    "configs/taiwan_tx_canary.gates.yaml": {
+      "sha256": "6c8aa941ff164361e36a992cc6ff9defb48894508bc427bbd0281cb559033fe5",
+      "registered_on": "2026-09-30",
+      "reason": "initial registration 2026-09-30 (SharpOps ladder decision item 7): baseline of every gates file as committed; later edits need a re-registration citing a decision"
+    },
+    "configs/taiwan_txo_vrp_deltahedge.gates.yaml": {
+      "sha256": "8574411b06a5bb93cc193af87f1943ec652781d5661b0c57a280138581e6b0dd",
+      "registered_on": "2026-09-30",
+      "reason": "initial registration 2026-09-30 (SharpOps ladder decision item 7): baseline of every gates file as committed; later edits need a re-registration citing a decision"
+    },
+    "configs/taiwan_txo_vrp_extension.gates.yaml": {
+      "sha256": "2b16e95416d8805445d8dbb9ede4955f574bedd885c646402ea23329df5a463f",
+      "registered_on": "2026-09-30",
+      "reason": "initial registration 2026-09-30 (SharpOps ladder decision item 7): baseline of every gates file as committed; later edits need a re-registration citing a decision"
+    },
+    "configs/taiwan_txo_vrp_scout.gates.yaml": {
+      "sha256": "77d9e4a3448eb700f7f7b272f177064242cfff45434e855e384de1c42330aa59",
+      "registered_on": "2026-09-30",
+      "reason": "initial registration 2026-09-30 (SharpOps ladder decision item 7): baseline of every gates file as committed; later edits need a re-registration citing a decision"
+    },
+    "configs/taiwan_txo_vrp_validation.gates.yaml": {
+      "sha256": "c94f0f0736ce09e19516b0987035950c24d0142feca7bbd023358b82c98add12",
+      "registered_on": "2026-09-30",
+      "reason": "initial registration 2026-09-30 (SharpOps ladder decision item 7): baseline of every gates file as committed; later edits need a re-registration citing a decision"
+    },
+    "configs/taiwan_txo_vrp_validation_weekly.gates.yaml": {
+      "sha256": "c38084b120182b1acbd8a452abbdb662c297fb15cca8dccc24c0f7ceb03d23f4",
+      "registered_on": "2026-09-30",
+      "reason": "initial registration 2026-09-30 (SharpOps ladder decision item 7): baseline of every gates file as committed; later edits need a re-registration citing a decision"
+    },
+    "configs/us_equity_corrected_contract.gates.yaml": {
+      "sha256": "36a9d93984d4a328b577998e5c298acb64d186dc91e4b1ada9c84cbd50ce4dd7",
+      "registered_on": "2026-09-30",
+      "reason": "initial registration 2026-09-30 (SharpOps ladder decision item 7): baseline of every gates file as committed; later edits need a re-registration citing a decision"
+    },
+    "configs/us_equity_h21_ho60_signal_eval.gates.yaml": {
+      "sha256": "7a50d2c2c481ef69bcd6af73bab5cc28daa0bc3d9ab04109eee7afd4d5822e4d",
+      "registered_on": "2026-09-30",
+      "reason": "initial registration 2026-09-30 (SharpOps ladder decision item 7): baseline of every gates file as committed; later edits need a re-registration citing a decision"
+    },
+    "configs/us_equity_h21_signal_eval.gates.yaml": {
+      "sha256": "2bd8f0a51ea959582b78dc14af5d0abdc9a5d204d1ad1832e847196874fa1833",
+      "registered_on": "2026-09-30",
+      "reason": "initial registration 2026-09-30 (SharpOps ladder decision item 7): baseline of every gates file as committed; later edits need a re-registration citing a decision"
+    },
+    "configs/us_equity_power.gates.yaml": {
+      "sha256": "99b94c3fd2f741cc701b42dcb5b5a0ea4d2fc7f6e273b656fa2fc200f0f907b5",
+      "registered_on": "2026-09-30",
+      "reason": "initial registration 2026-09-30 (SharpOps ladder decision item 7): baseline of every gates file as committed; later edits need a re-registration citing a decision"
+    },
+    "configs/us_equity_signal_eval.gates.yaml": {
+      "sha256": "da293fbfc1982ff2480b833e54f0314ae4c935ac2068e837cdeb480542a86050",
+      "registered_on": "2026-09-30",
+      "reason": "initial registration 2026-09-30 (SharpOps ladder decision item 7): baseline of every gates file as committed; later edits need a re-registration citing a decision"
+    },
+    "configs/vwap_avwap.gates.yaml": {
+      "sha256": "7775926baa9b1577014d3e14c14eb0fe79b7e315dae1a5004973c4c73dd72568",
+      "registered_on": "2026-09-30",
+      "reason": "initial registration 2026-09-30 (SharpOps ladder decision item 7): baseline of every gates file as committed; later edits need a re-registration citing a decision"
+    }
+  }
+}

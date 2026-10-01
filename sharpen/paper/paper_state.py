@@ -122,6 +122,18 @@ class PaperState:
         """Equity = margin + Σ unrealized at ``price``."""
         return self.margin_balance + float(self.unrealized_pnl(price).sum())
 
+    def notional_gross(self, price: np.ndarray, pv: float) -> float:
+        """Actual gross exposure at ``price``: ``sum_i |shares_i * price_i| / pv``, with
+        ``shares_i = entry_notional_i / entry_price_i``, the fixed-notional book's share count.
+        The weight labels say what was targeted; this is what the book holds after price drift
+        (audit T4-12a). +inf when positions sit on no equity, so a kill reading it fails closed."""
+        active = (np.abs(self.positions) > _POS_EPS) & (self.entry_notionals > _NOTIONAL_EPS)
+        held = float((self.entry_notionals[active] * price[active]
+                      / (self.entry_prices[active] + _PRICE_EPS)).sum())
+        if held <= 0.0:
+            return 0.0
+        return held / pv if pv > 1e-12 else float("inf")
+
     def pv_before(self, prev_price: np.ndarray) -> float:
         """``portfolio_value_before`` (env.step): equity at the PRIOR bar's price,
         floored at ``initial_capital·0.001`` — the notional base for this bar's costs."""
@@ -175,10 +187,10 @@ class PaperState:
             added_notional = np.abs(delta_weights[increased]) * pv_before
             old_notional = self.entry_notionals[increased]
             new_notional = old_notional + added_notional
-            self.entry_prices[increased] = (
-                self.entry_prices[increased] * old_notional
-                + price[increased] * added_notional
-            ) / (new_notional + _PRICE_EPS)
+            # Share-weighted VWAP, as env._update_entry_prices (audit T4-10).
+            shares = (old_notional / (self.entry_prices[increased] + _PRICE_EPS)
+                      + added_notional / (price[increased] + _PRICE_EPS))
+            self.entry_prices[increased] = new_notional / (shares + _PRICE_EPS)
             self.entry_notionals[increased] = new_notional
 
         reduced = ~closed & ~from_flat & ~flipped & ~increased & (abs_new < abs_old)
@@ -186,14 +198,20 @@ class PaperState:
             closed_frac = (abs_old[reduced] - abs_new[reduced]) / abs_old[reduced]
             self.entry_notionals[reduced] *= (1.0 - closed_frac)
 
-    def _apply_carry(self, price: np.ndarray, carry_rates: np.ndarray) -> float:
-        """env._apply_carry: per-bar carry on OPEN positions (v1 carry == 0)."""
+    def _apply_carry(self, prev_price: np.ndarray, carry_rates: np.ndarray,
+                     borrow_rates: np.ndarray | None = None) -> float:
+        """env._apply_carry: carry (a long earns it, a short pays it) plus a borrow fee on
+        SHORT notional, both charged on the notional carried INTO the bar (marked at
+        ``prev_price``). Zero unless a financing leg is wired (``sharpen.data.financing``)."""
         active = (np.abs(self.positions) >= _POS_EPS) & (np.abs(self.entry_prices) >= _PRICE_EPS)
         if not active.any():
             return 0.0
-        current_notional = self.entry_notionals[active] * (price[active] / self.entry_prices[active])
-        carry_pnl = np.sign(self.positions[active]) * current_notional * carry_rates[active]
-        return float(carry_pnl.sum())
+        notional = self.entry_notionals[active] * (prev_price[active] / self.entry_prices[active])
+        carry_pnl = float((np.sign(self.positions[active]) * notional * carry_rates[active]).sum())
+        if borrow_rates is not None:
+            short = self.positions[active] < 0.0
+            carry_pnl -= float((notional[short] * borrow_rates[active][short]).sum())
+        return carry_pnl
 
     # ------------------------------------------------------------------ #
     # The per-bar forward step (env.step accounting, ordering preserved)
@@ -208,21 +226,25 @@ class PaperState:
         carry_rates: np.ndarray,
         pv_before: float,
         as_of_ts: int | None = None,
+        borrow_rates: np.ndarray | None = None,
     ) -> dict:
         """Advance the book one bar, mirroring ``MultiAssetAllocatorEnv.step`` exactly.
 
         Caller supplies ``pv_before`` (== ``self.pv_before(prev_price)``, marked BEFORE
         carry) and the ``fill`` whose cost was computed on that same ``pv_before`` — so
         the cost notional base matches the env. Returns the per-bar info the trajectory
-        accumulates. ``prev_price`` is accepted for signature symmetry / future
-        validation; ``pv_before`` already encodes it.
+        accumulates. ``prev_price`` is the close the held positions were marked at when the
+        bar opened: carry and borrow are charged on that notional (env._apply_carry).
+        ``borrow_rates`` is the bar's fee on short notional (None = no borrow).
         """
-        del prev_price  # encoded in pv_before (kept in the signature for call-site clarity)
         delta_weights = np.asarray(delta_weights, dtype=np.float64).ravel()
         old_positions = self.positions.copy()
 
-        # 1. Carry on OLD positions at the new price (env applies before rebalance).
-        carry_pnl = self._apply_carry(price_now, np.asarray(carry_rates, dtype=np.float64).ravel())
+        # 1. Carry + borrow on OLD positions (env applies before rebalance).
+        carry_pnl = self._apply_carry(
+            np.asarray(prev_price, dtype=np.float64).ravel(),
+            np.asarray(carry_rates, dtype=np.float64).ravel(),
+            None if borrow_rates is None else np.asarray(borrow_rates, dtype=np.float64).ravel())
         self.cumulative_carry += carry_pnl
         self.margin_balance += carry_pnl
 
@@ -263,6 +285,7 @@ class PaperState:
             "cost": cost,
             "turnover": float(np.abs(delta_weights).sum()),
             "gross_exposure": float(np.abs(self.positions).sum()),
+            "notional_gross": self.notional_gross(price_now, pv),
             "net_exposure": float(self.positions.sum()),
         }
 
@@ -355,6 +378,10 @@ class LiveTrajectory:
     # terminated early on an env circuit-break (PV < 0.1×capital). Parity is then valid only
     # over the covered prefix, never silently treated as a full-coverage soak (P10-03).
     coverage_incomplete: bool = False
+    # (n_steps,) actual notional gross / equity after each step (audit T4-12a). The labels in
+    # ``gross_exposure`` are capped by construction and understate the drifted book. None on
+    # a path that does not record it; the gross kill then falls back to the labels.
+    notional_gross: np.ndarray | None = None
 
     @property
     def n_steps(self) -> int:
@@ -374,7 +401,14 @@ class LiveTrajectory:
         return float(self.step_returns.min() * 100.0) if self.n_steps else 0.0
 
     def max_gross_exposure(self) -> float:
-        return float(self.gross_exposure.max()) if self.n_steps else 0.0
+        """Largest gross exposure: actual notional (``notional_gross``) when the path records
+        it, else the weight labels (``gross_basis`` says which)."""
+        g = self.gross_exposure if self.notional_gross is None else self.notional_gross
+        return float(np.max(g)) if self.n_steps else 0.0
+
+    @property
+    def gross_basis(self) -> str:
+        return "label" if self.notional_gross is None else "notional"
 
     def corr_to_spy(self, window: int | None = None) -> float | None:
         """Correlation of portfolio daily returns to SPY daily returns over the trailing

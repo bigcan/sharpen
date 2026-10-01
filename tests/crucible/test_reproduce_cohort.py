@@ -84,7 +84,8 @@ def test_cohort_run_reproduces_and_cohort_drift_is_detected(tmp_path: Path) -> N
     manifest = json.loads(pristine)
     assert manifest["cohort_verdicts"], "expected the 8-slot synthetic overlay pool to form a cohort"
     assert manifest["cohort_card_hashes"], "cohort card hash (pins the MC p-value) must be pinned"
-    assert manifest["extra"] == {}, "cohort provenance must be a pinned field, not the non-gated extra"
+    # v15.0: `extra` carries only the offspring-search sidecar; cohort provenance must stay a PINNED field
+    assert set(manifest["extra"]) == {"offspring_searched"},         "cohort provenance must be a pinned field, not the non-gated extra"
     assert next(run_dir.glob("cards/cohort_*.json")).exists()
 
     # (1) reproduce PASSES: the recipe re-runs the cohort gate (it carries --cohort-config) and

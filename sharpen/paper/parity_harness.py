@@ -229,6 +229,8 @@ class ParityHarness:
         price = np.asarray(arrays["price_ary"], dtype=np.float64)
         volume = np.asarray(arrays["volume_ary"], dtype=np.float64)     # DOLLAR volume (F1)
         carry = np.asarray(arrays["carry_ary"], dtype=np.float64)
+        borrow_raw = arrays.get("borrow_ary")       # financing leg: fee on short notional
+        borrow = None if borrow_raw is None else np.asarray(borrow_raw, dtype=np.float64)
         ts = np.asarray(arrays["timestamps"], dtype=np.int64)
         T, N = price.shape
         W = np.asarray(target_weights, dtype=np.float64)
@@ -251,7 +253,7 @@ class ParityHarness:
         book = PaperState(n_assets=N, initial_capital=self.initial_capital, assets=assets)
 
         weights, equity = [], [self.initial_capital]
-        rets, turns, cumfees, gross, net, stamps = [], [], [], [], [], []
+        rets, turns, cumfees, gross, net, stamps, ngross = [], [], [], [], [], [], []
         for k in range(n_replay):
             prev_price, price_now = price[k], price[k + 1]
             pv_before = book.pv_before(prev_price)
@@ -265,6 +267,7 @@ class ParityHarness:
             info = book.step_bar(
                 delta_weights=delta, fill=fill, prev_price=prev_price, price_now=price_now,
                 carry_rates=carry[k + 1], pv_before=pv_before, as_of_ts=int(ts[k + 1]),
+                borrow_rates=None if borrow is None else borrow[k + 1],
             )
             weights.append(book.positions.copy())
             equity.append(info["portfolio_value"])
@@ -272,6 +275,7 @@ class ParityHarness:
             turns.append(info["turnover"])
             cumfees.append(book.cumulative_fees)
             gross.append(info["gross_exposure"])
+            ngross.append(info["notional_gross"])
             net.append(info["net_exposure"])
             stamps.append(int(ts[k + 1]))
 
@@ -294,6 +298,7 @@ class ParityHarness:
             initial_capital=self.initial_capital,
             spy_returns=spy_returns,
             coverage_incomplete=coverage_incomplete,
+            notional_gross=np.asarray(ngross, dtype=np.float64),
         )
 
     @staticmethod
@@ -309,10 +314,14 @@ class ParityHarness:
 
     def _attribution(self, W: np.ndarray, price: np.ndarray, assets: list[str],
                      asset_class: dict[str, str]) -> tuple[dict[str, float], np.ndarray | None]:
-        """Cumulative gross-return attribution per class (``Σ_k Σ_{i∈c} W[k,i]·ret[k+1,i]``)
-        and SPY daily returns for the corr-to-SPY drift gate (None if SPY absent)."""
+        """Cumulative gross-return attribution per class (``Σ_k Σ_{i∈c} W[k-1,i]·rets[k,i]``,
+        ``rets[k]`` the k→k+1 move) and SPY daily returns for the corr-to-SPY drift gate (None
+        if SPY absent). ``_replay`` fills row ``W[k]`` at close k+1, so the book's step-k return
+        is ``W[k-1]·rets[k]``: pairing ``W[k]`` with ``rets[k]`` credits each row with the move
+        before it was entered (N11; audit T2-10/T4-09/T6-13). ``rets[0]`` is earned by the flat
+        opening book and the last row's move lies past the window, so both drop out."""
         rets = self._asset_returns(price)              # (T-1, N)
-        contrib = W * rets                             # (T-1, N) gross attribution
+        contrib = W[:-1] * rets[1:]                    # (T-2, N) gross attribution
         class_pnl: dict[str, float] = {}
         for c in sorted(set(asset_class.get(a, "all") for a in assets)):
             idx = [i for i, a in enumerate(assets) if asset_class.get(a, "all") == c]

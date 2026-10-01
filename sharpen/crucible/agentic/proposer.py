@@ -22,6 +22,7 @@ from typing import Protocol, runtime_checkable
 
 from ...signals.library._alpha_formulas import FORMULAS
 from ...signals.library.alphas101 import SKIP
+from ..search_memory import hypothesis_keys
 
 # OHLCV base terminals (grammar ``INPUTS``) are NOT overlay feature slots — a proposer identifies a
 # feature slot as any available terminal outside this set (e.g. ``fred:DGS10``, ``macro:regime``).
@@ -34,14 +35,23 @@ _OHLCV_TERMINALS = frozenset(
 # pre-registration record carries a real hypothesis, not "rank of formula 33".
 _CS_SEED_BANK: tuple[tuple[int, str, str, int], ...] = (
     # (WQ101 formula index, kebab name, one-line falsifiable hypothesis, expected_sign)
-    (1, "cs-ret-reversal", "short-horizon cross-sectional return reversal earns a premium", -1),
-    (3, "cs-oc-volume-corr", "open-close vs volume co-movement predicts cross-sectional returns", -1),
-    (4, "cs-low-rank-reversal", "ts-rank of lows mean-reverts across the cross-section", -1),
-    (6, "cs-open-volume-corr", "open/volume correlation is a cross-sectional flow proxy", -1),
+    #
+    # v15.0 — every sign is +1. The WQ101 formulas are PRE-SIGNED (library/alphas101.py: "Every alpha is
+    # the pre-signed score (expected_sign=+1)"; the reversal ones carry their own `-1 *`), and the funnel
+    # trades the formula as written. Five of these eight were labelled -1, describing the direction of the
+    # INNER quantity rather than of the formula — harmless only while the Author ignored the sign. Now
+    # that a declared -1 is folded into the tested formula (hypothesis.sign_folded_formula), keeping those
+    # labels would have silently flipped #1/#3/#4/#6/#53 to the anti-WQ101 direction. With +1 the formula
+    # strings and candidate hashes are unchanged; the recorded pre-registrations of these five said -1
+    # while the test ran +1 (the published direction) — noted in the v15.0 changelog.
+    (1, "cs-ret-reversal", "short-horizon cross-sectional return reversal earns a premium", 1),
+    (3, "cs-oc-volume-corr", "open-close vs volume co-movement predicts cross-sectional returns", 1),
+    (4, "cs-low-rank-reversal", "ts-rank of lows mean-reverts across the cross-section", 1),
+    (6, "cs-open-volume-corr", "open/volume correlation is a cross-sectional flow proxy", 1),
     (9, "cs-1d-momentum", "one-day conditional momentum persists cross-sectionally", 1),
     (12, "cs-volume-delta-rev", "volume-change gates one-day price reversal", 1),
     (33, "cs-open-close-ratio", "the open/close ratio is a cross-sectional reversal signal", 1),
-    (53, "cs-intraday-range", "intraday range position predicts cross-sectional reversal", -1),
+    (53, "cs-intraday-range", "intraday range position predicts cross-sectional reversal", 1),
 )
 
 # ---------------------------------------------------------------------------------------------
@@ -87,6 +97,27 @@ _OVERLAY_TEMPLATES: tuple[tuple[str, str, str, int], ...] = (
     ("smooth", "decay_linear({t}, 10)",
      "a smoothed {t} reduces whipsaw as a book-timing conditioner", 1),
 )
+
+
+_PER_NAME_XS_TEMPLATES: tuple[tuple[str, str, str, int], ...] = (
+    ("xs-level", "rank({t})", "names with a higher {t} outperform cross-sectionally", 1),
+    ("xs-trend", "rank(delta({t}, 20))",
+     "names whose {t} rose over 20 bars outperform cross-sectionally", 1),
+    ("xs-smooth", "rank(decay_linear({t}, 10))",
+     "a smoothed {t} ranks next-period cross-sectional returns", 1),
+)
+
+
+def _registered(p: "HypothesisProposal", context: "ProposalContext") -> bool:
+    """True if the Author would drop ``p`` as already registered (any of its three dedup keys is in the
+    agent view). Lets the library proposer skip spent hypotheses BEFORE truncating at
+    ``max_proposals``. An unparseable formula is left in, for the Author to reject with its own log."""
+    try:
+        ch, sh, st = hypothesis_keys(p.formula, p.expected_sign, p.candidate_type)
+    except Exception:                                         # noqa: BLE001
+        return False
+    return (ch in context.existing_candidate_hashes or sh in context.existing_semantic_hashes
+            or st in context.existing_stat_hashes)
 
 
 def _interleave(a: list, b: list) -> list:
@@ -168,6 +199,13 @@ class ProposalContext:
     killed_families: tuple[str, ...] = ()
     existing_candidate_hashes: frozenset[str] = frozenset()
     existing_semantic_hashes: frozenset[str] = frozenset()
+    #: v15.0 — the third dedup key, invariant to every transform the scored BOOK is invariant to
+    #: (``search_memory.statistical_hash``). A hash of formula TEXT only (CR-1).
+    existing_stat_hashes: frozenset[str] = frozenset()
+    #: v15.0 — the feature slots that carry a PER-NAME ``(T, N)`` matrix (data SHAPE, CR-1-legal). Such a
+    #: slot varies across the cross-section, so it is meaningful inside ``rank()`` as a CROSS-SECTIONAL
+    #: hypothesis; a broadcast ``(T,)`` slot is overlay-only.
+    per_name_slots: tuple[str, ...] = ()
     asset_classes: tuple[str, ...] = ()
     max_proposals: int = 32
     panel_n: int = 0
@@ -264,6 +302,17 @@ class LibrarySeedProposer:
                         family="101alpha", expected_sign=_EXTENDED_SIGN,
                         candidate_type="cross_sectional", formula=FORMULAS[idx],
                         economic_rationale=_EXTENDED_CS_BANK_NOTE.format(idx=idx)))
+            for term in _round_robin_by_source(tuple(context.per_name_slots)):   # v15.0
+                slug = term.replace(":", "-").replace("_", "-")
+                for suffix, tmpl, hypo_t, sign in _PER_NAME_XS_TEMPLATES:
+                    xsec.append(HypothesisProposal(
+                        name=f"xs-{slug}-{suffix.removeprefix('xs-')}",
+                        hypothesis=hypo_t.format(t=term), family="altdata", expected_sign=sign,
+                        candidate_type="cross_sectional", formula=tmpl.format(t=term),
+                        economic_rationale=(
+                            f"Per-name cross-sectional (v15.0): {term} is a (T,N) per-name series, so "
+                            f"ranking names on it is a cross-sectional hypothesis with the panel's "
+                            f"breadth. GENERIC prior, not a bespoke story: {hypo_t.format(t=term)}.")))
         if self.include_overlay:
             for term in _round_robin_by_source(context.feature_slots()):
                 slug = term.replace(":", "-").replace("_", "-")
@@ -284,4 +333,10 @@ class LibrarySeedProposer:
         # round-robin, the same discipline `_round_robin_by_source` already applies across alt-data
         # sources (a batch cap must not silently become a type filter).
         out = xsec + overlay if not self.extended_cs_bank else _interleave(xsec, overlay)
+        # v15.0 — DEDUP BEFORE THE CAP. The batch was truncated here and deduplicated only afterwards by
+        # the Author, so with the extended bank at the default cap of 32 the first tick registered 32
+        # and every later tick re-emitted those same 32 — all dropped as duplicates — leaving the other
+        # 77 published formulas permanently unreachable. On a fresh ledger nothing is filtered, so the
+        # first batch is byte-identical.
+        out = [p for p in out if not _registered(p, context)]
         return out[: context.max_proposals]

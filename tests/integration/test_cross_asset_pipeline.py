@@ -78,9 +78,18 @@ def test_load_gate_thresholds_from_overlay():
     assert g["max_cost_gap"] == 0.15
 
 
-def test_load_gate_thresholds_defaults_without_file():
-    g = pipe.load_gate_thresholds({})
-    assert g["min_uplift"] == 0.10 and g["wf_net_sharpe_floor"] == 0.40
+def test_load_gate_thresholds_fails_closed_without_file_or_key(tmp_path):
+    """Tier-2 N14: no in-code defaults. A config without a gates file, or a gates file missing a
+    key, raises instead of silently using a number the code chose."""
+    import pytest
+    import yaml
+    with pytest.raises(ValueError, match="gates_file"):
+        pipe.load_gate_thresholds({})
+    g = tmp_path / "x.gates.yaml"
+    g.write_text(yaml.safe_dump({"gates": {"rl_beats_linear": {"min_uplift_vs_baseline": 0.1}}}),
+                 encoding="utf-8")
+    with pytest.raises(KeyError, match="wf_net_sharpe_floor"):
+        pipe.load_gate_thresholds({"ensemble": {"gates_file": str(g)}})
 
 
 # --------------------------------------------------------------------------- #

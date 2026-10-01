@@ -27,6 +27,7 @@ from typing import Mapping
 import numpy as np
 import pandas as pd
 
+from sharpen.data.financing import financing_spec
 from sharpen.envs.multi_asset_allocator_env import MultiAssetAllocatorEnv
 
 logger = logging.getLogger(__name__)
@@ -117,6 +118,7 @@ def make_allocator_env(
         carry_ary=arrays["carry_ary"],
         volume_ary=arrays["volume_ary"],
         timestamps=arrays["timestamps"],
+        borrow_ary=arrays.get("borrow_ary"),    # financing leg (sharpen.data.financing); None = off
         **kwargs,
     )
 
@@ -138,7 +140,9 @@ def monthly_rebal_conviction(timestamps: np.ndarray, conviction_ary: np.ndarray)
     forward / incremental reader MUST NOT take ``monthly_rebal_conviction(window)[-1]`` as the
     live target: use :func:`linear_core_weights` ``w[-1]`` (which lags to the last CONFIRMED
     month-end) or an independent true-month-end calendar. Reading the in-progress tail is an
-    ADR-2 "daily is a different strategy" / X2-class look-ahead trap."""
+    ADR-2 "daily is a different strategy" / X2-class look-ahead trap. The decision lead
+    (:func:`_apply_decision_lead`), which reads row ``k+1`` at step ``k``, would reach that
+    final-bar flag at the last decision, so it holds there instead of consuming it."""
     ts = np.asarray(timestamps, dtype=np.int64)
     dates = pd.to_datetime(ts, unit="s")
     months = dates.to_period("M")
@@ -157,14 +161,20 @@ def monthly_rebal_conviction(timestamps: np.ndarray, conviction_ary: np.ndarray)
 
 
 def _drive(env: MultiAssetAllocatorEnv, action_at_step) -> tuple[dict, np.ndarray, dict]:
-    """Run ``env`` to termination, action chosen by ``action_at_step(step_idx, obs)``
-    (env-native convention: action at step k governs the k→k+1 move). Returns
-    ``(metrics, weights, trajectory)``: ``metrics`` from the env's own step returns /
-    turnover; ``weights[k]`` the signed target weight held during the k→k+1 move
-    (``info['position']`` after the step — post vol-scaling, availability-zeroing,
-    and gross cap); ``trajectory`` the per-step series (equity curve, step returns,
-    turnover, running fees) the paper executor's parity harness consumes as the sim
-    oracle (ADR-7)."""
+    """Run ``env`` to termination, action chosen by ``action_at_step(step_idx, obs)``.
+
+    Env-native timing: the action at step ``k`` is decided at bar ``k`` and FILLS at close
+    ``k+1`` (``MultiAssetAllocatorEnv.step`` advances the clock, then rebalances at
+    ``price[k+1]``). The new weight therefore earns the ``(k+1)->(k+2)`` move; step ``k``'s
+    own return is the ``k->(k+1)`` move of the weights held before it. (Before 2026-09-29
+    this said "governs the k→k+1 move" — one bar early; full-codebase audit R-3.)
+
+    Returns ``(metrics, weights, trajectory)``: ``metrics`` from the env's own step returns /
+    turnover; ``weights[k]`` the signed weight filled at close ``k+1`` and held over
+    ``(k+1)->(k+2)`` (``info['position']`` after the step — post vol-scaling,
+    availability-zeroing, and gross cap); ``trajectory`` the per-step series (equity curve,
+    step returns, turnover, running fees) the paper executor's parity harness consumes as
+    the sim oracle (ADR-7)."""
     obs, _ = env.reset()
     step_returns: list[float] = []
     turnovers: list[float] = []
@@ -241,6 +251,80 @@ def _exposure_metrics(weights, n_steps: int) -> dict:
     }
 
 
+_DECISION_LEAD_KEY = "decision_lead_bars"
+_CUTOFF_LAG_KEYS = ("conviction_cutoff_lag", "vol_cutoff_lag")
+
+
+def decision_lead_bars(config: Mapping) -> int:
+    """``execution.decision_lead_bars``: 0 (default, the legacy drive) or 1.
+
+    The env fills a step-``k`` decision at close ``k+1`` (its one-bar execution latency, the
+    paper fill model's "next close"). The linear-core arrays are ALREADY causal at ``t-1``:
+    row ``t`` of ``conviction_ary`` / ``vol_ary`` reads data ``<= t-1``. Feeding row ``k`` at
+    step ``k`` therefore puts two bars between the data cutoff and the fill, so the month-end
+    rebalance lands on the first close of the NEXT month — one day staler than the validated
+    research convention (month-end ``d`` weights from data ``<= d-1``, filled at close ``d``;
+    full-codebase audit 2026-09-23, R-3).
+
+    ``1`` feeds row ``k+1`` at step ``k``: the decision reads data ``<= k`` and fills at close
+    ``k+1`` — one bar from cutoff to fill, the research convention under the env's own
+    latency, with no same-close idealization. Like the live scheduler (the parity harness's
+    true-month-end calendar), it needs to know a bar ahead that ``k+1`` is a month-end: the
+    trading calendar is public ex ante, prices are not.
+    """
+    raw = dict(config.get("execution", {}) or {}).get(_DECISION_LEAD_KEY, 0)
+    # The integer 0 or 1 only (TAILWIND Tier-2 N4): int() would coerce True, 1.7 or "1" into a
+    # lead and silently swap the book a run measures.
+    if isinstance(raw, bool) or not isinstance(raw, (int, np.integer)) or int(raw) not in (0, 1):
+        raise ValueError(f"execution.{_DECISION_LEAD_KEY} must be the integer 0 or 1, got {raw!r}")
+    return int(raw)
+
+
+def execution_stamp(config: Mapping) -> dict:
+    """The execution choices that decide WHICH book a linear-core run measured: the decision
+    lead and the financing model. Every executor-path artifact records this (TAILWIND Tier-2
+    N4), because a number cited without it cannot be told apart from the book it did not
+    measure (lead 0 vs 1: DSR 0.930 vs 0.967; unfinanced vs financed: 0.967 vs 0.913)."""
+    spec = financing_spec(config)
+    fin = ({"model": spec.model, "tenor": spec.tenor, "day_count": spec.day_count,
+            "short_borrow_bps": spec.short_borrow_bps} if spec.enabled else {"model": "none"})
+    return {"decision_lead_bars": decision_lead_bars(config), "financing": fin}
+
+
+def _apply_decision_lead(arrays: Mapping, conv_monthly: np.ndarray) -> tuple[dict, np.ndarray]:
+    """Present row ``k+1`` of the conviction and vol arrays at decision step ``k``.
+
+    FAIL-CLOSED on the causal contract: each shifted array must declare a cutoff lag >= 1
+    (``*_cutoff_lag`` from the array builder — row ``t`` reads data ``<= t - lag``), so the
+    row read at step ``k`` uses data ``<= k``. An undeclared or 0 lag raises instead of
+    silently reading the bar being filled (LEAK-2).
+
+    The FINAL bar is never acted on: ``monthly_rebal_conviction`` flags a window's last bar as
+    a month-end whether or not its month is complete (P2-01), so the last decision HOLDS the
+    previous conviction rather than consume that unconfirmed flag. The final step's own return
+    is the move of the weights held before it, so this changes the last weight row only.
+    """
+    for key in _CUTOFF_LAG_KEYS:
+        lag = arrays.get(key)
+        if lag is None or int(lag) < 1:
+            raise ValueError(
+                f"execution.{_DECISION_LEAD_KEY}=1 needs arrays['{key}'] >= 1 (row t reads data "
+                f"<= t-1), got {lag!r}. Deciding a bar early on an array that reads its own bar "
+                f"is look-ahead (LEAK-2): declare the lag only where a current-bar tripwire "
+                f"proves it.")
+    conv = np.asarray(conv_monthly, dtype=np.float64)
+    T = conv.shape[0]
+    if T < 2:
+        return dict(arrays), conv.copy()
+    conv_lead = conv.copy()
+    conv_lead[:-1] = conv[1:]
+    conv_lead[T - 2] = conv[T - 2]           # last decision: hold, never act on the final bar
+    vol = np.asarray(arrays["vol_ary"], dtype=np.float64)
+    vol_lead = vol.copy()
+    vol_lead[:-1] = vol[1:]                  # row k+1 = returns <= k: known at decision bar k
+    return {**arrays, "vol_ary": vol_lead}, conv_lead
+
+
 def _linear_core_drive(
     arrays: Mapping,
     config: Mapping,
@@ -252,7 +336,9 @@ def _linear_core_drive(
     """Shared frozen-linear-core env drive behind :func:`evaluate_linear_core` (the
     gate metrics) and :func:`linear_core_weights` (the executor's weight trajectory).
     Keeping ONE drive path guarantees the executor's target weights are byte-identical
-    to the gate baseline (ADR-7) — rung-1 paper-sim parity is ≈0 by construction.
+    to the gate baseline (ADR-7) — rung-1 paper-sim parity is ≈0 by construction. The one
+    exception is a config with ``execution.decision_lead_bars: 1``, which only the executor
+    paths accept (see :func:`_refuse_lead_for_gate_baseline`).
 
     Drives the env (real config costs, ``eval_mode``) with the monthly-rebalanced
     ``conviction_ary`` under the env-native convention. Forces the v1.1 execution
@@ -275,6 +361,10 @@ def _linear_core_drive(
             raise KeyError("the linear-core drive needs arrays['conviction_ary'] "
                            "(build_allocator_arrays output)")
         conv_monthly = monthly_rebal_conviction(arrays["timestamps"], arrays["conviction_ary"])
+    # Applied HERE, the single drive path, so the gate baseline, the executor's sim oracle
+    # and the forward-recompute drive (conv_monthly supplied) all get the same timing.
+    if decision_lead_bars(config) == 1:
+        arrays, conv_monthly = _apply_decision_lead(arrays, conv_monthly)
     core_overrides = dict(overrides or {})
     if force_levers_off:
         core_overrides.update(_EXECUTION_LEVERS_OFF)
@@ -295,8 +385,22 @@ def evaluate_linear_core(
     RL eval, so the RL−baseline uplift is well-posed. Requires
     ``arrays['conviction_ary']`` (from ``build_allocator_arrays``).
     """
+    _refuse_lead_for_gate_baseline(config, "evaluate_linear_core")
     metrics, _, _ = _linear_core_drive(arrays, config, overrides)
     return metrics
+
+
+def _refuse_lead_for_gate_baseline(config: Mapping, caller: str) -> None:
+    """The RL-beats-linear baseline must run under the RL's own env timing: the policy
+    reads observation row ``k`` (data ``<= k-1``) at step ``k``. With the decision lead
+    the baseline would read row ``k+1`` (data ``<= k``) — one bar more information than
+    the policy it is scored against, which silently tilts the gate toward the baseline.
+    ``decision_lead_bars`` is an EXECUTOR setting; refuse it here (fail closed)."""
+    if decision_lead_bars(config) != 0:
+        raise ValueError(
+            f"{caller}: execution.{_DECISION_LEAD_KEY}=1 is an executor setting. The "
+            f"RL-beats-linear baseline must share the RL policy's timing (obs row k at "
+            f"step k); drive it with a config that leaves the lead at 0.")
 
 
 def evaluate_linear_core_levered(
@@ -323,6 +427,7 @@ def evaluate_linear_core_levered(
     a `rebalance_interval > 1` can block the monthly cadence itself, which is precisely
     the point — it is the RL's discipline applied to the baseline's signal.
     """
+    _refuse_lead_for_gate_baseline(config, "evaluate_linear_core_levered")
     metrics, _, _ = _linear_core_drive(arrays, config, overrides, force_levers_off=False)
     return metrics
 
@@ -336,17 +441,22 @@ def linear_core_weights(
     """Per-step target-weight trajectory of the frozen linear core — the paper
     executor's weight source (ADR-7; resolves spec Open-Item-1 toward the env path).
 
-    Returns ``w`` of shape ``(n_steps, N)`` where ``w[k]`` is the signed weight the
-    core holds during the k→k+1 move (vol-scaled monthly conviction, capped). Because
+    Returns ``w`` of shape ``(n_steps, N)`` where ``w[k]`` is the signed weight decided at
+    bar ``k``, filled at close ``k+1`` and held over ``(k+1)->(k+2)`` (vol-scaled monthly
+    conviction, capped; see :func:`_drive` for the timing and
+    :func:`decision_lead_bars` for which bar's data the decision reads). Because
     it shares :func:`_linear_core_drive` with :func:`evaluate_linear_core`, the
     executor's target weights are byte-identical to the RL-beats-linear gate baseline
+    (for a config without the decision lead, which the gate baseline refuses)
     and rung-1 paper-sim parity is ≈0 by construction (on the accounting axis — see
-    :func:`linear_core_trajectory`). ``w[-1]`` is the weight to hold going forward from the
-    most recent bar (the live order-generation target) — and it is the SAFE forward target:
-    the env drive's last decision (index ``T-2``) reads ``conv_monthly[T-2]``, the last
-    CONFIRMED interior month-end, NOT the in-progress final bar (cf. the
-    :func:`monthly_rebal_conviction` truncation caveat, P2-01). Step-4 MUST source the live
-    target from here, never from ``monthly_rebal_conviction(window)[-1]``.
+    :func:`linear_core_trajectory`).
+
+    ``w[-1]`` of a window that ends at the latest bar is NOT a live target. Its month-end flags
+    come from the window, whose last row is never a confirmed month-end, so under
+    ``execution.decision_lead_bars: 1`` a month-end rebalance read this way fills one or two
+    closes late (TAILWIND Tier-2 T2-01). The forward runner (``sharpen.paper.forward_runner``)
+    is the live target. It appends the next two exchange-calendar sessions to prices truncated
+    at the as-of bar, recomputes the signals, and reads ``w[-2]``.
     """
     _, weights, _ = _linear_core_drive(arrays, config, overrides)
     return weights
@@ -363,7 +473,8 @@ def linear_core_trajectory(
 
     Shares :func:`_linear_core_drive` with :func:`evaluate_linear_core` and
     :func:`linear_core_weights`, so the ``weights`` and ``equity_curve`` returned here
-    are byte-identical to the RL-beats-linear gate baseline. The paper executor's forward
+    are byte-identical to the RL-beats-linear gate baseline (for a config without the
+    decision lead, which the gate baseline refuses). The paper executor's forward
     (SimFillEngine + paper_state) path is compared against this trajectory; rung-1 parity
     is ≈0 by construction. NOTE (Tier-2 audit 2026-06-14): that 0 is load-bearing for
     ACCOUNTING (``daily_return_te_bps`` / equity diverge if the book is wrong) but
@@ -436,23 +547,47 @@ def drive_with_conviction(
 # number, preserving the executor's parity-by-construction model.
 
 
+def _month_end_mask(timestamps: np.ndarray) -> np.ndarray:
+    """Boolean mask of the LAST row of each calendar (year, month) in ``timestamps`` (epoch s,
+    cast to int64 exactly as :func:`_monthly_held` always has). "Last" is the largest ROW INDEX
+    carrying that month — order-independent, i.e. the same set ``groupby(month).max()`` returns —
+    so a window's final row is flagged even when its month is only partly covered (the behaviour
+    ``tests/paper/test_decision_lead.py`` pins as pre-existing).
+
+    Pure numpy (``datetime64[M]`` month keys + ``np.unique`` on the reversed axis). The previous
+    pandas ``to_period('M')`` + ``groupby`` boxed one ``Period`` object per row and was the single
+    largest cost in a Crucible mining tick (measured 2026-09-30: 400 s of a 1,365 s profiled
+    synthetic tick, 74 M ``Period._box_func`` calls). Both produce proleptic-Gregorian UTC months,
+    so the flagged rows are identical."""
+    ts = np.asarray(timestamps, dtype=np.int64)
+    k = ts.shape[0]
+    is_me = np.zeros(k, dtype=bool)
+    if k == 0:
+        return is_me
+    months = ts.astype("datetime64[s]").astype("datetime64[M]").astype(np.int64)
+    _, first_in_reversed = np.unique(months[::-1], return_index=True)
+    is_me[k - 1 - first_in_reversed] = True
+    return is_me
+
+
 def _monthly_held(values: np.ndarray, timestamps: np.ndarray) -> np.ndarray:
     """Forward-fill ``values`` (shape ``(K, ...)``) from the LAST decision bar of each
     (year, month) — the monthly meta-rebalance hold. ``timestamps`` is the per-row decision
-    stamp (epoch s). Rows before the first month-end keep their own value (warmup)."""
-    ts = np.asarray(timestamps, dtype=np.int64)
+    stamp (epoch s). Rows before the first month-end take row 0's value (warmup) — that is what
+    the code has always done (the old docstring said "keep their own value"; in practice both
+    are the NaN trailing-vol warmup, since no month is longer than ``min_periods``).
+
+    Vectorized as an index forward-fill (``np.maximum.accumulate`` over the month-end rows) —
+    pure element copies, so bit-identical to the former per-row Python loop (pinned by
+    ``tests/envs/test_combiner_vectorized_identity.py`` against a verbatim copy of that loop)."""
     out = np.array(values, dtype=np.float64, copy=True)
-    if len(ts) == 0:
+    k = len(np.asarray(timestamps))
+    if k == 0:
         return out
-    months = pd.to_datetime(ts, unit="s").to_period("M")
-    last_of_month = pd.Series(np.arange(len(ts))).groupby(months.values).max().to_numpy()
-    is_me = np.zeros(len(ts), dtype=bool)
-    is_me[last_of_month] = True
-    held = out[0].copy() if out.ndim > 1 else out[0]
-    for k in range(len(ts)):
-        if is_me[k]:
-            held = out[k].copy() if out.ndim > 1 else out[k]
-        out[k] = held
+    is_me = _month_end_mask(timestamps)
+    src = np.where(is_me, np.arange(k), 0)          # rows before the first month-end -> row 0
+    np.maximum.accumulate(src, out=src)
+    out[:k] = out[src]                              # RHS is a copy, so later rows read unmodified values
     return out
 
 
@@ -543,6 +678,19 @@ def _trailing_mean_abs_corr(
     return out
 
 
+def _stack_rows(per_sleeve: Mapping[str, np.ndarray], names: list[str], k: int) -> np.ndarray:
+    """``(k, len(names))`` float64 matrix of the first ``k`` rows of each sleeve's series — exactly the
+    ``series[s][row]`` values the former per-bar loops read for ``row < k``. A series shorter than
+    ``k`` raises, as the loop's ``series[s][k]`` indexing did."""
+    cols = []
+    for s in names:
+        col = np.asarray(per_sleeve[s], dtype=np.float64)
+        if col.shape[0] < k:
+            raise IndexError(f"sleeve {s!r} series has {col.shape[0]} rows < {k} decision bars")
+        cols.append(col[:k])
+    return np.column_stack(cols)
+
+
 def risk_parity_alphas(
     sleeve_returns: Mapping[str, np.ndarray],
     timestamps: np.ndarray,
@@ -579,20 +727,22 @@ def risk_parity_alphas(
     if monthly_meta:
         sig = {s: _monthly_held(sig[s], timestamps) for s in names}
 
-    alphas = {s: np.full(K, 1.0 / N, dtype=np.float64) for s in names}
-    for k in range(K):
-        sk = np.array([sig[s][k] for s in names], dtype=np.float64)
-        usable = np.isfinite(sk) & (sk > vol_floor)
-        if not usable.all():
-            continue  # warmup / degenerate → equal weights (already set)
+    # Vectorized over bars (was a per-bar Python loop): identical element-wise ops, and the per-row
+    # sum is the same contiguous-axis reduction numpy runs on a 1-D row, so the result is
+    # bit-identical (tests/envs/test_combiner_vectorized_identity.py). Warmup/degenerate rows (any
+    # sleeve σ unusable) keep the equal weight 1/N exactly as before.
+    if N == 0:
+        return {}
+    sk = _stack_rows(sig, names, K)                                                  # (K, N)
+    usable = (np.isfinite(sk) & (sk > vol_floor)).all(axis=1)
+    with np.errstate(divide="ignore", invalid="ignore"):
         inv = 1.0 / sk
         if target_portfolio_vol is None:
-            a = inv / inv.sum()                       # convex, Σα = 1
+            a = inv / inv.sum(axis=1, keepdims=True)                    # convex, Σα = 1
         else:
-            a = (1.0 / N) * float(target_portfolio_vol) * inv  # scale-each-to-target, eq-wt
-        for j, s in enumerate(names):
-            alphas[s][k] = a[j]
-    return alphas
+            a = (1.0 / N) * float(target_portfolio_vol) * inv          # scale-each-to-target, eq-wt
+    a = np.where(usable[:, None], a, 1.0 / N)
+    return {s: a[:, j].copy() for j, s in enumerate(names)}
 
 
 def dynamic_sleeve_alphas(
@@ -709,25 +859,28 @@ def dynamic_sleeve_alphas(
         if lam_r > 0.0:
             rho = {s: _monthly_held(rho[s], timestamps) for s in names}
 
-    alphas = {s: np.full(K, 1.0 / N, dtype=np.float64) for s in names}
     lam = float(tilt_strength)
     c = float(tilt_clip)
-    for k in range(K):
-        sk = np.array([sigma[s][k] for s in names], dtype=np.float64)
-        usable = np.isfinite(sk) & (sk > vol_floor)
-        if not usable.all():
-            continue  # σ warmup / degenerate → equal weights (== prior p), no tilt
+    if N == 0:
+        return {}
+    # Vectorized over bars (was a per-bar Python loop — measured 2026-09-30 as the dominant cost of a
+    # Crucible mining tick, which calls this twice per genome). Every step is the same element-wise
+    # op the loop applied to one row, and the row sum is the same contiguous-axis reduction, so α is
+    # bit-identical (tests/envs/test_combiner_vectorized_identity.py pins it against a verbatim copy
+    # of the loop). σ-warmup / degenerate rows keep the equal weight 1/N (== prior p), no tilt.
+    sk = _stack_rows(sigma, names, K)                                                # (K, N)
+    shk = _stack_rows(shat, names, K)
+    rhk = _stack_rows(rho, names, K)
+    usable = (np.isfinite(sk) & (sk > vol_floor)).all(axis=1)
+    with np.errstate(divide="ignore", invalid="ignore", over="ignore"):
         inv = 1.0 / sk                                  # convex inverse-vol prior (unnormalized)
-        shk = np.array([shat[s][k] for s in names], dtype=np.float64)
         tilt = np.exp(lam * np.clip(shk, -c, c))        # =1 where ŝ=0 (warmup/degenerate/λ=0)
-        rhk = np.array([rho[s][k] for s in names], dtype=np.float64)
         rhk = np.where(np.isfinite(rhk), np.clip(rhk, 0.0, 1.0), 0.0)   # NaN warmup → 0 (neutral)
         redund = np.exp(-lam_r * rhk)                   # ≤1; a sleeve collinear with others is down-weighted
         wk = inv * tilt * redund
-        a = wk / wk.sum()                               # convex, Σα = 1
-        for j, s in enumerate(names):
-            alphas[s][k] = a[j]
-    return alphas
+        a = wk / wk.sum(axis=1, keepdims=True)          # convex, Σα = 1
+    a = np.where(usable[:, None], a, 1.0 / N)
+    return {s: a[:, j].copy() for j, s in enumerate(names)}
 
 
 def combiner_alphas(

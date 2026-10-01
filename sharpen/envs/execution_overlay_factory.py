@@ -183,6 +183,7 @@ def make_execution_env(
         price_ary=union["price_ary"],
         volume_ary=union["volume_ary"],
         carry_ary=union["carry_ary"],
+        borrow_ary=union.get("borrow_ary"),
         timestamps=union["timestamps"],
         assets=list(union["assets"]),
         rebalance_steps=rebalance_steps,

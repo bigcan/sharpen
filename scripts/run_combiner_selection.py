@@ -35,6 +35,7 @@ from typing import Mapping, Sequence
 import numpy as np
 import yaml
 
+from sharpen.envs.allocator_factory import execution_stamp
 from sharpen.paper import TwoSleeveExecutor
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
@@ -189,6 +190,7 @@ def main() -> int:
                               split_frac=args.split_frac, perf_metric=args.metric)
     verdict["validation_meta"] = {
         "config": str(args.config), "gates": str(gates_path),
+        "execution_stamp": execution_stamp(config),     # lead + financing (Tier-2 N4)
         "data_start": str(start_ts.date()), "data_end": str(end_ts.date()),
         "require_fresh": require_fresh,
     }

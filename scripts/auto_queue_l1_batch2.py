@@ -71,7 +71,7 @@ def launch_batch2() -> int:
         f"for SEED in {seeds_str}; do "
         "TORCHINDUCTOR_CACHE_DIR=/tmp/inductor_seed$SEED "
         "CUDA_VISIBLE_DEVICES=0 "
-        "nohup /root/miniconda3/bin/python -u scripts/run_full_pipeline.py "
+        "nohup /root/miniconda3/bin/python -u scripts/run_full_pipeline.py --stage l1-multiseed "
         "--config configs/sg1_xauusd_ftmo_rehpo_l1_multiseed.yaml "
         "--run_name sg1-xauusd-l1-multiseed-rehpo-batch2-seed${SEED}_${TS} "
         "--seed $SEED "

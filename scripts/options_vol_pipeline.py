@@ -96,25 +96,31 @@ def load_config(path: str) -> dict:
     return yaml.safe_load(Path(path).read_text(encoding="utf-8"))
 
 
+def _gate(g: dict, dotted: str, src: str) -> float:
+    """Fail closed (Tier-2 N14): a missing gate key raises; there is no in-code default."""
+    node = g
+    for part in dotted.split("."):
+        if not isinstance(node, dict) or part not in node:
+            raise KeyError(f"{src}: missing gate key 'gates.{dotted}' (no in-code default)")
+        node = node[part]
+    return float(node)
+
+
 def load_gate_thresholds(config: dict) -> dict:
     """Read the decision gates from the gates overlay file (gates live in configs,
     never hardcoded — CLAUDE.md invariant)."""
-    gates_file = config.get("ensemble", {}).get("gates_file")
-    defaults = {"min_uplift": 0.10, "wf_net_sharpe_floor": 0.50,
-                "max_cost_gap": 0.90, "max_worst_window_dd_pct": 25.0,
-                "max_corr_to_existing_sleeves": 0.30}
+    gates_file = (config.get("ensemble") or {}).get("gates_file")
     if not gates_file:
-        logger.warning("no ensemble.gates_file — using gate defaults %s", defaults)
-        return defaults
+        raise ValueError("config declares no ensemble.gates_file; the decision gates have no "
+                         "in-code defaults (Tier-2 N14)")
     p = (PROJECT_ROOT / gates_file) if not Path(gates_file).is_absolute() else Path(gates_file)
-    g = yaml.safe_load(p.read_text(encoding="utf-8")).get("gates", {})
+    g = yaml.safe_load(p.read_text(encoding="utf-8")).get("gates") or {}
     return {
-        "min_uplift": float(g.get("rl_beats_linear", {}).get("min_uplift_vs_baseline", 0.10)),
-        "wf_net_sharpe_floor": float(g.get("wf_net_sharpe_floor", 0.50)),
-        "max_cost_gap": float(g.get("g_cost_gap", {}).get("max_frictionless_minus_net_sharpe", 0.90)),
-        "max_worst_window_dd_pct": float(g.get("tail", {}).get("max_worst_window_dd_pct", 25.0)),
-        "max_corr_to_existing_sleeves":
-            float(g.get("g_diversification", {}).get("max_corr_to_existing_sleeves", 0.30)),
+        "min_uplift": _gate(g, "rl_beats_linear.min_uplift_vs_baseline", gates_file),
+        "wf_net_sharpe_floor": _gate(g, "wf_net_sharpe_floor", gates_file),
+        "max_cost_gap": _gate(g, "g_cost_gap.max_frictionless_minus_net_sharpe", gates_file),
+        "max_worst_window_dd_pct": _gate(g, "tail.max_worst_window_dd_pct", gates_file),
+        "max_corr_to_existing_sleeves": _gate(g, "g_diversification.max_corr_to_existing_sleeves", gates_file),
     }
 
 

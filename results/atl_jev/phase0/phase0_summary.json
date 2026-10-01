@@ -1,0 +1,163 @@
+{
+ "phase": 0,
+ "gates_sha256": "28bfb3ba0ffe15c7ee7315519609e11c9a84ea93df7f4ce1b38b297763f23f9a",
+ "C1_knowledge_cutoff": {
+  "preregistered_rule": {
+   "knowledge_detected": false,
+   "T_c": null,
+   "clean_window_from": null
+  },
+  "exploratory_regime_memory_by_year": {
+   "2018": {
+    "corr_implied_vs_realized": 0.176,
+    "mean_abs_lean": 0.0474,
+    "directional_months": 7,
+    "lean_agrees": 5
+   },
+   "2019": {
+    "corr_implied_vs_realized": 0.208,
+    "mean_abs_lean": 0.0372,
+    "directional_months": 9,
+    "lean_agrees": 7
+   },
+   "2020": {
+    "corr_implied_vs_realized": 0.692,
+    "mean_abs_lean": 0.0956,
+    "directional_months": 10,
+    "lean_agrees": 8
+   },
+   "2021": {
+    "corr_implied_vs_realized": 0.279,
+    "mean_abs_lean": 0.0395,
+    "directional_months": 5,
+    "lean_agrees": 3
+   },
+   "2022": {
+    "corr_implied_vs_realized": 0.539,
+    "mean_abs_lean": 0.0773,
+    "directional_months": 9,
+    "lean_agrees": 6
+   },
+   "2023": {
+    "corr_implied_vs_realized": 0.581,
+    "mean_abs_lean": 0.0227,
+    "directional_months": 7,
+    "lean_agrees": 5
+   },
+   "2024": {
+    "corr_implied_vs_realized": -0.105,
+    "mean_abs_lean": 0.0187,
+    "directional_months": 7,
+    "lean_agrees": 5
+   },
+   "2025": {
+    "corr_implied_vs_realized": -0.397,
+    "mean_abs_lean": 0.0145,
+    "directional_months": 5,
+    "lean_agrees": 4
+   },
+   "2026": {
+    "corr_implied_vs_realized": -0.719,
+    "mean_abs_lean": 0.0184,
+    "directional_months": 2,
+    "lean_agrees": 1
+   }
+  },
+  "adopted": {
+   "T_c": "2025-01",
+   "clean_window_from": "2025-02",
+   "first_nonpositive_year": "2024",
+   "rule": "one-year buffer after the first year from which regime correlation stays <= 0; deviation from the pre-registered rule, conservative direction"
+  }
+ },
+ "C3_identification": {
+  "decision": {
+   "identifiable": true,
+   "rule": "masked company_top1 > 0.2"
+  },
+  "summary": {
+   "masked": {
+    "company_top1": 0.935,
+    "company_top1_wilson95": [
+     0.892,
+     0.9616
+    ],
+    "company_top1_djia": 0.9333,
+    "company_top1_other": 0.9353,
+    "mean_p_true_company": 0.923,
+    "year_top1": 0.495,
+    "year_top1_wilson95": [
+     0.4265,
+     0.5637
+    ]
+   },
+   "raw": {
+    "company_top1": 1.0,
+    "company_top1_wilson95": [
+     0.9812,
+     1.0
+    ],
+    "company_top1_djia": 1.0,
+    "company_top1_other": 1.0,
+    "mean_p_true_company": 0.9994,
+    "year_top1": 0.995,
+    "year_top1_wilson95": [
+     0.9722,
+     0.9991
+    ]
+   }
+  },
+  "chance": {
+   "company": 0.1,
+   "year": 0.14285714285714285
+  },
+  "n_filings": 200
+ },
+ "K2_power": {
+  "decision": {
+   "K2_fires": false,
+   "rule": "MDE80 above plausible_ic_max on every verdict universe"
+  },
+  "by_universe": {
+   "sp500": {
+    "mde80_target_ic": 0.02,
+    "mde80_measured_ic": 0.02123,
+    "reachable_at_plausible_ic": true,
+    "active_median": 422,
+    "min_names_per_day": 50
+   },
+   "djia_frozen": {
+    "mde80_target_ic": null,
+    "mde80_measured_ic": null,
+    "reachable_at_plausible_ic": false,
+    "active_median": 30,
+    "min_names_per_day": 50
+   },
+   "djia_whatif": {
+    "mde80_target_ic": 0.05,
+    "mde80_measured_ic": 0.05732,
+    "reachable_at_plausible_ic": false,
+    "active_median": 30,
+    "min_names_per_day": 8
+   }
+  },
+  "verdict_universes": [
+   "djia_frozen",
+   "sp500"
+  ]
+ },
+ "K0_feasibility": {
+  "tokens_per_filing_est": 6679,
+  "corpus_filings": 100000,
+  "cost_usd_est": 28.05,
+  "jev_hours_est": 2.06,
+  "edgar_hours_est": 13.9,
+  "fires": false
+ },
+ "jev_served_models": [
+  "jev-1.13.0"
+ ],
+ "live_run_spend_usd": 0.1264,
+ "mixed_served_versions": false,
+ "phase0_verdict": "PROCEED to Phase 1"
+}

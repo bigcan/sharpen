@@ -44,6 +44,29 @@ def load_config(path: str) -> dict:
 # Fold Runner
 # ---------------------------------------------------------------------------
 
+def fold_metrics(metrics: dict, prefix: str, fold_idx: int, train_range, val_range,
+                 test_range) -> dict:
+    """Read run_backtest's ``<prefix>/<key>`` metrics. The old reader asked for bare
+    ``sharpe_ratio`` / ``max_drawdown`` keys that run_backtest never returns, so every fold
+    metric was None (Protocol v2 audit 2026-09-29, §4). A completed fold with no metrics
+    (no checkpoint) is reported as ``no_metrics``, not ``completed``."""
+    def get(k):
+        return metrics.get(f"{prefix}/{k}")
+    tr = get("total_return")
+    return {
+        "fold": fold_idx,
+        "train_range": str(train_range),
+        "val_range": str(val_range),
+        "test_range": str(test_range),
+        "sharpe": get("sharpe"),
+        "sharpe_daily": get("sharpe_daily"),
+        "max_drawdown": get("max_drawdown"),
+        "total_return_pct": None if tr is None else 100.0 * tr,
+        "profit_factor": get("profit_factor"),
+        "status": "completed" if metrics else "no_metrics",
+    }
+
+
 def run_fold(fold_idx: int, train_range, val_range, test_range, config: dict, dry_run: bool = False,
              seed: int | None = None):
     """
@@ -81,6 +104,10 @@ def run_fold(fold_idx: int, train_range, val_range, test_range, config: dict, dr
         from scripts.run_full_pipeline import run_backtest, run_training
 
         fold_config = copy.deepcopy(config)
+        # SEED-01: the global seed in main() reaches the PARENT process only; envs read it
+        # from config["seed"] (run_full_pipeline.py does the same).
+        if seed is not None:
+            fold_config["seed"] = seed
 
         # Override date ranges for this fold
         fold_config.setdefault("data", {})
@@ -122,16 +149,7 @@ def run_fold(fold_idx: int, train_range, val_range, test_range, config: dict, dr
             logger.warning(f"  No checkpoint found for {fold_id}, skipping backtest")
             metrics = {}
 
-        return {
-            "fold": fold_idx,
-            "train_range": str(train_range),
-            "val_range": str(val_range),
-            "test_range": str(test_range),
-            "sharpe": metrics.get("sharpe_ratio"),
-            "max_drawdown": metrics.get("max_drawdown"),
-            "total_return_pct": metrics.get("total_return_pct"),
-            "status": "completed",
-        }
+        return fold_metrics(metrics, f"wf_{fold_id}", fold_idx, train_range, val_range, test_range)
 
     except Exception as e:
         logger.error(f"  Fold {fold_idx} failed: {e}", exc_info=True)

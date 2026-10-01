@@ -27,6 +27,7 @@ Two design calls, both to keep the moat honest:
 """
 from __future__ import annotations
 
+import math
 from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING
@@ -42,10 +43,16 @@ from ...signals.generation.fitness import (
     FitnessConfig,
     _combined_book,
     _combined_book_with_components,
+    augmented_book,
 )
 
 if TYPE_CHECKING:
     from ...signals.generation.base_sleeves import SleeveComponents
+
+
+#: The lockbox decision rules. ``fixed`` is the pre-v16 rule, kept so an entry enrolled under it is
+#: judged by it (CR-2: the criterion is pinned at enrollment); ``sprt`` is the crucible-v16.0 rule.
+INCUBATION_TESTS = ("fixed", "sprt")
 
 
 @dataclass(frozen=True, slots=True)
@@ -54,21 +61,66 @@ class IncubationCriterion:
     ``configs/crucible_lockbox.gates.yaml`` and copied VERBATIM into each lockbox entry at
     enrollment — pinned per candidate, never edited afterward.
 
+    ``test="fixed"`` (pre-v16, the library default so old constructions keep their meaning):
+
     * ``min_forward_bars`` — the fixed evaluation HORIZON (post-proposal bars) before ANY verdict is
       rendered. Outcome-independent, so the single evaluation at the horizon is a fixed-horizon test,
       not optional stopping / peeking.
     * ``min_forward_sharpe`` — the forward marginal-contribution annualized Sharpe the candidate must
       clear AT the horizon to become eligible for the human Tier-2 gate. Below it -> REJECTED.
+
+    ``test="sprt"`` (crucible-v16.0, the shipped gates). The fixed rule had two defects. Its statistic,
+    the Sharpe of ``b_aug − b_base``, is the Tier-C-sealed substitution residual (``w·(r_c − b_base)``):
+    a genuine variance-reducing diversifier has a NEGATIVE one, so the lockbox would reject exactly the
+    candidates the corrected contract promotes. And one 63-bar look at a 0.30 floor is a coin flip:
+    P(clear) 0.44 at zero edge vs 0.64 at IR 1.0. The v16 rule measures the forward Sharpe DIFFERENCE
+    (the statistic the corrected contract certifies) and decides it with Wald's sequential probability
+    ratio test on ``block_bars`` blocks:
+
+    * ``delta_sr_h1`` — the alternative: the annualized ΔSR a candidate worth a human's time delivers
+      forward. H0 is ΔSR = 0.
+    * ``alpha`` / ``beta`` — P(CLEARED | H0) and P(REJECTED | H1). Boundaries ln((1−β)/α) and
+      ln(β/(1−α)); no verdict before ``min_forward_bars``.
+    * ``max_forward_bars`` — the cap: still undecided there ⇒ INCONCLUSIVE (terminal, not eligible).
+    * ``calib_bars`` — the pre-proposal window that pins each book's vol and the block noise scale.
     """
 
     min_forward_bars: int
     min_forward_sharpe: float
+    test: str = "fixed"
+    max_forward_bars: int = 756
+    block_bars: int = 21
+    calib_bars: int = 504
+    delta_sr_h1: float = 0.30
+    alpha: float = 0.10
+    beta: float = 0.20
 
     def __post_init__(self) -> None:
         if int(self.min_forward_bars) < 2:
             raise ValueError("incubation.min_forward_bars must be >= 2")
         if not np.isfinite(self.min_forward_sharpe):
             raise ValueError("incubation.min_forward_sharpe must be finite")
+        if self.test not in INCUBATION_TESTS:
+            raise ValueError(f"incubation.test must be one of {INCUBATION_TESTS}; got {self.test!r}")
+        if self.test == "sprt":
+            if not (0.0 < self.alpha < 1.0 and 0.0 < self.beta < 1.0 and self.alpha + self.beta < 1.0):
+                raise ValueError("incubation.alpha / beta must lie in (0, 1) with alpha + beta < 1")
+            if int(self.block_bars) < 2 or int(self.calib_bars) < 2 * int(self.block_bars):
+                raise ValueError("incubation.block_bars must be >= 2 and calib_bars >= 2 * block_bars")
+            if int(self.max_forward_bars) < int(self.min_forward_bars):
+                raise ValueError("incubation.max_forward_bars must be >= min_forward_bars")
+            if not (np.isfinite(self.delta_sr_h1) and self.delta_sr_h1 > 0.0):
+                raise ValueError("incubation.delta_sr_h1 must be a finite positive ΔSR")
+
+    @property
+    def log_upper(self) -> float:
+        """SPRT acceptance boundary for H1 (CLEARED): ln((1 − β) / α)."""
+        return math.log((1.0 - self.beta) / self.alpha)
+
+    @property
+    def log_lower(self) -> float:
+        """SPRT acceptance boundary for H0 (REJECTED): ln(β / (1 − α))."""
+        return math.log(self.beta / (1.0 - self.alpha))
 
 
 @dataclass(frozen=True, slots=True)
@@ -79,10 +131,15 @@ class ForwardEvidence:
     forward_sharpe: float
     forward_start_ts: str | None
     forward_end_ts: str | None
+    # crucible-v16.0 SPRT evidence (NaN / 0 when the criterion is "fixed" or not yet calibratable)
+    forward_delta_sr: float = float("nan")    # annualized SR(b_aug) − SR(b_base) on the forward bars
+    sprt_llr: float = float("nan")            # Wald log-likelihood ratio over complete forward blocks
+    n_blocks: int = 0
 
 
 # --- incubation criterion loader (no hardcoded gates — CLAUDE.md) ---------------------------------
-_INCUBATION_DEFAULTS: dict = {"min_forward_bars": 63, "min_forward_sharpe": 0.30}
+_INCUBATION_DEFAULTS: dict = {"min_forward_bars": 63, "min_forward_sharpe": 0.30, "test": "fixed"}
+_SPRT_KEYS = ("max_forward_bars", "block_bars", "calib_bars", "delta_sr_h1", "alpha", "beta")
 
 
 def load_incubation_criterion(gates_path: str | Path) -> IncubationCriterion:
@@ -96,8 +153,12 @@ def load_incubation_criterion(gates_path: str | Path) -> IncubationCriterion:
     with open(gates_path, encoding="utf-8") as fh:
         cfg = yaml.safe_load(fh) or {}
     g = {**_INCUBATION_DEFAULTS, **dict(cfg.get("incubation", {}))}
+    extra = {k: g[k] for k in _SPRT_KEYS if k in g}
     return IncubationCriterion(min_forward_bars=int(g["min_forward_bars"]),
-                               min_forward_sharpe=float(g["min_forward_sharpe"]))
+                               min_forward_sharpe=float(g["min_forward_sharpe"]),
+                               test=str(g["test"]),
+                               **{k: (float(v) if k in ("delta_sr_h1", "alpha", "beta") else int(v))
+                                  for k, v in extra.items()})
 
 
 # --- forward-window slicing (the CR-8 keystone) ---------------------------------------------------
@@ -162,11 +223,50 @@ def _candidate_book(formula: str, candidate_type: str, panel: Panel,
     return None if cr is None else cr[0]
 
 
+def _sprt_evidence(base: dict[str, np.ndarray], cand: np.ndarray, timestamps: np.ndarray,
+                   cfg: FitnessConfig, fwd: np.ndarray, crit: IncubationCriterion) -> dict:
+    """The v16 forward evidence: ΔSR and Wald's log-likelihood ratio (see :class:`IncubationCriterion`).
+
+    Books come from :func:`fitness.augmented_book` — the candidate joins only where the combiner can size
+    it, the same book the corrected contract scores. The per-bar difference of VOL-STANDARDIZED returns
+    ``d = b_aug/σ_aug − b_base/σ_base`` has mean SR_aug − SR_base (per bar), and because the two books
+    share most of their holdings its noise is small (the Memmel pairing that powers the JKM test). The
+    vols and the block noise scale ``s`` are pinned from the last ``calib_bars`` PRE-proposal bars — data
+    that existed at enrollment, so every SPRT increment is a function of forward data alone. Block sums
+    of ``d`` over ``block_bars`` absorb the autocorrelation of held books; with ``y_b = D_b / s`` and
+    ``θ = (delta_sr_h1 / √ppy)·B / s``, the LLR is ``Σ_b (θ·y_b − θ²/2)``. Returns ``{}`` when the
+    pre-proposal window is too short to calibrate (the entry keeps incubating)."""
+    b_base, b_aug, _ = augmented_book(base, cand, timestamps, cfg)
+    ok = np.isfinite(b_base) & np.isfinite(b_aug)
+    blk = int(crit.block_bars)
+    pre_idx = np.flatnonzero(ok & ~fwd)[-int(crit.calib_bars):]
+    n_cal = pre_idx.size // blk
+    if n_cal < 2:
+        return {}
+    sa, sb = float(np.std(b_aug[pre_idx], ddof=1)), float(np.std(b_base[pre_idx], ddof=1))
+    if not (sa > 0.0 and sb > 0.0):
+        return {}
+    d = b_aug / sa - b_base / sb
+    cal = d[pre_idx[pre_idx.size - n_cal * blk:]].reshape(n_cal, blk).sum(axis=1)
+    s = float(np.std(cal, ddof=1))
+    if not (s > 0.0 and np.isfinite(s)):
+        return {}
+    post_idx = np.flatnonzero(ok & fwd)
+    n_blk = post_idx.size // blk
+    fb = d[post_idx[: n_blk * blk]].reshape(n_blk, blk).sum(axis=1) if n_blk else np.zeros(0)
+    theta = crit.delta_sr_h1 / math.sqrt(cfg.periods_per_year) * blk / s
+    llr = float(np.sum(theta * (fb / s) - 0.5 * theta * theta))
+    dsr = (_ann_sharpe(b_aug[post_idx], cfg.periods_per_year)
+           - _ann_sharpe(b_base[post_idx], cfg.periods_per_year)) if post_idx.size >= 2 else math.nan
+    return {"forward_delta_sr": float(dsr), "sprt_llr": llr, "n_blocks": int(n_blk)}
+
+
 def forward_evidence(*, formula: str, candidate_type: str, panel: Panel,
                      base_returns: dict[str, np.ndarray], timestamps: np.ndarray,
                      proposal_ts: str, cfg: FitnessConfig, hold_horizon: int, cost_bps: float,
                      ls_min_names: int,
                      base_components: "dict[str, SleeveComponents] | None" = None,
+                     criterion: IncubationCriterion | None = None,
                      ) -> ForwardEvidence | None:
     """Forward marginal-contribution evidence for a candidate (spec §6.2).
 
@@ -174,7 +274,11 @@ def forward_evidence(*, formula: str, candidate_type: str, panel: Panel,
     pre-proposal history — that is legitimate real-time warmup), forms the marginal stream
     ``b_aug − b_base``, then slices it to bars STRICTLY after ``proposal_ts`` and returns the forward
     window's size + annualized Sharpe. Returns None if the candidate is degenerate or no forward bar
-    exists yet (the panel has not extended past the proposal)."""
+    exists yet (the panel has not extended past the proposal).
+
+    With an ``sprt`` ``criterion`` (crucible-v16.0) the evidence also carries the forward ΔSR and the
+    SPRT log-likelihood ratio the entry is judged on (:func:`_sprt_evidence`); the legacy marginal
+    Sharpe is still reported, unchanged."""
     cand_ret = _candidate_book(formula, candidate_type, panel, base_returns, timestamps, cfg,
                                hold_horizon=hold_horizon, cost_bps=cost_bps, ls_min_names=ls_min_names,
                                base_components=base_components)
@@ -197,6 +301,10 @@ def forward_evidence(*, formula: str, candidate_type: str, panel: Panel,
     fwd_marg = marg[fwd_finite]
     sharpe = _ann_sharpe(fwd_marg, cfg.periods_per_year) if n_fwd >= 2 else float("nan")
     fwd_secs = ts_sec[fwd_finite]
+    extra = (_sprt_evidence({k: v[:n] for k, v in base.items()},
+                            np.asarray(cand_ret, dtype=np.float64)[:n], np.asarray(timestamps)[:n],
+                            cfg, fwd, criterion)
+             if criterion is not None and criterion.test == "sprt" else {})
     return ForwardEvidence(n_forward_bars=n_fwd, forward_sharpe=float(sharpe),
                            forward_start_ts=_iso(float(fwd_secs.min())),
-                           forward_end_ts=_iso(float(fwd_secs.max())))
+                           forward_end_ts=_iso(float(fwd_secs.max())), **extra)

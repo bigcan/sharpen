@@ -864,9 +864,11 @@ def main():
     parser.add_argument("--seed", type=int, default=None,
                         help="Global random seed for reproducibility (torch, numpy, random, env)")
     parser.add_argument("--stage", type=str, default=None,
-                        help="SharpOps stage (data-prep|hpo|l1-multiseed|ensemble-confirm|"
-                             "wf|oos|paper-deploy). When set, the config is validated via "
-                             "scripts/validate_config.py before any training; a FAIL aborts.")
+                        help="SharpOps stage (REQUIRED): hpo | l1-multiseed | wf | "
+                             "ensemble-confirm | oos, or 'all' for the explicit legacy fused "
+                             "HPO+train+backtest run. The stage decides which phases run "
+                             "(sharpen/sharpops/stages.py) and the config is validated via "
+                             "scripts/validate_config.py first; a FAIL aborts.")
     parser.add_argument("--skip_validate", action="store_true",
                         help="Skip the SharpOps config-validation gate (NOT for CI/scheduled jobs).")
     args = parser.parse_args()
@@ -877,12 +879,26 @@ def main():
     # fee-curriculum ban, XPARAM, hindsight, drift/safe-mode and health-key gates
     # actually enforce. Previously run_full_pipeline never invoked validate_config,
     # so a config could silently reproduce e.g. the frictionless-HPO artifact.
-    # --stage names the stage; omitting it warns (backward compatible).
-    if args.stage and not args.skip_validate:
+    # SharpOps P1 (Protocol v2 audit 2026-09-29 §4): the stage is REQUIRED and decides the
+    # phases. It used to be optional and only triggered validation, so every default run
+    # fused HPO -> train -> backtest.
+    from sharpen.sharpops.stages import BACKTEST, HPO, TRAIN, StageError, resolve_stage_phases, validator_stage
+    try:
+        phases = resolve_stage_phases(args.stage, backtest_only=args.backtest_only,
+                                      has_checkpoint=bool(args.checkpoint))
+    except StageError as e:
+        logger.error("SharpOps: %s", e)
+        sys.exit(2)
+    if args.stage == "all":
+        logger.warning("SharpOps: --stage all = the legacy FUSED HPO+train+backtest run "
+                       "(a SharpOps P1 exception; operator-aware use only, never CI).")
+    logger.info("SharpOps stage %r runs phases: %s", args.stage, sorted(phases))
+    if not args.skip_validate:
         import subprocess
         _validator = str(Path(__file__).resolve().parent / "validate_config.py")
         _vc = subprocess.run(
-            [sys.executable, _validator, "--config", args.config, "--stage", args.stage],
+            [sys.executable, _validator, "--config", args.config,
+             "--stage", validator_stage(args.stage)],
         )
         if _vc.returncode != 0:
             logger.error(
@@ -892,11 +908,8 @@ def main():
             )
             sys.exit(_vc.returncode)
         logger.info("SharpOps config validation PASSED for stage '%s'.", args.stage)
-    elif not args.stage:
-        logger.warning(
-            "No --stage given: SharpOps config validation SKIPPED. CI/scheduled "
-            "jobs MUST name the stage (see CLAUDE.md SharpOps).",
-        )
+    else:
+        logger.warning("SharpOps config validation SKIPPED (--skip_validate; not for CI).")
 
     # Auto-detect agent type from config if --agent was not explicitly provided.
     # This prevents KeyError when deploying with e.g. deepscalper_ppo_dev.yaml
@@ -992,8 +1005,8 @@ def main():
             logger.info("HPO storage overridden from --hpo_storage (shared study backend)")
         final_config = copy.deepcopy(base_config)
 
-        if args.backtest_only:
-            logger.info("Backtest-only mode: skipping HPO.")
+        if HPO not in phases:
+            logger.info("Stage %r: HPO phase not run (the stage's params are locked).", args.stage)
         elif hpo_config.get("enabled", True):
             # Silence Optuna INFO logs (Start/Finish trial) to avoid WandB console spam
             optuna.logging.set_verbosity(optuna.logging.WARNING)
@@ -1019,11 +1032,12 @@ def main():
         # =====================================================================
         # PHASE 2: TRAINING
         # =====================================================================
-        if args.backtest_only:
-            if not args.checkpoint:
-                raise ValueError("--backtest_only requires --checkpoint <path>")
-            checkpoint_path = args.checkpoint
-            logger.info(f"Backtest-only mode: using checkpoint {checkpoint_path}")
+        if phases == {HPO}:
+            logger.info("Stage 'hpo' complete: training and backtests belong to later stages.")
+            checkpoint_path = None
+        elif TRAIN not in phases:
+            checkpoint_path = args.checkpoint     # resolve_stage_phases required it
+            logger.info(f"Stage {args.stage!r}: evaluating checkpoint {checkpoint_path}")
         else:
             print("\n" + "="*60)
             print(">>> PHASE 2: TRAINING (Full Run with Best Params)")
@@ -1032,7 +1046,9 @@ def main():
             checkpoint_path = run_training(final_config, run_name, device, agent_type=agent_type,
                                            warm_start=args.warm_start)
 
-        if checkpoint_path:
+        if BACKTEST not in phases:
+            pass
+        elif checkpoint_path:
             # PHASE 3a: Validation Backtest (for Overfitting Check)
             # FIX LEAK-1: Pass train_end_date as cutoff so validation z-scores
             # don't include training data in their rolling windows.

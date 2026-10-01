@@ -41,6 +41,7 @@ import numpy as np
 from sharpen.envs.allocator_factory import (
     combine_sleeve_weights,
     combiner_alphas,
+    decision_lead_bars,
     drive_with_conviction,
     linear_core_trajectory,
 )
@@ -110,11 +111,20 @@ class TwoSleeveExecutor:
     def _sleeve_assets(self, bundle: Mapping) -> dict[str, list[str]]:
         return {s: list(bundle[s]["assets"]) for s in self.sleeve_names}
 
-    @staticmethod
-    def _decision_ts(bundle: Mapping) -> np.ndarray:
-        """Per-step DECISION stamps (one per of the T-1 steps) — the union calendar's
-        bars 0..T-2 (weights w[k] are decided at bar k, applied k→k+1)."""
-        return np.asarray(bundle["union"]["timestamps"], dtype=np.int64)[:-1]
+    def _alpha_ts(self, bundle: Mapping) -> np.ndarray:
+        """Stamps keying the α monthly meta-rebalance, one per of the T-1 steps (weights
+        w[k] are decided at bar k and filled at close k+1). The step on which α may switch
+        must be the step on which the sleeves' month-end conviction switches, or every
+        month-end trades twice (sleeves one close, α the next).
+
+        Legacy drive: the sleeves switch on the month-end DECISION bar, so α keys on the
+        decision stamps (bars 0..T-2). With ``execution.decision_lead_bars: 1`` the sleeves
+        switch one step earlier — the step whose FILL bar is the month-end — so α keys on
+        the fill stamps (bars 1..T-1). Causality is unchanged: the stamps only pick WHICH
+        step holds σ; σ at step k always reads sleeve returns <= k-1 (``_trailing_ann_vol``).
+        """
+        ts = np.asarray(bundle["union"]["timestamps"], dtype=np.int64)
+        return ts[1:] if decision_lead_bars(self.config) == 1 else ts[:-1]
 
     # ------------------------------------------------------------------ #
     def sim_oracle(self, bundle: Mapping) -> tuple[dict, dict]:
@@ -127,9 +137,9 @@ class TwoSleeveExecutor:
         sleeve_r = {s: traj[s]["step_returns"] for s in self.sleeve_names}
         sleeve_assets = self._sleeve_assets(bundle)
         union_assets = list(bundle["union"]["assets"])
-        ts_dec = self._decision_ts(bundle)
+        ts_alpha = self._alpha_ts(bundle)
 
-        combined_w, alphas = self._combine(sleeve_w, sleeve_assets, sleeve_r, union_assets, ts_dec)
+        combined_w, alphas = self._combine(sleeve_w, sleeve_assets, sleeve_r, union_assets, ts_alpha)
         live = self.harness._replay(bundle["union"], combined_w, fill_engine=None)
         oracle = _as_oracle(live)
         detail = {"sleeve_traj": traj, "alphas": alphas, "combined_w": combined_w,
@@ -172,7 +182,7 @@ class TwoSleeveExecutor:
         fns = dict(conviction_fns or {})
         sleeve_assets = self._sleeve_assets(bundle)
         union_assets = list(bundle["union"]["assets"])
-        ts_dec = self._decision_ts(bundle)
+        ts_alpha = self._alpha_ts(bundle)
 
         sleeve_w_fwd, sleeve_r_fwd = {}, {}
         for s in self.sleeve_names:
@@ -182,10 +192,15 @@ class TwoSleeveExecutor:
             sleeve_w_fwd[s] = fwd["weights"]
             sleeve_r_fwd[s] = fwd["step_returns"]
 
-        combined_w, _ = self._combine(sleeve_w_fwd, sleeve_assets, sleeve_r_fwd, union_assets, ts_dec)
+        combined_w, alphas = self._combine(
+            sleeve_w_fwd, sleeve_assets, sleeve_r_fwd, union_assets, ts_alpha)
         live = self.harness._replay(bundle["union"], combined_w, fill_engine=fill_engine)
         self.harness._expected_rebalance_ts = self.harness._true_month_end_ts(
             np.asarray(bundle["union"]["timestamps"], dtype=np.int64))
+        # This is the path the soak scores: attribute the FORWARD sleeve weights and alphas,
+        # so its sleeve_attribution check reads real per-sleeve P&L (audit T4-12b).
+        live.sleeve_pnl = self._sleeve_attribution(
+            sleeve_w_fwd, sleeve_assets, alphas, union_assets, bundle["union"]["price_ary"])
         return live, oracle
 
     def run_with_overlay(
@@ -273,9 +288,11 @@ class TwoSleeveExecutor:
         alphas: Mapping[str, np.ndarray], union_assets: list[str], union_price: np.ndarray,
     ) -> dict[str, float]:
         """Cumulative gross-return contribution of EACH sleeve to the combined book:
-        ``Σ_k α_s(k) · Σ_{a∈sleeve_s} w_s[k,a] · ret_union[k+1,a]``. Unambiguous even when
-        sleeves overlap on a bond ETF (each sleeve's own weight is attributed to it). The
-        per-CLASS drift gate is computed separately by the union replay (SHY→rates)."""
+        ``Σ_k α_s(k-1) · Σ_{a∈sleeve_s} w_s[k-1,a] · ret_union[k,a]`` (``ret_union[k]`` the
+        k→k+1 move). The combined row ``k`` fills at close k+1, so it earns ``ret_union[k+1]``
+        — the same one-bar pairing as :meth:`ParityHarness._attribution` (N11). Unambiguous
+        even when sleeves overlap on a bond ETF (each sleeve's own weight is attributed to it).
+        The per-CLASS drift gate is computed separately by the union replay (SHY→rates)."""
         price = np.asarray(union_price, dtype=np.float64)
         prev, cur = price[:-1], price[1:]
         valid = (prev > 1e-10) & (cur > 1e-10)
@@ -287,7 +304,8 @@ class TwoSleeveExecutor:
         for s, w in sleeve_weights.items():
             cols = [idx[a] for a in sleeve_assets[s]]
             a_s = np.asarray(alphas[s], dtype=np.float64)[:, None]
-            contrib = (a_s * np.asarray(w, dtype=np.float64)) * ret[:, cols]
+            w_book = a_s * np.asarray(w, dtype=np.float64)     # sleeve s's rows of the combined book
+            contrib = w_book[:-1] * ret[1:, cols]
             out[s] = float(contrib.sum())
         return out
 

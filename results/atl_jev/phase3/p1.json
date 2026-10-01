@@ -1,0 +1,876 @@
+{
+ "leg": "p1",
+ "run_utc": "2026-09-24T06:53:50+00:00",
+ "stamps": {
+  "gates_sha": "77b9a306392784824b5612acf2a428548527222f924fcced4107ef6c279c8f54",
+  "funnel_gates_hash": "519158fa1450",
+  "questionnaire": {
+   "version": "v1",
+   "hash": "3fc01888e31f"
+  },
+  "panel_sha256": "b3bf8490f1261a701ace17162c6b12656d28bf1ff036e6b0246b979f470478eb",
+  "scores_built_utc": "2026-09-24T05:45:30+00:00",
+  "served_models": {
+   "jev-1.13.0": 140614
+  },
+  "corpus_stamp": {
+   "mode": "screening",
+   "since": "2011-09-17T00:00:00+00:00",
+   "until": "2025-01-01T00:00:00+00:00",
+   "rows": [
+    "2012-01-01",
+    "2024-12-31"
+   ],
+   "form": "8-K",
+   "doc_types": [
+    "8-K",
+    "EX-99.1",
+    "EX-99.01",
+    "EX-99"
+   ],
+   "max_chars": 24000,
+   "questionnaire_hash": "3fc01888e31f",
+   "pipeline_sha": "4877e0f424a1"
+  }
+ },
+ "commit": "166edc074a5f88010bce6bd96d6f23657304113c",
+ "dirty": true,
+ "status": "COMPLETE",
+ "promising": [
+  "jev-surprise-63"
+ ],
+ "filing_coverage": {
+  "filing_ticker_rows": 24831,
+  "in_panel": 24831,
+  "tickers_not_in_panel": []
+ },
+ "scorecard": {
+  "batch_name": "atl-jev-p1",
+  "primary_horizon": 5,
+  "n_trials": 5,
+  "n_multiplicity": 8,
+  "multiplicity_source": "preregistered",
+  "multiplicity_provenance": "docs/research/atl_jev_prereg.md (questionnaire 3fc01888e31f)",
+  "panel_meta": {
+   "survivorship_free": false,
+   "source": "yfinance+fja05680_PIT",
+   "universe_def": "S&P 500 PIT members (as-of join), priced",
+   "n_universe_union": 688,
+   "unpriceable_dropped": 270,
+   "fetch_start": "2007-01-01",
+   "verdict_cap": "PROMISING",
+   "screening_window": [
+    "2012-01-01",
+    "2024-12-31"
+   ],
+   "data_clean": "cross_asset_loader._clean_wide + OHLC bracketing",
+   "sectors": [
+    "Communication Services",
+    "Consumer Discretionary",
+    "Consumer Staples",
+    "Energy",
+    "Financials",
+    "Health Care",
+    "Industrials",
+    "Information Technology",
+    "Materials",
+    "Real Estate",
+    "Utilities",
+    "Unknown"
+   ]
+  },
+  "cards": [
+   {
+    "name": "jev-surprise-63",
+    "family": "altdata",
+    "spec_hash": "694a3efd86ed",
+    "verdict": "PROMISING",
+    "rank_key": 0.9459614571946624,
+    "hygiene": {
+     "passed": true,
+     "causal": true,
+     "ohlc_violations": 0,
+     "valid_days": 3270,
+     "reasons": []
+    },
+    "gross": {
+     "primary_horizon": 5,
+     "breadth": 1.0,
+     "decay_halflife": null,
+     "by_horizon": {
+      "1": {
+       "horizon": 1,
+       "ic_mean": 0.0064978684550317575,
+       "ic_ir": 0.07483129284259031,
+       "ic_tstat": 4.278491847366929,
+       "n_days": 3269,
+       "ci_low": null,
+       "ci_high": null,
+       "p_le_0": null,
+       "decile_spread": -3.9632976281089285e-06,
+       "decile_monotonic": false,
+       "sign_used": 1
+      },
+      "5": {
+       "horizon": 5,
+       "ic_mean": 0.00903724225396139,
+       "ic_ir": 0.10176729053173501,
+       "ic_tstat": 3.2057766447289957,
+       "n_days": 3265,
+       "ci_low": 0.002492881805868044,
+       "ci_high": 0.015547508496271388,
+       "p_le_0": 0.0031,
+       "decile_spread": 2.3878653193126772e-05,
+       "decile_monotonic": false,
+       "sign_used": 1
+      },
+      "10": {
+       "horizon": 10,
+       "ic_mean": 0.009505468782103373,
+       "ic_ir": 0.10564403090118114,
+       "ic_tstat": 2.356699607165973,
+       "n_days": 3260,
+       "ci_low": null,
+       "ci_high": null,
+       "p_le_0": null,
+       "decile_spread": 0.0001559287027888573,
+       "decile_monotonic": false,
+       "sign_used": 1
+      },
+      "21": {
+       "horizon": 21,
+       "ic_mean": 0.009164430672880919,
+       "ic_ir": 0.09922693018315916,
+       "ic_tstat": 1.5295033984381923,
+       "n_days": 3249,
+       "ci_low": null,
+       "ci_high": null,
+       "p_le_0": null,
+       "decile_spread": 0.0004225097420032429,
+       "decile_monotonic": false,
+       "sign_used": 1
+      },
+      "63": {
+       "horizon": 63,
+       "ic_mean": 0.005792258467353235,
+       "ic_ir": 0.06109231505906085,
+       "ic_tstat": 0.5338599051165736,
+       "n_days": 3207,
+       "ci_low": null,
+       "ci_high": null,
+       "p_le_0": null,
+       "decile_spread": -0.0008833240263346973,
+       "decile_monotonic": false,
+       "sign_used": 1
+      }
+     }
+    },
+    "deflation": {
+     "dsr": 0.9459614571946624,
+     "psr": 0.9999999950207605,
+     "mintrl_years": 1.0707546074964724,
+     "fdr_q": 0.0248,
+     "n_trials": 5,
+     "sr_star": 0.049986221181880265,
+     "n_eff": 1.802686716691151,
+     "fdr_q_bhy": 0.06740285714285713,
+     "hlz_pass": true,
+     "n_multiplicity": 8,
+     "multiplicity_source": "preregistered"
+    },
+    "cpcv": {
+     "n_groups": 6,
+     "k_test": 2,
+     "n_paths": 15,
+     "oos_sharpe_mean": 0.03703367256779971,
+     "oos_sharpe_std": 0.27631555278052156,
+     "oos_sharpe_p05": -0.2797554917858808,
+     "frac_paths_positive": 0.4666666666666667,
+     "embargo_days": 5,
+     "purge_horizon": 5
+    },
+    "capturability": {
+     "frictionless_sharpe": 0.019847117375040173,
+     "cost_wall": 0.30068455528313387,
+     "by_cost": {
+      "frictionless": {
+       "net_sharpe": 0.019847117375040173,
+       "net_pf": 1.0077633844688703,
+       "turnover_ann": 8.101408578977324,
+       "max_dd": -0.09127332046431369
+      },
+      "standard": {
+       "net_sharpe": -0.2808374379080937,
+       "net_pf": 0.8958388053323191,
+       "turnover_ann": 8.101408578977324,
+       "max_dd": -0.147712950713073
+      },
+      "harsh": {
+       "net_sharpe": -0.7250940049942066,
+       "net_pf": 0.751837071428557,
+       "turnover_ann": 8.101408578977324,
+       "max_dd": -0.2403655676097839
+      }
+     }
+    },
+    "robustness": {
+     "min_subperiod_ic_ir": 0.009698335052919782,
+     "mean_subperiod_ic_ir": 0.10701434903094834,
+     "recent_ic_ir": 0.060788819213775956,
+     "subperiod_ic_ir": [
+      0.15365806746853108,
+      0.18230065068786594,
+      0.009698335052919782,
+      0.08240034291447655
+     ],
+     "subperiod_valid_days": [
+      817,
+      818,
+      817,
+      813
+     ]
+    },
+    "orthogonality": null,
+    "caveats": [
+     "survivorship-biased data \u2014 results are UPPER BOUNDS",
+     "cost-blocked: net Sharpe <= 0 at standard cost (structure without capture)",
+     "CPCV fragile: p05 OOS Sharpe -0.28<0 (47% of 15 paths +)"
+    ]
+   },
+   {
+    "name": "jev-toneinfl-63",
+    "family": "altdata",
+    "spec_hash": "8f9889b4d418",
+    "verdict": "LOGGED",
+    "rank_key": 0.7635054472149674,
+    "hygiene": {
+     "passed": true,
+     "causal": true,
+     "ohlc_violations": 0,
+     "valid_days": 3270,
+     "reasons": []
+    },
+    "gross": {
+     "primary_horizon": 5,
+     "breadth": 0.6666666666666666,
+     "decay_halflife": 14.84755185755888,
+     "by_horizon": {
+      "1": {
+       "horizon": 1,
+       "ic_mean": 0.006578129328152721,
+       "ic_ir": 0.08382548761992005,
+       "ic_tstat": 4.792736457698366,
+       "n_days": 3269,
+       "ci_low": null,
+       "ci_high": null,
+       "p_le_0": null,
+       "decile_spread": 6.104070555523498e-05,
+       "decile_monotonic": false,
+       "sign_used": 1
+      },
+      "5": {
+       "horizon": 5,
+       "ic_mean": 0.005814357397836391,
+       "ic_ir": 0.07312154780828509,
+       "ic_tstat": 2.282235703023143,
+       "n_days": 3265,
+       "ci_low": -7.586789718092628e-05,
+       "ci_high": 0.01164215525211066,
+       "p_le_0": 0.0278,
+       "decile_spread": 4.610371112097606e-05,
+       "decile_monotonic": false,
+       "sign_used": 1
+      },
+      "10": {
+       "horizon": 10,
+       "ic_mean": 0.004357892672489484,
+       "ic_ir": 0.05384594783275689,
+       "ic_tstat": 1.1982152207794774,
+       "n_days": 3260,
+       "ci_low": null,
+       "ci_high": null,
+       "p_le_0": null,
+       "decile_spread": -0.00024875451219422953,
+       "decile_monotonic": false,
+       "sign_used": 1
+      },
+      "21": {
+       "horizon": 21,
+       "ic_mean": 0.001932522415911151,
+       "ic_ir": 0.024146747792789153,
+       "ic_tstat": 0.38013395186906423,
+       "n_days": 3249,
+       "ci_low": null,
+       "ci_high": null,
+       "p_le_0": null,
+       "decile_spread": -0.0008678510259652108,
+       "decile_monotonic": false,
+       "sign_used": 1
+      },
+      "63": {
+       "horizon": 63,
+       "ic_mean": -0.0009205347541529634,
+       "ic_ir": -0.011652776356271525,
+       "ic_tstat": -0.10471337803543174,
+       "n_days": 3207,
+       "ci_low": null,
+       "ci_high": null,
+       "p_le_0": null,
+       "decile_spread": -0.003157415374940849,
+       "decile_monotonic": false,
+       "sign_used": 1
+      }
+     }
+    },
+    "deflation": {
+     "dsr": 0.7635054472149674,
+     "psr": 0.9999836772542882,
+     "mintrl_years": 2.034610068667788,
+     "fdr_q": 0.10293333333333334,
+     "n_trials": 5,
+     "sr_star": 0.049986221181880265,
+     "n_eff": 1.802686716691151,
+     "fdr_q_bhy": 0.2797580952380952,
+     "hlz_pass": false,
+     "n_multiplicity": 8,
+     "multiplicity_source": "preregistered"
+    },
+    "cpcv": {
+     "n_groups": 6,
+     "k_test": 2,
+     "n_paths": 15,
+     "oos_sharpe_mean": 0.018778117796903544,
+     "oos_sharpe_std": 0.3948103325389544,
+     "oos_sharpe_p05": -0.5427885444406624,
+     "frac_paths_positive": 0.5333333333333333,
+     "embargo_days": 5,
+     "purge_horizon": 5
+    },
+    "capturability": {
+     "frictionless_sharpe": -0.03816242173492727,
+     "cost_wall": 0.31134888264721616,
+     "by_cost": {
+      "frictionless": {
+       "net_sharpe": -0.03816242173492727,
+       "net_pf": 0.9853342812075688,
+       "turnover_ann": 7.958798231760631,
+       "max_dd": -0.09005548897311288
+      },
+      "standard": {
+       "net_sharpe": -0.34951130438214345,
+       "net_pf": 0.8730670208097047,
+       "turnover_ann": 7.958798231760631,
+       "max_dd": -0.1223865070589304
+      },
+      "harsh": {
+       "net_sharpe": -0.8107857344771162,
+       "net_pf": 0.7292912717329266,
+       "turnover_ann": 7.958798231760631,
+       "max_dd": -0.24289281958755593
+      }
+     }
+    },
+    "robustness": {
+     "min_subperiod_ic_ir": 0.04497233217647107,
+     "mean_subperiod_ic_ir": 0.07647383266903024,
+     "recent_ic_ir": 0.02960158336980098,
+     "subperiod_ic_ir": [
+      0.06114287104202828,
+      0.14072643308825472,
+      0.059053694369366874,
+      0.04497233217647107
+     ],
+     "subperiod_valid_days": [
+      817,
+      818,
+      817,
+      813
+     ]
+    },
+    "orthogonality": null,
+    "caveats": [
+     "survivorship-biased data \u2014 results are UPPER BOUNDS",
+     "NOT CAPTURABLE: frictionless Sharpe -0.038 <= 0 \u2014 the long-short book loses money at ZERO cost (gross IC without traded-book P&L)",
+     "cost-blocked: net Sharpe <= 0 at standard cost (structure without capture)",
+     "CPCV fragile: p05 OOS Sharpe -0.54<0 (53% of 15 paths +)"
+    ]
+   },
+   {
+    "name": "jev-comp-63",
+    "family": "altdata",
+    "spec_hash": "b8cdf5f2c3cf",
+    "verdict": "LOGGED",
+    "rank_key": 0.7234960954193205,
+    "hygiene": {
+     "passed": true,
+     "causal": true,
+     "ohlc_violations": 0,
+     "valid_days": 3270,
+     "reasons": []
+    },
+    "gross": {
+     "primary_horizon": 5,
+     "breadth": 0.6666666666666666,
+     "decay_halflife": 19.217700483599586,
+     "by_horizon": {
+      "1": {
+       "horizon": 1,
+       "ic_mean": 0.007125696407122868,
+       "ic_ir": 0.06999119496747526,
+       "ic_tstat": 4.001758431271897,
+       "n_days": 3269,
+       "ci_low": null,
+       "ci_high": null,
+       "p_le_0": null,
+       "decile_spread": 5.7867691302560044e-05,
+       "decile_monotonic": false,
+       "sign_used": 1
+      },
+      "5": {
+       "horizon": 5,
+       "ic_mean": 0.007205850641203226,
+       "ic_ir": 0.06924587467522028,
+       "ic_tstat": 2.155955559713612,
+       "n_days": 3265,
+       "ci_low": -0.0007912376491344238,
+       "ci_high": 0.015016581813500036,
+       "p_le_0": 0.0386,
+       "decile_spread": 0.00020239738342705578,
+       "decile_monotonic": false,
+       "sign_used": 1
+      },
+      "10": {
+       "horizon": 10,
+       "ic_mean": 0.006209456086581125,
+       "ic_ir": 0.058703303920855425,
+       "ic_tstat": 1.2978100818386016,
+       "n_days": 3260,
+       "ci_low": null,
+       "ci_high": null,
+       "p_le_0": null,
+       "decile_spread": 0.0003516282208222902,
+       "decile_monotonic": false,
+       "sign_used": 1
+      },
+      "21": {
+       "horizon": 21,
+       "ic_mean": 0.0030511101666833395,
+       "ic_ir": 0.02837369293869939,
+       "ic_tstat": 0.429625672986496,
+       "n_days": 3249,
+       "ci_low": null,
+       "ci_high": null,
+       "p_le_0": null,
+       "decile_spread": 0.0003977477599364,
+       "decile_monotonic": false,
+       "sign_used": 1
+      },
+      "63": {
+       "horizon": 63,
+       "ic_mean": -0.004719976003333787,
+       "ic_ir": -0.04248112918909128,
+       "ic_tstat": -0.3595288376939252,
+       "n_days": 3207,
+       "ci_low": null,
+       "ci_high": null,
+       "p_le_0": null,
+       "decile_spread": -0.002793775310910571,
+       "decile_monotonic": false,
+       "sign_used": 1
+      }
+     }
+    },
+    "deflation": {
+     "dsr": 0.7234960954193205,
+     "psr": 0.9999551268832123,
+     "mintrl_years": 2.288250346142404,
+     "fdr_q": 0.10293333333333334,
+     "n_trials": 5,
+     "sr_star": 0.049986221181880265,
+     "n_eff": 1.802686716691151,
+     "fdr_q_bhy": 0.2797580952380952,
+     "hlz_pass": false,
+     "n_multiplicity": 8,
+     "multiplicity_source": "preregistered"
+    },
+    "cpcv": {
+     "n_groups": 6,
+     "k_test": 2,
+     "n_paths": 15,
+     "oos_sharpe_mean": -0.11201512079146345,
+     "oos_sharpe_std": 0.294567563810492,
+     "oos_sharpe_p05": -0.5376153948081319,
+     "frac_paths_positive": 0.3333333333333333,
+     "embargo_days": 5,
+     "purge_horizon": 5
+    },
+    "capturability": {
+     "frictionless_sharpe": -0.13148890902719867,
+     "cost_wall": 0.22741397338167435,
+     "by_cost": {
+      "frictionless": {
+       "net_sharpe": -0.13148890902719867,
+       "net_pf": 0.9480636779320758,
+       "turnover_ann": 7.812765760319898,
+       "max_dd": -0.1378423448381808
+      },
+      "standard": {
+       "net_sharpe": -0.358902882408873,
+       "net_pf": 0.8639619355526788,
+       "turnover_ann": 7.812765760319898,
+       "max_dd": -0.17811754800237967
+      },
+      "harsh": {
+       "net_sharpe": -0.6965967929525106,
+       "net_pf": 0.7517271546400595,
+       "turnover_ann": 7.812765760319898,
+       "max_dd": -0.28577853920489993
+      }
+     }
+    },
+    "robustness": {
+     "min_subperiod_ic_ir": 0.021073893063922496,
+     "mean_subperiod_ic_ir": 0.0742414437584933,
+     "recent_ic_ir": 0.06753722504205373,
+     "subperiod_ic_ir": [
+      0.0517533650890402,
+      0.15904241234415054,
+      0.021073893063922496,
+      0.06509610453686
+     ],
+     "subperiod_valid_days": [
+      817,
+      818,
+      817,
+      813
+     ]
+    },
+    "orthogonality": null,
+    "caveats": [
+     "survivorship-biased data \u2014 results are UPPER BOUNDS",
+     "NOT CAPTURABLE: frictionless Sharpe -0.131 <= 0 \u2014 the long-short book loses money at ZERO cost (gross IC without traded-book P&L)",
+     "cost-blocked: net Sharpe <= 0 at standard cost (structure without capture)",
+     "CPCV fragile: p05 OOS Sharpe -0.54<0 (33% of 15 paths +)"
+    ]
+   },
+   {
+    "name": "jev-comp-21",
+    "family": "altdata",
+    "spec_hash": "1bf583ec9405",
+    "verdict": "LOGGED",
+    "rank_key": 0.25106174911462,
+    "hygiene": {
+     "passed": true,
+     "causal": true,
+     "ohlc_violations": 0,
+     "valid_days": 3270,
+     "reasons": []
+    },
+    "gross": {
+     "primary_horizon": 5,
+     "breadth": 0.5833333333333334,
+     "decay_halflife": 33.75250060500612,
+     "by_horizon": {
+      "1": {
+       "horizon": 1,
+       "ic_mean": 0.005988054053557539,
+       "ic_ir": 0.04971660594576678,
+       "ic_tstat": 2.361407945625992,
+       "n_days": 2256,
+       "ci_low": null,
+       "ci_high": null,
+       "p_le_0": null,
+       "decile_spread": -5.966825441039205e-05,
+       "decile_monotonic": false,
+       "sign_used": 1
+      },
+      "5": {
+       "horizon": 5,
+       "ic_mean": 0.003157204300969828,
+       "ic_ir": 0.025726086307712174,
+       "ic_tstat": 0.7140717894846452,
+       "n_days": 2251,
+       "ci_low": -0.00666712182133666,
+       "ci_high": 0.012953428770018089,
+       "p_le_0": 0.2614,
+       "decile_spread": -0.0008069363994795546,
+       "decile_monotonic": false,
+       "sign_used": 1
+      },
+      "10": {
+       "horizon": 10,
+       "ic_mean": 0.004006409918510118,
+       "ic_ir": 0.03262887370857374,
+       "ic_tstat": 0.6567727220108206,
+       "n_days": 2245,
+       "ci_low": null,
+       "ci_high": null,
+       "p_le_0": null,
+       "decile_spread": -0.000898914529717658,
+       "decile_monotonic": false,
+       "sign_used": 1
+      },
+      "21": {
+       "horizon": 21,
+       "ic_mean": 0.00690486924022165,
+       "ic_ir": 0.055128300612078004,
+       "ic_tstat": 0.8610317301576951,
+       "n_days": 2233,
+       "ci_low": null,
+       "ci_high": null,
+       "p_le_0": null,
+       "decile_spread": -0.0012736925886377417,
+       "decile_monotonic": false,
+       "sign_used": 1
+      },
+      "63": {
+       "horizon": 63,
+       "ic_mean": -0.005975378959893776,
+       "ic_ir": -0.04636401325940229,
+       "ic_tstat": -0.43392804757487585,
+       "n_days": 2191,
+       "ci_low": null,
+       "ci_high": null,
+       "p_le_0": null,
+       "decile_spread": -0.0042312826147560744,
+       "decile_monotonic": false,
+       "sign_used": 1
+      }
+     }
+    },
+    "deflation": {
+     "dsr": 0.25106174911462,
+     "psr": 0.8882720496910936,
+     "mintrl_years": 16.303573851786453,
+     "fdr_q": 0.45424,
+     "n_trials": 5,
+     "sr_star": 0.049986221181880265,
+     "n_eff": 1.802686716691151,
+     "fdr_q_bhy": 1.0,
+     "hlz_pass": false,
+     "n_multiplicity": 8,
+     "multiplicity_source": "preregistered"
+    },
+    "cpcv": {
+     "n_groups": 6,
+     "k_test": 2,
+     "n_paths": 15,
+     "oos_sharpe_mean": -0.12078184041919025,
+     "oos_sharpe_std": 0.12202408260529517,
+     "oos_sharpe_p05": -0.2664059170000928,
+     "frac_paths_positive": 0.2,
+     "embargo_days": 5,
+     "purge_horizon": 5
+    },
+    "capturability": {
+     "frictionless_sharpe": -0.11912184351699545,
+     "cost_wall": 1.0379216832445615,
+     "by_cost": {
+      "frictionless": {
+       "net_sharpe": -0.11912184351699545,
+       "net_pf": 0.9542539027198772,
+       "turnover_ann": 41.986759084689346,
+       "max_dd": -0.17783283786299742
+      },
+      "standard": {
+       "net_sharpe": -1.1570435267615569,
+       "net_pf": 0.6333481703008342,
+       "turnover_ann": 41.986759084689346,
+       "max_dd": -0.4832782297313589
+      },
+      "harsh": {
+       "net_sharpe": -2.6780310094579263,
+       "net_pf": 0.3479761485049512,
+       "turnover_ann": 41.986759084689346,
+       "max_dd": -0.7620294924461417
+      }
+     }
+    },
+    "robustness": {
+     "min_subperiod_ic_ir": -0.017327874991418222,
+     "mean_subperiod_ic_ir": 0.029773854306250354,
+     "recent_ic_ir": 0.05120490417914329,
+     "subperiod_ic_ir": [
+      0.04776365721550972,
+      0.033995880199576264,
+      -0.017327874991418222,
+      0.054663754801333654
+     ],
+     "subperiod_valid_days": [
+      533,
+      555,
+      596,
+      567
+     ]
+    },
+    "orthogonality": null,
+    "caveats": [
+     "survivorship-biased data \u2014 results are UPPER BOUNDS",
+     "NOT CAPTURABLE: frictionless Sharpe -0.119 <= 0 \u2014 the long-short book loses money at ZERO cost (gross IC without traded-book P&L)",
+     "cost-blocked: net Sharpe <= 0 at standard cost (structure without capture)",
+     "regime-fragile: min subperiod IC-IR -0.017 < 0 (inverts in a sampled subperiod)",
+     "CPCV fragile: p05 OOS Sharpe -0.27<0 (20% of 15 paths +)"
+    ]
+   },
+   {
+    "name": "jev-quality-63",
+    "family": "altdata",
+    "spec_hash": "0ea7f4d47363",
+    "verdict": "LOGGED",
+    "rank_key": 0.17827809437777836,
+    "hygiene": {
+     "passed": true,
+     "causal": true,
+     "ohlc_violations": 0,
+     "valid_days": 3270,
+     "reasons": []
+    },
+    "gross": {
+     "primary_horizon": 5,
+     "breadth": 0.4166666666666667,
+     "decay_halflife": 8.373630990741203,
+     "by_horizon": {
+      "1": {
+       "horizon": 1,
+       "ic_mean": 0.0019223274155670952,
+       "ic_ir": 0.027161477028012068,
+       "ic_tstat": 1.552962051200225,
+       "n_days": 3269,
+       "ci_low": null,
+       "ci_high": null,
+       "p_le_0": null,
+       "decile_spread": -6.637771865347831e-05,
+       "decile_monotonic": false,
+       "sign_used": 1
+      },
+      "5": {
+       "horizon": 5,
+       "ic_mean": 0.0014780889040821236,
+       "ic_ir": 0.020813388059875385,
+       "ic_tstat": 0.6589532094127971,
+       "n_days": 3265,
+       "ci_low": -0.003759306704427513,
+       "ci_high": 0.006548165879864295,
+       "p_le_0": 0.2839,
+       "decile_spread": -0.000326121615422821,
+       "decile_monotonic": false,
+       "sign_used": 1
+      },
+      "10": {
+       "horizon": 10,
+       "ic_mean": 0.0007119630329995175,
+       "ic_ir": 0.0099742071241316,
+       "ic_tstat": 0.22539640674368278,
+       "n_days": 3260,
+       "ci_low": null,
+       "ci_high": null,
+       "p_le_0": null,
+       "decile_spread": -0.0003438549654498577,
+       "decile_monotonic": false,
+       "sign_used": 1
+      },
+      "21": {
+       "horizon": 21,
+       "ic_mean": -0.0015044101589344761,
+       "ic_ir": -0.021029405695586117,
+       "ic_tstat": -0.3207432203586634,
+       "n_days": 3249,
+       "ci_low": null,
+       "ci_high": null,
+       "p_le_0": null,
+       "decile_spread": -0.0005711770145150819,
+       "decile_monotonic": false,
+       "sign_used": 1
+      },
+      "63": {
+       "horizon": 63,
+       "ic_mean": -0.007507896672258328,
+       "ic_ir": -0.09701600004296013,
+       "ic_tstat": -0.8301782767309048,
+       "n_days": 3207,
+       "ci_low": null,
+       "ci_high": null,
+       "p_le_0": null,
+       "decile_spread": -0.0025286105214430365,
+       "decile_monotonic": false,
+       "sign_used": 1
+      }
+     }
+    },
+    "deflation": {
+     "dsr": 0.17827809437777836,
+     "psr": 0.8825357416973925,
+     "mintrl_years": 24.84374750793147,
+     "fdr_q": 0.45424,
+     "n_trials": 5,
+     "sr_star": 0.049986221181880265,
+     "n_eff": 1.802686716691151,
+     "fdr_q_bhy": 1.0,
+     "hlz_pass": false,
+     "n_multiplicity": 8,
+     "multiplicity_source": "preregistered"
+    },
+    "cpcv": {
+     "n_groups": 6,
+     "k_test": 2,
+     "n_paths": 15,
+     "oos_sharpe_mean": -0.12820379923268496,
+     "oos_sharpe_std": 0.33517011352145226,
+     "oos_sharpe_p05": -0.6164603423793759,
+     "frac_paths_positive": 0.4666666666666667,
+     "embargo_days": 5,
+     "purge_horizon": 5
+    },
+    "capturability": {
+     "frictionless_sharpe": -0.1469212210632078,
+     "cost_wall": 0.30291359485865477,
+     "by_cost": {
+      "frictionless": {
+       "net_sharpe": -0.1469212210632078,
+       "net_pf": 0.9405827854047627,
+       "turnover_ann": 7.2158420728156765,
+       "max_dd": -0.09462370991730162
+      },
+      "standard": {
+       "net_sharpe": -0.44983481592186253,
+       "net_pf": 0.8288208635962161,
+       "turnover_ann": 7.2158420728156765,
+       "max_dd": -0.15393171291873886
+      },
+      "harsh": {
+       "net_sharpe": -0.8977062224225101,
+       "net_pf": 0.6883290748659386,
+       "turnover_ann": 7.2158420728156765,
+       "max_dd": -0.2574091517045006
+      }
+     }
+    },
+    "robustness": {
+     "min_subperiod_ic_ir": 0.003562758007323616,
+     "mean_subperiod_ic_ir": 0.020402500165137817,
+     "recent_ic_ir": 0.06751186193564757,
+     "subperiod_ic_ir": [
+      0.003562758007323616,
+      0.03526289444573589,
+      0.027954977680737153,
+      0.01482937052675462
+     ],
+     "subperiod_valid_days": [
+      817,
+      818,
+      817,
+      813
+     ]
+    },
+    "orthogonality": null,
+    "caveats": [
+     "survivorship-biased data \u2014 results are UPPER BOUNDS",
+     "NOT CAPTURABLE: frictionless Sharpe -0.147 <= 0 \u2014 the long-short book loses money at ZERO cost (gross IC without traded-book P&L)",
+     "cost-blocked: net Sharpe <= 0 at standard cost (structure without capture)",
+     "CPCV fragile: p05 OOS Sharpe -0.62<0 (47% of 15 paths +)"
+    ]
+   }
+  ]
+ },
+ "elapsed_min": 0.5
+}

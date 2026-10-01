@@ -49,6 +49,18 @@ _DEFAULT_SERIES: tuple[tuple[str, str, str], ...] = (
 #: Thursday's bar, one session early.
 _EXTRA_LAG_DAYS: dict[str, int] = {"WALCL": 1}
 
+#: Series published AFTER the US close on a weekly day that moves with the federal calendar
+#: (crucible-v15.0). WALCL/H.4.1 goes out Thursday 16:30 ET; when that Thursday is a federal holiday or
+#: closure (Thanksgiving every year; sometimes July 4, Christmas, New Year's Day, Juneteenth, Veterans
+#: Day) it is published on the next business day, again after the close. The fixed +2 days stamped
+#: those weeks on Friday — one session early. The stamp is now the first business day AFTER the
+#: business day on/after the nominal publication day.
+_AFTER_CLOSE_WEEKLY: frozenset[str] = frozenset({"WALCL"})
+#: FRED frequencies the default reference-plus-lag model is valid for (crucible-v15.0). FRED dates a
+#: monthly/quarterly observation at the START of its period, so reference + 1 day stamped March payrolls
+#: public on 2 March — about a month of look-ahead. Such series fail CLOSED unless read as ALFRED vintages.
+_RELEASE_LAG_SAFE_FREQ: frozenset[str] = frozenset({"D", "W"})
+
 
 def _default_transport(url: str) -> dict:
     """Live HTTPS GET → parsed JSON. Only reached when no ``transport`` is injected."""
@@ -137,9 +149,41 @@ class FredConnector:
                 "For offline/test use, inject a `transport` callable instead.")
         return _default_transport
 
+    def _release_for(self, series_id: str, reference: np.datetime64) -> np.datetime64:
+        """Modelled public release of the observation dated ``reference`` (see module docstring)."""
+        release = (reference + self._release_lag
+                   + np.timedelta64(_EXTRA_LAG_DAYS.get(series_id, 0), "D"))
+        if series_id in _AFTER_CLOSE_WEEKLY:
+            from .cftc_cot import _us_federal_busdaycal   # one federal calendar, closures included
+            cal = _us_federal_busdaycal()
+            nominal = np.datetime64(reference, "D") + np.timedelta64(1, "D")      # Thursday
+            published = np.busday_offset(nominal, 0, roll="forward", busdaycal=cal)
+            usable = np.busday_offset(published, 1, roll="forward", busdaycal=cal)
+            release = max(release, np.datetime64(usable, "ns"))
+        return release
+
+    def _check_frequency(self, ref: SeriesRef, obs_dates: list[np.datetime64]) -> None:
+        """Fail CLOSED on a period-START-dated (monthly/quarterly/annual) series in the release-lag
+        model — declared by frequency, or detected from observation spacing (median gap >= 25 days)."""
+        freq = (ref.frequency or "").upper()[:1]
+        declared_bad = bool(freq) and freq not in _RELEASE_LAG_SAFE_FREQ
+        detected_bad = False
+        if len(obs_dates) >= 3:
+            d = np.diff(np.array(obs_dates, dtype="datetime64[D]").astype(np.int64))
+            detected_bad = bool(np.median(d) >= 25)
+        if declared_bad or detected_bad:
+            raise ValueError(
+                f"FRED series {ref.series_id!r} is not daily/weekly (freq={ref.frequency!r}); FRED "
+                "dates such observations at period START, so the reference+lag release model would "
+                "leak about a period of look-ahead (LEAK-2). Read it via ALFRED vintages (as_of / "
+                "realtime_start) instead.")
+
     def _parse(self, ref: SeriesRef, payload: dict, *, as_of) -> SeriesData:
         obs = payload.get("observations", [])
         cutoff = np.datetime64(as_of, "ns") if as_of is not None else None
+        if as_of is None:
+            self._check_frequency(ref, [np.datetime64(o["date"], "D") for o in obs
+                                        if o.get("value", ".") not in (".", "", None)])
         refs: list[np.datetime64] = []
         vals: list[float] = []
         rels: list[np.datetime64] = []
@@ -152,8 +196,7 @@ class FredConnector:
             except (TypeError, ValueError):
                 continue
             reference = np.datetime64(o["date"], "ns")
-            release = (reference + self._release_lag              # publication lag (see __init__)
-                       + np.timedelta64(_EXTRA_LAG_DAYS.get(ref.series_id, 0), "D"))
+            release = self._release_for(ref.series_id, reference)   # publication lag (see __init__)
             if cutoff is not None and release > cutoff:    # vintage: only what was public by as_of
                 continue
             refs.append(reference)

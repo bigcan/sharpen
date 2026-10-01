@@ -707,16 +707,14 @@ def run_training_parity(
     cfg_rs = _prep_arm_config(config_path, mutate_to_risk=True)
     cfg_rs_path = _write_tmp_config(cfg_rs, tmp_dir, "train_parity_RS")
 
-    # S498 P4: only the args run_full_pipeline.py actually accepts. The
-    # legacy template carried `--stage l1-multiseed` and `--device` which
-    # argparse rejects (run_full_pipeline has neither flag); both runs
-    # would have died at parse time before any training started. Stage is
-    # set via validate_config wiring at the YAML level; device comes from
-    # `agent.device`.
+    # Only the args run_full_pipeline.py accepts: no `--device` (device comes from
+    # `agent.device`). `--stage` is REQUIRED since 2026-09-30 and decides the phases
+    # (sharpen/sharpops/stages.py); a locked-param train + eval run is `l1-multiseed`.
     extra_args = list(extra_run_full_pipeline_args or [])
     base_cmd = [
         sys.executable,
         str(project_root / "scripts" / "run_full_pipeline.py"),
+        "--stage", "l1-multiseed",
         "--steps", str(steps),
         "--seed", str(seed),
         *extra_args,

@@ -1,0 +1,176 @@
+{
+ "check": "phase-1 instrument check (no returns read)",
+ "gates_sha256": "ad8a73192d8a6aed8cf04b2585d9255007cb34e904e5d70a9b3726e5ae60aa53",
+ "questionnaire_hash": "3fc01888e31f",
+ "rules": {
+  "window": [
+   "2019-01-01",
+   "2023-12-31"
+  ],
+  "n_earnings": 40,
+  "n_events": 20,
+  "sample_seed": 20260924,
+  "min_answer_std": 0.1,
+  "min_n_for_std": 10,
+  "max_guidance_conflict_frac": 0.1
+ },
+ "n_filings": {
+  "earnings": 40,
+  "event": 20
+ },
+ "per_question": {
+  "E1": {
+   "n": 40,
+   "mean": 0.231,
+   "std": 0.356,
+   "decisive_frac": 0.175,
+   "rule": "applied"
+  },
+  "E2": {
+   "n": 40,
+   "mean": 0.087,
+   "std": 0.171,
+   "decisive_frac": 0.05,
+   "rule": "applied"
+  },
+  "E3": {
+   "n": 40,
+   "mean": 0.412,
+   "std": 0.385,
+   "decisive_frac": 0.4,
+   "rule": "applied"
+  },
+  "E4": {
+   "n": 40,
+   "mean": 0.417,
+   "std": 0.144,
+   "decisive_frac": 0.275,
+   "rule": "applied"
+  },
+  "E5": {
+   "n": 40,
+   "mean": 0.444,
+   "std": 0.248,
+   "decisive_frac": 0.4,
+   "rule": "applied"
+  },
+  "M1": {
+   "n": 60,
+   "mean": 0.368,
+   "std": 0.36,
+   "decisive_frac": 0.367,
+   "rule": "applied"
+  }
+ },
+ "guidance_conflict_frac": 0.0,
+ "failures": [],
+ "passed": true,
+ "jev_usage": {
+  "requests": 19,
+  "questions_sent": 19,
+  "cache_hits": 241,
+  "input_tokens": 45776,
+  "output_tokens": 399,
+  "retries": 0,
+  "latency_s": {
+   "p50": 0.469,
+   "p90": 0.594,
+   "max": 0.609
+  },
+  "served_models": {
+   "jev-1.13.0": 260
+  },
+  "cost_usd": 0.001922592
+ },
+ "spot_check": {
+  "E1_max": {
+   "value": 0.99,
+   "ticker": "AXON",
+   "accession": "0001069183-19-000144",
+   "keywords": [
+    "Outlook",
+    "Depart",
+    "Depart",
+    "Depart",
+    "Depart",
+    "impairment",
+    "lower",
+    "lower"
+   ],
+   "snippets": [
+    "terprise, Inc. IR@axon.com Axon Reports Record Revenue of $131 million; Axon Cloud Grows 42%; Raising Full-Year Revenue Outlook to $500-$510 million Scottsdale, Ariz., November 7, 2019 \u2014 Axon (Nasdaq: AAXN), the global leader in connected public safety technologies, today released the f",
+    "feed information into Axon Records. Axon Records also achieved a critical milestone in September when the Fresno Police Department went live with a full agency-wide Records Management System (RMS) deployment using our cloud subscription service.Cincinnati Police Department has also sta",
+    "th a full agency-wide Records Management System (RMS) deployment using our cloud subscription service.Cincinnati Police Department has also started using Axon Records for several critical workloads, including use-of-force reporting, and will continue to deploy additional modules throug"
+   ]
+  },
+  "E1_min": {
+   "value": 0.02,
+   "ticker": "JBHT",
+   "accession": "0001437749-21-023713",
+   "keywords": [
+    "lower"
+   ],
+   "snippets": [
+    "from implementation costs related to new long-term contractual business, higher third-party contract carrier costs, and lower volumes with certain customers related to product availability as a result of supply-chain disruptions. Higher personnel expense related to salary, wages and i"
+   ]
+  },
+  "E2_max": {
+   "value": 0.96,
+   "ticker": "BSX",
+   "accession": "0000885725-20-000019",
+   "keywords": [
+    "withdrew",
+    "guidance",
+    "lower",
+    "lower",
+    "Guidance",
+    "withdrew",
+    "guidance",
+    "impairment"
+   ],
+   "snippets": [
+    "ported GAAP earnings of $0.01 per share. Achieved adjusted earnings per share of $0.28 . On March 30, 2020, the company withdrew its Q1 2020 sales and EPS guidance, originally provided on February 5, 2020. \u2022 Generated first quarter sales growth/(decline) in our reportable segments 4 , co",
+    "hare. Achieved adjusted earnings per share of $0.28 . On March 30, 2020, the company withdrew its Q1 2020 sales and EPS guidance, originally provided on February 5, 2020. \u2022 Generated first quarter sales growth/(decline) in our reportable segments 4 , compared to the prior year period: \u25e6 ",
+    " blockages in the iliofemoral veins. Iliofemoral deep vein thrombosis (DVT) represents approximately one-quarter of all lower extremity DVT cases. 6 \u2022 Announced positive three-year data for the WATCHMAN\u2122 Left Atrial Appendage Closure Device -- the largest real-world analysis of the de"
+   ]
+  },
+  "E2_min": {
+   "value": 0.02,
+   "ticker": "JBHT",
+   "accession": "0001437749-21-023713",
+   "keywords": [
+    "lower"
+   ],
+   "snippets": [
+    "from implementation costs related to new long-term contractual business, higher third-party contract carrier costs, and lower volumes with certain customers related to product availability as a result of supply-chain disruptions. Higher personnel expense related to salary, wages and i"
+   ]
+  },
+  "M1_max": {
+   "value": 0.97,
+   "ticker": "CAH",
+   "accession": "0000721371-21-000021",
+   "keywords": [
+    "raised",
+    "guidance",
+    "outlook",
+    "impairment",
+    "Restructuring",
+    "restructuring",
+    "Impairment",
+    "guidance"
+   ],
+   "snippets": [
+    "m orientation, and collaborative partnership approach enable companies to flourish. Since its founding in 1984, H&F has raised over $50 billion of committed capital, invested in over 90 companies, and is currently investing its ninth fund, with $16.5 billion of committed capital. Learn",
+    "\" \"project,\" \"continue,\" \"likely,\" and similar expressions, and include statements reflecting future results, trends or guidance, statements of outlook and expense accruals. These matters are subject to risks and uncertainties that could cause actual results to differ materially from tho",
+    " \"likely,\" and similar expressions, and include statements reflecting future results, trends or guidance, statements of outlook and expense accruals. These matters are subject to risks and uncertainties that could cause actual results to differ materially from those projected, anticipat"
+   ]
+  },
+  "M1_min": {
+   "value": 0.03,
+   "ticker": "DRI",
+   "accession": "0000940944-23-000064",
+   "keywords": [],
+   "snippets": []
+  }
+ }
+}

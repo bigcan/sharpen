@@ -104,8 +104,12 @@ def build_jobs(stage, seeds, folds):
             for v in VARIANTS:
                 jobs.append((v, f"configs/gmgp1_spx500_{v}_wf_f{f}.yaml", [], f"wf-f{f}"))
     elif stage == "oos":
-        for v in VARIANTS:
-            jobs.append((v, f"configs/gmgp1_spx500_{v}_recent_oos.yaml", [], "oos"))
+        # SharpOps Stage 4 evaluates the FROZEN Stage 2/3 checkpoints on the recent window.
+        # These jobs retrained a fresh model per run, which run_full_pipeline now refuses
+        # (--stage oos needs --checkpoint; sharpen/sharpops/stages.py). GMGP1-SPX500 is closed.
+        raise SystemExit("stage oos: pass frozen checkpoints (run_full_pipeline --stage oos "
+                         "--checkpoint <path>); the retrain-per-run oos jobs were a SharpOps P1 "
+                         "violation and GMGP1-SPX500 is closed")
     else:
         raise SystemExit(f"unknown stage {stage}")
     return jobs

@@ -1,0 +1,91 @@
+# ============================================================================
+# SharpOps promotion ladder — the numeric gates (adopted 2026-09-30)
+# ============================================================================
+# Standard: docs/sharpops_promotion_standard.md. Decision: docs/research/
+# sharpops_ladder_decision_2026-09-30.md (Protocol v2 audit 2026-09-29 §6 items 1, 3, 7).
+# Consumed by sharpen/sharpops/{ladder,tripwires}.py callers and
+# scripts/sharpops_promotion_check.py. Registered in configs/gates_registry.json: an edit
+# needs a re-registration with a written reason.
+ladder:
+  schema: sharpops_ladder/v1
+  adopted_on: '2026-09-30'
+
+  # One pre-registered PRIMARY test per rung, with its alpha and its power at a stated target
+  # published before the run (planted-signal operating characteristic, `calibration` below).
+  rungs:
+    paper:                               # rung 2: paper incubation, no capital
+      primary_test: pooled_oos_psr       # sharpen/sharpops/ladder.py::pooled_oos_sharpe
+      alpha: 0.20                        # PSR vs 0 >= 1 - alpha on daily net OOS pooled over folds
+      audit: integrity                   # integrity-scoped audit (data, timing, costs, seeds), not full Tier-2
+      tripwires_required: true
+      purpose: paper GENERATES the forward evidence a backtest cannot; it is an instrument, not a reward
+    challenge:                           # rung 3: prop-firm challenge, fee at risk
+      primary_test: forward_betting_eprocess   # ladder.py::betting_eprocess on the paper record's daily net P&L
+      alpha: 0.10
+      daily_loss_bound: 0.05             # = the firm daily limit: a day beyond it fails the challenge anyway, and it
+                                         # voids the e-process (fail closed). 0.10 capped the bet at half the
+                                         # growth-optimal size (SR 1 power at 3y: 0.07 vs 0.32). Math check 2026-09-30.
+      reachability:                      # measured power at alpha 0.10 (planted Gaussian, 300 sims each)
+        sr_2.0: {y1: 0.21, y3: 0.85, y5: 0.98}
+        sr_1.0: {y1: 0.04, y3: 0.32, y5: 0.58, y10: 0.81}
+        sr_0.5: {y3: 0.12, y5: 0.20, y10: 0.34}   # a SR-0.5 book cannot earn this rung in any realistic soak
+      also_requires: simulated P(pass) Wilson-lower >= the workstream's min_p_pass (its gates file), under its declared kills
+      audit: tier2
+      tripwires_required: true
+    live:                                # rung 4: own capital
+      primary_test: deflated_backtest_plus_forward
+      alpha: 0.05                        # DSR >= 1 - alpha against the trial ledger AND forward e-process at alpha
+      audit: tier2
+      tripwires_required: true
+
+  # Target Sharpe at which each gate's power is published (annualized, net).
+  target_sharpe:
+    daily_multi_asset: 0.5
+    intraday_single_asset: 1.0
+
+  # Hard artifact gates at EVERY rung (sharpen/sharpops/tripwires.py).
+  tripwires:
+    sharpe_ceiling:                      # net Sharpe above this is presumed an artifact until audited
+      intraday_single_asset: 3.0
+      daily_multi_asset: 2.0
+    cost_sign: required                  # net Sharpe may never exceed frictionless
+    pf_xcheck: required                  # on the TRUE LOB mid where one exists ((H+L)/2 cannot see bid-ask bounce)
+    seeds: {diverge: required, same_seed_reproduces: required}
+    shuffle_placebo: {n_perm: 200, max_null_sharpe: 0.3, alpha: 0.05}
+    circular_shift_null: {n_shifts: 500, min_shift_days: 21, alpha: 0.05}
+    planted_signal_recovery: required    # any TRAINING stack, before it is used for discovery
+
+  # Gate calibration (item 5): every gate is characterized on planted signals of known Sharpe,
+  # never on candidates. Report the false-pass rate at SR 0 and the power at target_sharpe.
+  calibration:
+    required: true
+    n_sims: 500
+    max_false_pass_over_alpha: 0.05      # Wilson-lower false-pass at SR 0 may exceed the rung alpha by at most this
+
+  # RL overlay gate (item 8): Sharpe superiority needs ~10y OOS, so non-inferiority + a secondary.
+  overlay:
+    non_inferiority_margin_sharpe: 0.10
+    alpha: 0.05
+    secondary: [cost, turnover, max_drawdown]   # superiority on one pre-registered secondary
+    bootstrap_block_days: 21
+
+  # Retired as GATES (items 3, 4, 9); kept as diagnostics only.
+  retired:
+    bar_level_profit_factor: diagnostic_only    # a bar-PF floor of 1.10-1.5 is a Sharpe floor of 3-67
+    and_of_units_rules: diagnostic_only         # every-seed / every-window / 2-of-5 x 3-of-4
+    recent_oos_60d: replaced_by_forward_betting_eprocess
+    ratio_gates_on_pf: re_express_on_sharpe     # CV-of-PF, OOS hold ratio, sensitivity 0.70, obs-noise
+
+  # Enforcing artifacts per workstream (Tier-2 N3): scripts/sharpops_promotion_check.py loads
+  # the newest match, re-verifies its data pins and config hashes and the gate registry, and
+  # exits 0 PASS / 3 REVIEW / 1 BLOCK, FAIL or stale.
+  workstreams:
+    tailwind-v1:
+      target_rung: paper
+      enforcing_artifact_glob: results/tailwind_v1/x1_recertification_*.json
+
+  # Trial ledger (item 7): a workstream at rung >= paper must keep one in its gates file;
+  # DSR takes N from it; a waiver is a written decision that cites it.
+  trial_ledger:
+    required_from_rung: paper
+    registry: configs/gates_registry.json

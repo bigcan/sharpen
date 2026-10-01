@@ -144,7 +144,15 @@ cohort:
   # less selection for the MC null to price (can go either way). It is a CORRECTNESS change, not a
   # tightening — do not reason about it as "stricter". Blast radius: the three cohort cards on disk
   # (all LOGGED) do not move; a re-run under this file's changed hash is visible in the manifest.
-  enforce_funnel_feasibility: true
+  #
+  # crucible-v16.0: FALSE again, for the same reason it was set true — consistency with the funnel.
+  # Since v15.0 the funnel no longer refuses a PRE-REGISTERED spec over the turnover/size search bounds:
+  # a pre-registration is tested, not screened, on its NET-of-cost stream (evolve.score; the bounds
+  # still bind bred offspring). Every cohort member is a pre-registration, so the cull above now makes
+  # the cohort refuse members the per-candidate gate adjudicates — on us_equity it culled 96 of 140.
+  # Turnover's economic cost is priced by each substrate's `cost_bps`; a substrate whose cost model is
+  # optimistic needs its cost model fixed, not a turnover cap standing in for it.
+  enforce_funnel_feasibility: false
 
   # Selection-aware Monte-Carlo null (Doc 2 §3 — the BINDING statistical gate).
   alpha_cohort: 0.05        # new pre-registered gate: cohort passes iff MC p <= alpha_cohort

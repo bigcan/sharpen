@@ -56,6 +56,9 @@ class Tier2Handoff:
     # forward-incubation evidence (CR-8) — the binding forward gate that made this eligible
     incubation_status: str = STATUS_CLEARED
     forward_sharpe: float | None = None
+    forward_delta_sr: float | None = None      # v16.0: the statistic an ``sprt`` entry was cleared on
+    sprt_llr: float | None = None
+    incubation_test: str = "fixed"
     min_forward_sharpe: float | None = None
     n_forward_bars: int = 0
     min_forward_bars: int | None = None
@@ -122,12 +125,74 @@ def _fmt(x: float | None) -> str:
     return "n/a" if x is None else f"{x:.4f}"
 
 
-def deep_audit_invocation(workstream: str, scope: str) -> str:
+# The Tier-2 pillars for a Crucible FORMULA survivor (crucible-v15.0). The workflow's default pillars are
+# the 11 RL-lifecycle ones (env, reward, replay, …), which do not fit a DSL survivor; the workflow accepts
+# caller-supplied pillars for exactly this case. Before v15.0 the packet also passed the substrate id or
+# "overlay" as `scope`, which the workflow REJECTS before any agent starts ("match no pillar") — the
+# command a CLEARED survivor's human was handed could not run.
+CRUCIBLE_SURVIVOR_PILLARS: tuple[dict[str, str], ...] = (
+    {"key": "C1", "title": "Data and point-in-time integrity",
+     "focus": "Every input series the survivor's formula reads, its release timestamps and joins.",
+     "look": "Release stamps vs the ACTUAL publication record (shutdowns, closures, after-close "
+             "releases); as-of join direction and forward-fill; panel membership and survivorship; the "
+             "forward-return label conditioned on formation-time membership only."},
+    {"key": "C2", "title": "Formula causality and direction",
+     "focus": "The formula as TRADED (sign-folded) and every DSL operator it uses.",
+     "look": "Truncation-equivalence over the WHOLE timeline incl. warm-up; the pre-registered "
+             "expected_sign equals the traded direction; per-name vs broadcast slot handling."},
+    {"key": "C3", "title": "Pre-registration and multiplicity",
+     "focus": "The ledger record, the substrate's online-FDR account, and sibling tests of the idea.",
+     "look": "proposal_ts precedes the holdout; charged LORD++ level vs the level the test used; "
+             "statistical duplicates (stat_hash) and re-admissions of the survivor; any human reuse of "
+             "the holdout."},
+    {"key": "C4", "title": "Marginal-contribution statistic",
+     "focus": "The corrected-contract decision on the embargoed holdout.",
+     "look": "Augmented-book construction (candidate joins only where usable); JKM z and its effective "
+             "N under overlap; CPCV fragility; collinearity; a market-beta / factor-exposure "
+             "decomposition (is the edge a tilt?)."},
+    {"key": "C5", "title": "Costs and capturability",
+     "focus": "The traded book, its turnover and the venue's cost model.",
+     "look": "Frictionless vs net Sharpe at 1/2/5x cost; rebalance-phase sensitivity; capacity at a "
+             "realistic size; shorting constraints; the base book priced on the same cost basis."},
+    {"key": "C6", "title": "Forward evidence (lockbox)",
+     "focus": "The CR-8 incubation that cleared the survivor.",
+     "look": "Forward bars strictly after proposal_ts AND the last scored bar; estimator pinned at "
+             "enrollment; the statistical power of the forward criterion (is clearing distinguishable "
+             "from noise?)."},
+    {"key": "C7", "title": "Implementation parity",
+     "focus": "What a live book would actually trade.",
+     "look": "Execution lag (same-bar close vs next open), data availability at decision time, the "
+             "rebalance calendar, sim-vs-live parity of the combiner and costs."},
+)
+
+
+def deep_audit_invocation(workstream: str, scope: str, *, context: str | None = None) -> str:
     """The exact Tier-2 audit command the OPERATOR runs (never executed here, CLAUDE.md). Mirrors the
-    `deep_strategy_audit` skill contract: ``args:{workstream, scope}`` over
-    ``.claude/workflows/deep_strategy_audit.js``."""
-    args = json.dumps({"workstream": workstream, "scope": scope}, sort_keys=True)
+    `deep_strategy_audit` skill contract: ``args:{workstream, scope, pillars, context}`` over
+    ``.claude/workflows/deep_strategy_audit.js``. ``scope`` is passed through only when it names
+    survivor-pillar keys ("C2,C4"); anything else (a substrate id, "overlay") becomes ``"all"`` — the
+    packet keeps the caller's label in its own ``scope`` field."""
+    keys = {p["key"] for p in CRUCIBLE_SURVIVOR_PILLARS}
+    req = [k.strip().upper() for k in str(scope or "").split(",") if k.strip()]
+    wf_scope = ",".join(req) if req and all(k in keys for k in req) else "all"
+    payload: dict = {"workstream": workstream, "scope": wf_scope,
+                     "pillars": [dict(p) for p in CRUCIBLE_SURVIVOR_PILLARS]}
+    if context:
+        payload["context"] = context
+    args = json.dumps(payload, sort_keys=True, ensure_ascii=False)
     return f"/deep_strategy_audit  args:{args}   # {_AUDIT_WORKFLOW}"
+
+
+def _survivor_context(entry: LockboxEntry) -> str:
+    """The ground truth injected into every finder/skeptic prompt of the survivor's Tier-2."""
+    return (f"Crucible lockbox survivor {entry.candidate_hash} on substrate {entry.substrate_id}: "
+            f"{entry.candidate_type} formula `{entry.formula}`, pre-registered {entry.proposal_ts} "
+            f"under {entry.crucible_version} (gates {entry.gates_hash}); cleared forward incubation "
+            f"with forward Sharpe {entry.forward_sharpe} over {entry.n_forward_bars} bars. Key code: "
+            f"sharpen/crucible (ledger, corrected_contract, lockbox, orchestrator), "
+            f"sharpen/signals/generation (evolve, fitness), sharpen/crucible/data (connectors). Ground "
+            f"rules: CRU-1 frozen funnel gates, CRU-2 agent sees dedup keys only, LEAK-2 no data "
+            f"stamped after the decision bar.")
 
 
 def handoff_for(entry: LockboxEntry, *, workstream: str, scope: str,
@@ -157,8 +222,9 @@ def handoff_for(entry: LockboxEntry, *, workstream: str, scope: str,
         data_snapshot_hash=entry.data_snapshot_hash,
         verdict_snapshot_hash=entry.verdict_snapshot_hash,
         incubation_status=entry.status, forward_sharpe=entry.forward_sharpe,
+        forward_delta_sr=entry.forward_delta_sr, sprt_llr=entry.sprt_llr, incubation_test=entry.test,
         min_forward_sharpe=entry.min_forward_sharpe, n_forward_bars=entry.n_forward_bars,
         min_forward_bars=entry.min_forward_bars, forward_start_ts=entry.forward_start_ts,
         forward_end_ts=entry.forward_end_ts,
         workstream=workstream, scope=scope,
-        audit_command=deep_audit_invocation(workstream, scope), **v)
+        audit_command=deep_audit_invocation(workstream, scope, context=_survivor_context(entry)), **v)

@@ -62,7 +62,7 @@ def _launch_batch(seeds: list[int], run_prefix: str, log_prefix: str) -> int:
         f"for SEED in {seeds_str}; do "
         "TORCHINDUCTOR_CACHE_DIR=/tmp/inductor_gmgp1_oanda_seed$SEED "
         "CUDA_VISIBLE_DEVICES=0 "
-        "nohup /root/miniconda3/bin/python -u scripts/run_full_pipeline.py "
+        "nohup /root/miniconda3/bin/python -u scripts/run_full_pipeline.py --stage l1-multiseed "
         f"--config {CONFIG_PATH} "
         f"--run_name {run_prefix}-seed${{SEED}}_${{TS}} "
         "--seed $SEED "
