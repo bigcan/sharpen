@@ -185,6 +185,18 @@ python scripts/research/crucible_mining_log.py --root C:/FinRL/FinRL-Pro_DS --ro
 # -> docs/research/crucible_mining_log_facts.md (generated) + crucible_mining_log.md (curated:
 #    per-campaign question / binding constraint / what would reopen it, plus the substrate board)
 
+# Community ledger of closed searches (community/ledger/, one JSON per substrate; counts and
+# dedup hashes only -- never formulas, scores or per-hypothesis verdicts). Advice for people:
+# NOTHING in the funnel reads it, so CRU-2 is untouched. Note these two live in scripts/, not
+# scripts/research/.
+python scripts/crucible_community_ledger.py check --substrate us_equity   # "has anyone searched this?" -- before you mine
+python scripts/crucible_community_ledger.py validate                      # schema + internal consistency; exit 1 on any problem; CI runs it
+python scripts/crucible_export_closed_search.py --ledger results/crucible_orchestrator/real/trial_ledger.db --out community/ledger/ [--list] [--dry-run]
+# Verdict per file: CLOSED_DECISIVE (the test could have seen the edge and did not) or
+# OPEN_UNDERPOWERED (could not tell -- NOT "nothing there"). A substrate holding a PROMISING
+# result is skipped unless --include-promising is passed; never pass it for a public export.
+# Schema: docs/schemas/community_closed_search.schema.json. Code: sharpen/crucible/community.py.
+
 # Support scripts
 python scripts/research/generate_alphas.py                  # base sleeve generation
 python scripts/research/measure_altdata_pool_diversity.py    # data-breadth audit
