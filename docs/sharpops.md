@@ -176,11 +176,46 @@ Written by `scripts/build_data_manifest.py`. Co-located with the parquet file as
     "<feature_name>": {"mean": 0.0, "std": 1.0, "p01": -2.3, "p99": 2.4}
   },
   "clean_ohlcv_passed": true,
+  "provenance": {
+    "vendor": "ctrader",
+    "feed": "demo",
+    "symbol_convention": "XAUUSD",
+    "fallback_used": false,
+    "retrieved_at": "2026-04-18T13:40:00Z",
+    "notes": null
+  },
   "built_at": "2026-04-18T13:55:00Z"
 }
 ```
 
 `feature_distribution` is consumed by §8 live-feed drift check; precompute it once per dataset.
+
+### 3.1 Provenance block
+
+Every other field in the manifest answers *are these bytes intact*; none answers
+*which series is this*. The two are not the same question, and the second one has
+cost real work: Dukascopy SPY was gappy so the SPX500 book moved to OANDA, the gold
+series was corrupted in S106, and BALLAST was killed by free-data survivorship —
+a property of the **vendor**, not of the strategy.
+
+- `vendor` — who supplied the bytes (`oanda`, `dukascopy`, `ctrader`, `binance`, `finmind`)
+- `feed` — the tape or tier *within* that vendor (`sip`, `iex`, `demo`, `free-600rph`).
+  Same vendor and a different tape is a different dataset.
+- `symbol_convention` — the instrument as that vendor names it. `SPX500`, `^GSPC` and
+  `SPY` are three different series.
+- `fallback_used` — whether a degraded or secondary source served any bar.
+- `retrieved_at` — when the **bytes** were pulled, distinct from `generated_at`.
+- `notes` — free text.
+
+**Undeclared fields are `null`, never `false` or `""`.** `fallback_used` is tri-state
+on purpose: `null` means nobody said, `false` is an assertion by the fetcher that the
+primary feed served every bar. Defaulting it to `false` would manufacture an assurance
+no one made.
+
+**A rebuild inherits provenance.** `build_data_manifest.py` recomputes every integrity
+field from the parquet, so re-running it without the flags would otherwise drop the
+block while leaving the manifest looking complete. Omitted flags inherit from the
+manifest already on disk; `--clear-provenance` is the only way to remove it.
 
 **Rejection rules** (enforced by `validate_config.py`):
 - `clean_ohlcv_passed != true` → reject
@@ -188,6 +223,15 @@ Written by `scripts/build_data_manifest.py`. Co-located with the parquet file as
 - Any `regime_quartile < 0.10` → reject (insufficient regime coverage)
 - `nan_count > 0` → reject
 - `max_gap_bars > 1 day` without explicit `gap_detection: true` in config → reject
+- Missing or incomplete `provenance` → **WARN**, or reject when the workstream sets
+  `gates.provenance_required: true`. Ships dormant (Phase α, same pattern as
+  `check_obs_noise_gate`) so no existing manifest is retroactively invalidated;
+  an operator flips the key per workstream once its manifests are backfilled.
+- `provenance.fallback_used: true` → WARN (reject under the same key). A run served
+  by a degraded secondary feed is reproducible in name only.
+
+Runtime-fetch sources (`ccxt`, `yfinance*`, `deribit*`) ship no parquet and are exempt:
+`data.source` is itself the vendor declaration.
 
 ---
 

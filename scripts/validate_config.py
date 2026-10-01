@@ -449,6 +449,99 @@ def check_gates_block(cfg: dict, r: ValidationResult) -> None:
     r.ok(f"gates block present ({len(gates)} keys, from {source})")
 
 
+_PROVENANCE_REQUIRED_FIELDS = ("vendor", "feed", "symbol_convention")
+
+
+def _is_runtime_fetch_source(source: str) -> bool:
+    """Mirror of `check_data_manifest`'s own source exemptions.
+
+    Deliberately exact for ccxt and prefix for the other two, because that is what
+    `check_data_manifest` does. The two functions read the same `data.source` and
+    must agree about which datasets ship a manifest: if this one exempted a source
+    that the other still gates, provenance would go unchecked on a dataset that has
+    a manifest to check. One owner of the rule, mirrored here rather than restated
+    loosely.
+    """
+    return source == "ccxt" or source.startswith(("yfinance", "deribit"))
+
+
+def check_data_provenance(cfg: dict, stage: str, r: ValidationResult) -> None:
+    """Data-manifest ORIGIN fields (vendor / feed / symbol_convention).
+
+    Complements `check_data_manifest`, which gates *integrity* -- rows, NaNs, gaps,
+    DATA-CLEAN, recency. Integrity cannot answer "is this the same series the last
+    verdict was built on?", and that question has cost this project repeatedly
+    (Dukascopy SPY vs OANDA SPX500; the S106 gold corruption; BALLAST's free-data
+    survivorship, which was a property of the vendor and not of the strategy).
+
+    **Ships DORMANT (Phase alpha), matching `check_sensitivity_audit` /
+    `check_obs_noise_gate`.** Missing provenance is a WARN so no existing manifest
+    is retroactively invalidated; a workstream opts into enforcement with
+    `gates.provenance_required: true` -- in the `gates:` block, alongside its
+    `*_required` siblings, not under `data:`, so it is resolved from
+    `configs/<workstream>.gates.yaml` like every other enforcement switch.
+
+    `fallback_used: true` warns on its own even when the identity fields are
+    complete: a run served by a degraded secondary feed is reproducible in name
+    only, which is exactly the failure the flag exists to surface.
+    """
+    data = cfg.get("data", {})
+    # Resolve the SAME effective gates every sibling check reads. The inline
+    # `gates:` block alone is not enough: CLAUDE.md mandates that per-workstream
+    # gates live in `configs/<ws>.gates.yaml`, reached via `ensemble.gates_file`,
+    # so reading `cfg["gates"]` directly would leave enforcement silently OFF for
+    # exactly the workstreams that followed the rule.
+    gates = _load_ensemble_gates_overlay(cfg)
+    required = bool(gates.get("provenance_required", False))
+    emit = r.fail if required else r.warn
+
+    source = str(data.get("source") or "")
+    if _is_runtime_fetch_source(source):
+        r.ok(f"data provenance: source={source} declares its own vendor (runtime fetch)")
+        return
+
+    file_path = data.get("file_path")
+    if not file_path:
+        return  # check_data_manifest already failed on this
+    data_path = Path(file_path)
+    if not data_path.exists():
+        return  # ditto
+    manifest = load_data_manifest(data_path)
+    if manifest is None:
+        return  # ditto
+
+    block = manifest.get("provenance")
+    if not isinstance(block, dict):
+        emit(
+            f"data manifest {data_path.with_suffix('.manifest.json').name}: no provenance "
+            "block (vendor / feed / symbol_convention undeclared). Rebuild with "
+            "scripts/build_data_manifest.py --vendor ... --feed ... --symbol-convention ..."
+        )
+        return
+
+    missing = [k for k in _PROVENANCE_REQUIRED_FIELDS if block.get(k) is None]
+    if missing:
+        emit(
+            f"data manifest: provenance incomplete -- undeclared: {', '.join(missing)}. "
+            "Rebuild with the matching scripts/build_data_manifest.py flags."
+        )
+    else:
+        r.ok(
+            f"data provenance OK (vendor={block['vendor']}, feed={block['feed']}, "
+            f"symbol={block['symbol_convention']}; stage={stage})"
+        )
+
+    # Tri-state on purpose. `is True` so a truthy string can never trip this
+    # silently, and so an undeclared None stays the completeness question above
+    # rather than becoming a false all-clear here.
+    if block.get("fallback_used") is True:
+        emit(
+            "data manifest: provenance.fallback_used=true -- a degraded or secondary "
+            "source served part of this dataset; results are not reproducible from the "
+            "primary feed alone."
+        )
+
+
 def check_data_manifest(cfg: dict, stage: str, r: ValidationResult) -> None:
     """Stage 0 rejection rules from §3 of sharpops.md."""
     data = cfg.get("data", {})
@@ -2662,6 +2755,7 @@ def validate(config_path: Path, stage: str, overlays: list[str] | None = None) -
     check_legacy_prop_firm_block(cfg, stage, r, config_path=config_path)
     check_gates_block(cfg, r)
     check_data_manifest(cfg, stage, r)
+    check_data_provenance(cfg, stage, r)
     check_execution_cost_realism(cfg, stage, r)
     check_execution_overlay_gates(cfg, r)
     check_decision_lead(cfg, r)
