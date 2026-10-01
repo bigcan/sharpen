@@ -11,7 +11,7 @@ The Crucible alpha-mining platform keeps its own version (`sharpen/crucible/vers
 `crucible-vMAJOR.MINOR`), because it stamps every mining run; each entry below names the Crucible
 versions it contains.
 
-## [1.1.0] — unreleased
+## [1.1.0] — 2026-10-01
 
 ### Added
 - **SharpOps promotion ladder** (`docs/sharpops_promotion_standard.md`, `sharpen/sharpops/`): one
