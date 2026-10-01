@@ -56,10 +56,15 @@ jobs:
       # `crypto` is required, not optional: sharpen/analytics/ imports matplotlib at MODULE
       # level and matplotlib is declared under that extra. `ctrader` is required too --
       # tests/cfd/test_ctrader_broker.py imports ctrader_open_api directly (3 failures on
-      # the first Linux run). `ib` is NOT needed: no test imports ib_insync, and
-      # sharpen/futures/ imports it lazily inside functions.
+      # the first Linux run). `deploy` is required as well:
+      # tests/test_deploy_excludes_secrets.py imports scripts/deploy_bare_metal.py to run
+      # its packager, and that script imports paramiko at MODULE level (the suite's only
+      # failure when the extra was added, 2026-10-01). scripts/remote_cmd.py does the same,
+      # and tests/scripts/test_remote_cmd_redaction.py had been skipping on it rather than
+      # running. `ib` is NOT needed: no test imports ib_insync, and sharpen/futures/
+      # imports it lazily inside functions.
       - name: Install project
-        run: pip install -e ".[dev,crypto,ctrader]"
+        run: pip install -e ".[dev,crypto,ctrader,deploy]"
 
       # sharpen/ and tests/ are clean today (measured 2026-09-01), so this is a real gate:
       # it fails the moment the package or the suite regresses. scripts/oss/ is the tracked
