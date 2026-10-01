@@ -15,6 +15,8 @@ The load-bearing risks pinned here:
   * a name must not be active before the first monthly rebalance admits it.
   * the dividend add-back must be FORWARD-only — a back-adjusted feed would rewrite past bars with
     a future factor, the classic total-return look-ahead.
+  * the opt-in age cap (`max_age_days`) is OFF by default, and the default must not move: the
+    uncapped join is compared byte for byte against a frozen copy of the pre-cap `asof_grid`.
 """
 from __future__ import annotations
 
@@ -277,3 +279,242 @@ def test_sector_map_sha_moves_only_with_this_panels_partition(data_dir):
     pool.to_parquet(data_dir / "pool.frozen.parquet")
     _ids, c = tsp.sector_map(data_dir, _TICKERS)
     assert c["sector_map_sha"] != a["sector_map_sha"]
+
+
+# --------------------------------------------------------------------------- #
+# Opt-in age cap (`max_age_days`) — off by default, and the default must not move
+# --------------------------------------------------------------------------- #
+def _sealed_asof_grid(events, dates, tickers, value_col, avail_col="avail_date",
+                      id_col="stock_id", *, max_age_days=None):
+    """SEALED REFERENCE — `asof_grid` exactly as it stood before the age cap existed. DO NOT EDIT.
+
+    `max_age_days` is accepted only so this can stand in for `tsp.asof_grid` inside the builder; the
+    default build must never hand a cap to any channel, which the assert enforces.
+    """
+    assert max_age_days is None, "the default build passed an age cap to a channel"
+    T, N = len(dates), len(tickers)
+    grid = np.full((T, N), np.nan, dtype=np.float64)
+    if events is None or events.empty or value_col not in events.columns:
+        return grid
+    d = pd.DataFrame({avail_col: pd.to_datetime(dates)}).sort_values(avail_col).reset_index(drop=True)
+    ev = events.dropna(subset=[avail_col, value_col]).copy()
+    ev[avail_col] = pd.to_datetime(ev[avail_col])
+    ev[id_col] = ev[id_col].astype(str)
+    col = {tk: j for j, tk in enumerate(tickers)}
+    for tk, g in ev.groupby(id_col):
+        j = col.get(str(tk))
+        if j is None:
+            continue
+        g = g[[avail_col, value_col]].sort_values(avail_col)
+        # collapse duplicate avail dates to the LAST print that day (keep it public-consistent)
+        g = g.groupby(avail_col, as_index=False).last()
+        merged = pd.merge_asof(d, g, on=avail_col, direction="backward")
+        grid[:, j] = merged[value_col].to_numpy(dtype=np.float64)
+    return grid
+
+
+_GRID_TICKERS = ("A", "B", "C")
+
+
+def _irregular_events() -> pd.DataFrame:
+    """Prints 1-119 days apart, plus a duplicate avail date, a NaN value and an off-grid ticker."""
+    rng = np.random.default_rng(5)
+    rows = []
+    for tk in (*_GRID_TICKERS, "Z"):                      # Z is not on the grid
+        t = pd.Timestamp("2020-01-01")
+        for _ in range(12):
+            t = t + pd.Timedelta(days=int(rng.integers(1, 120)))
+            rows.append({"stock_id": tk, "avail_date": t, "v": float(rng.normal())})
+    rows.append({"stock_id": "A", "avail_date": rows[3]["avail_date"], "v": 9.0})
+    rows.append({"stock_id": "B", "avail_date": pd.Timestamp("2020-06-01"), "v": np.nan})
+    return pd.DataFrame(rows)
+
+
+_GRID_DATES = np.array(pd.bdate_range("2020-01-01", periods=700), dtype="datetime64[ns]")
+
+
+def test_asof_grid_default_is_the_sealed_join_byte_for_byte():
+    ev = _irregular_events()
+    want = _sealed_asof_grid(ev, _GRID_DATES, _GRID_TICKERS, "v")
+    assert np.isfinite(want).any() and np.isnan(want).any()
+    assert tsp.asof_grid(ev, _GRID_DATES, _GRID_TICKERS, "v").tobytes() == want.tobytes()
+    assert tsp.asof_grid(ev, _GRID_DATES, _GRID_TICKERS, "v",
+                         max_age_days=None).tobytes() == want.tobytes()
+
+
+def test_a_stale_value_becomes_nan_after_the_cap():
+    dates = np.array(pd.date_range("2020-01-01", periods=20, freq="D"), dtype="datetime64[ns]")
+    ev = pd.DataFrame({"stock_id": ["A", "A"],
+                       "avail_date": [pd.Timestamp("2020-01-03"), pd.Timestamp("2020-01-15")],
+                       "v": [1.0, 2.0]})
+    capped = tsp.asof_grid(ev, dates, ("A",), "v", max_age_days=5)[:, 0]
+    assert np.isnan(capped[:2]).all()
+    assert (capped[2:8] == 1.0).all(), "ages 0..5 must be carried — the cap is inclusive"
+    assert np.isnan(capped[8:14]).all(), "a print older than the cap was still carried"
+    assert (capped[14:] == 2.0).all(), "a newer print did not bring the cell back"
+    # the sealed behaviour carries the first print across that whole stretch — this is what the
+    # cap removes, and why a cap that silently did nothing would be caught here
+    assert (tsp.asof_grid(ev, dates, ("A",), "v")[8:14, 0] == 1.0).all()
+
+
+def test_the_age_cap_counts_calendar_days_not_bars():
+    dates = np.array(pd.bdate_range("2020-01-06", periods=10), dtype="datetime64[ns]")   # a Monday
+    ev = pd.DataFrame({"stock_id": ["A"], "avail_date": [pd.Timestamp("2020-01-10")], "v": [1.0]})
+    two = tsp.asof_grid(ev, dates, ("A",), "v", max_age_days=2)[:, 0]
+    # Friday the 10th is bar 4. Monday the 13th is ONE bar later but three calendar days older.
+    assert two[4] == 1.0 and np.isnan(two[5:]).all()
+    assert tsp.asof_grid(ev, dates, ("A",), "v", max_age_days=3)[5, 0] == 1.0
+
+
+@pytest.mark.parametrize("cap", [0, 1, 30, 75, 400])
+def test_age_cap_agrees_with_an_explicit_age_computation(cap):
+    """The cap rides on `merge_asof(tolerance=...)`. Re-derive it WITHOUT that argument: carry the
+    avail date of the print in force through the uncapped join, measure its age at every bar, and
+    blank what is older. Pins the inclusive boundary against a change in pandas' semantics."""
+    ev = _irregular_events()
+    valid = ev.dropna(subset=["v"])                       # the print in force is the last VALID one
+    epoch = pd.Timestamp("1970-01-01")
+    stamped = valid.assign(day=(valid["avail_date"] - epoch) / pd.Timedelta(days=1))
+    in_force = tsp.asof_grid(stamped, _GRID_DATES, _GRID_TICKERS, "day")
+    today = ((pd.DatetimeIndex(_GRID_DATES) - epoch) / pd.Timedelta(days=1)).to_numpy()[:, None]
+    uncapped = tsp.asof_grid(ev, _GRID_DATES, _GRID_TICKERS, "v")
+    want = np.where(today - in_force > cap, np.nan, uncapped)
+
+    got = tsp.asof_grid(ev, _GRID_DATES, _GRID_TICKERS, "v", max_age_days=cap)
+    np.testing.assert_array_equal(got, want)
+    blanked = int((np.isfinite(uncapped) & np.isnan(got)).sum())
+    if cap <= 75:
+        assert blanked > 0 and np.isfinite(got).any(), "the cap never bound — nothing was compared"
+    else:
+        assert blanked == 0 and got.tobytes() == uncapped.tobytes(), "a non-binding cap changed a cell"
+
+
+def test_asof_grid_rejects_a_negative_cap():
+    with pytest.raises(ValueError, match="max_age_days must be >= 0"):
+        tsp.asof_grid(_irregular_events(), _GRID_DATES, _GRID_TICKERS, "v", max_age_days=-1)
+
+
+def _stop_feed(data_dir: Path, ticker: str, after: str) -> None:
+    """Delete `ticker`'s month-revenue prints available after `after`: a vendor feed that stops
+    while the name itself keeps trading."""
+    mr = pd.read_parquet(data_dir / "month_revenue.parquet")
+    gone = (mr["stock_id"] == ticker) & (pd.to_datetime(mr["avail_date"]) > pd.Timestamp(after))
+    assert gone.any()
+    mr[~gone].to_parquet(data_dir / "month_revenue.parquet")
+
+
+def _assert_same_panel(got, want) -> None:
+    assert got.tickers == want.tickers
+    for name in ("dates", "open", "high", "low", "close", "volume", "active", "adv_usd",
+                 "sector_id"):
+        assert getattr(got, name).tobytes() == getattr(want, name).tobytes(), f"{name} moved"
+    assert list(got.feature_slots) == list(want.feature_slots)
+    for name, slot in want.feature_slots.items():
+        assert np.asarray(got.feature_slots[name]).tobytes() == np.asarray(slot).tobytes(), (
+            f"slot {name} moved")
+    assert got.meta == want.meta
+
+
+def test_default_panel_is_the_sealed_panel(data_dir, monkeypatch):
+    """No cap asked for => the panel the pre-cap builder gave, on a fixture where a cap WOULD bind."""
+    _stop_feed(data_dir, "6505", "2020-04-30")
+    got = tsp.build_taiwan_smallcap_panel(data_dir, channels=tsp.ALL_CHANNELS)
+    assert "max_age_days" not in got.meta, "the default meta gained a key — sealed scorecards move"
+
+    monkeypatch.setattr(tsp, "asof_grid", _sealed_asof_grid)
+    want = tsp.build_taiwan_smallcap_panel(data_dir, channels=tsp.ALL_CHANNELS)
+    _assert_same_panel(got, want)
+
+
+@pytest.mark.parametrize("off", [None, {}, {"mrev_yoy": None}])
+def test_an_empty_age_cap_is_the_default(data_dir, off):
+    _stop_feed(data_dir, "6505", "2020-04-30")
+    _assert_same_panel(tsp.build_taiwan_smallcap_panel(data_dir, max_age_days=off),
+                       tsp.build_taiwan_smallcap_panel(data_dir))
+
+
+def test_a_stopped_feed_drops_out_of_the_panel_after_the_cap(data_dir):
+    """The last print for the stopped feed is due 2020-04-10 (a Friday), so it is usable from the
+    next session, Monday 2020-04-13. With a 75-day cap it is carried through 2020-06-27 and NaN
+    after; the uncapped panel carries that one value to the last bar."""
+    _stop_feed(data_dir, "6505", "2020-04-30")
+    sealed = tsp.build_taiwan_smallcap_panel(data_dir)
+    capped = tsp.build_taiwan_smallcap_panel(data_dir, max_age_days={"mrev_yoy": 75})
+    j = sealed.tickers.index("6505")
+    d = pd.DatetimeIndex(sealed.dates)
+    stale = np.asarray(d > pd.Timestamp("2020-04-13") + pd.Timedelta(days=75))
+    assert stale.sum() > 100 and d[stale][0] == pd.Timestamp("2020-06-29")
+
+    before, after = sealed.feature_slots["mrev_yoy"], capped.feature_slots["mrev_yoy"]
+    assert np.isfinite(before[stale, j]).all() and len(set(before[stale, j])) == 1, (
+        "the uncapped panel should be carrying one frozen value here")
+    assert np.isnan(after[stale, j]).all(), "a value older than the cap survived"
+    assert after[~stale, j].tobytes() == before[~stale, j].tobytes()
+    # the two names still reporting every month are never 75 days stale — untouched
+    others = [k for k in range(sealed.N) if k != j]
+    assert after[:, others].tobytes() == before[:, others].tobytes()
+
+    # ...and the cap is per channel: nothing else in the panel moves
+    for name in ("margin_util", "holder_conc"):
+        assert capped.feature_slots[name].tobytes() == sealed.feature_slots[name].tobytes()
+    for name in ("close", "volume", "active", "adv_usd"):
+        assert getattr(capped, name).tobytes() == getattr(sealed, name).tobytes()
+    assert capped.meta["max_age_days"] == {"mrev_yoy": 75}, "a capped panel must say it is capped"
+    assert {k: v for k, v in capped.meta.items() if k != "max_age_days"} == sealed.meta
+
+
+def test_age_cap_is_per_channel(data_dir):
+    """Capping one channel leaves the others exactly as they were."""
+    sealed = tsp.build_taiwan_smallcap_panel(data_dir)
+    capped = tsp.build_taiwan_smallcap_panel(data_dir, max_age_days={"holder_conc": 30})
+    # the fixture's register is a single print on the first bar: uncapped it is carried all year
+    assert np.isfinite(sealed.feature_slots["holder_conc"]).all()
+    d = pd.DatetimeIndex(sealed.dates)
+    old = np.asarray(d > d[0] + pd.Timedelta(days=30))
+    assert np.isnan(capped.feature_slots["holder_conc"][old]).all()
+    assert np.isfinite(capped.feature_slots["holder_conc"][~old]).all()
+    for name in ("mrev_yoy", "margin_util"):
+        assert capped.feature_slots[name].tobytes() == sealed.feature_slots[name].tobytes()
+
+
+def test_age_cap_on_a_channel_that_is_not_built_is_rejected(data_dir):
+    """A cap that names nothing would leave the panel uncapped while the caller thinks otherwise."""
+    with pytest.raises(ValueError, match="not being built"):          # real channel, not requested
+        tsp.build_taiwan_smallcap_panel(data_dir, max_age_days={"short_util": 30})
+    with pytest.raises(ValueError, match="not being built"):          # misspelt
+        tsp.build_taiwan_smallcap_panel(data_dir, max_age_days={"mrev": 75})
+
+
+@pytest.mark.parametrize("bad", [-1, 7.5])
+def test_a_malformed_age_cap_is_rejected(data_dir, bad):
+    with pytest.raises(ValueError, match="whole number of days"):
+        tsp.build_taiwan_smallcap_panel(data_dir, max_age_days={"mrev_yoy": bad})
+
+
+@pytest.mark.parametrize("bare", [0, 75])
+def test_a_bare_number_is_not_accepted_as_a_panel_age_cap(data_dir, bare):
+    """`asof_grid` takes a number, the builder takes {channel: days}. A bare 0 is falsy, so without
+    this check it would be read as "no cap" and build an uncapped panel without a word."""
+    with pytest.raises(TypeError, match="must be a mapping"):
+        tsp.build_taiwan_smallcap_panel(data_dir, max_age_days=bare)
+
+
+def test_capped_rebuild_on_truncated_source_reproduces_every_past_cell(data_dir, tmp_path):
+    """LEAK-2 for the capped path: the truncate-the-SOURCE-and-rebuild tripwire, with caps that bind."""
+    caps = {"mrev_yoy": 20, "holder_conc": 30}
+    full = tsp.build_taiwan_smallcap_panel(data_dir, channels=tsp.ALL_CHANNELS, max_age_days=caps)
+    uncapped = tsp.build_taiwan_smallcap_panel(data_dir, channels=tsp.ALL_CHANNELS)
+    for name in caps:
+        assert (np.isfinite(uncapped.feature_slots[name])
+                & np.isnan(full.feature_slots[name])).any(), f"the {name} cap never binds"
+
+    cut_ix = int(full.T * 0.7)
+    trunc_dir = tmp_path / "as_of"
+    _truncate_source(data_dir, trunc_dir, pd.Timestamp(full.dates[cut_ix]))
+    past = tsp.build_taiwan_smallcap_panel(trunc_dir, channels=tsp.ALL_CHANNELS, max_age_days=caps)
+
+    assert past.T == cut_ix + 1 and past.tickers == full.tickers
+    for name in tsp.ALL_CHANNELS:
+        np.testing.assert_array_equal(
+            np.asarray(past.feature_slots[name]), np.asarray(full.feature_slots[name])[:past.T],
+            err_msg=f"capped slot {name} moved at t<=cut when the future was deleted — look-ahead")
