@@ -1,0 +1,474 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:sharpen:crucible:community-closed-search:v1",
+  "title": "Crucible community ledger: one closed search",
+  "description": "One substrate's mining record: what was searched, how many hypotheses reached the out-of-sample test, how strong that test was, and whether the question is closed. Counts and hashes only; no formula, score or per-hypothesis verdict.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "export_id",
+    "hypotheses",
+    "kind",
+    "power",
+    "provenance",
+    "rejections",
+    "schema_version",
+    "substrate",
+    "ticks",
+    "trials",
+    "verdict",
+    "verdict_reasons"
+  ],
+  "properties": {
+    "schema_version": {
+      "const": 1
+    },
+    "kind": {
+      "const": "crucible_closed_search"
+    },
+    "export_id": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{12}$"
+    },
+    "verdict": {
+      "enum": [
+        "CLOSED_DECISIVE",
+        "OPEN_UNDERPOWERED",
+        "PROMISING_FOUND"
+      ]
+    },
+    "verdict_reasons": {
+      "type": "array",
+      "minItems": 1,
+      "uniqueItems": true,
+      "items": {
+        "enum": [
+          "promising_result",
+          "all_holdout_rejections_decisive",
+          "holdout_count_not_recorded",
+          "no_holdout_decision",
+          "underpowered_rejections",
+          "unclassified_rejections",
+          "mde_above_floor",
+          "power_not_measured"
+        ]
+      }
+    },
+    "substrate": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "data_end",
+        "data_sources",
+        "data_start",
+        "id",
+        "search_space",
+        "universe"
+      ],
+      "properties": {
+        "id": {
+          "type": "string",
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9_.-]{0,63}$"
+        },
+        "universe": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "minLength": 1,
+          "maxLength": 300
+        },
+        "data_sources": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 300
+          },
+          "maxItems": 20,
+          "uniqueItems": true
+        },
+        "data_start": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}$"
+        },
+        "data_end": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}$"
+        },
+        "search_space": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "minLength": 1,
+          "maxLength": 300
+        }
+      }
+    },
+    "trials": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "holdout_count_complete",
+        "holdout_tested",
+        "preregistered",
+        "promising",
+        "recorded",
+        "scored"
+      ],
+      "properties": {
+        "recorded": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "preregistered": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "scored": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "holdout_tested": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "minimum": 0
+        },
+        "holdout_count_complete": {
+          "type": "boolean"
+        },
+        "promising": {
+          "type": "integer",
+          "minimum": 0
+        }
+      }
+    },
+    "rejections": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "decisive",
+        "unclassified",
+        "underpowered"
+      ],
+      "properties": {
+        "decisive": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "underpowered": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "unclassified": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "minimum": 0
+        }
+      }
+    },
+    "power": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "decisive_mde_multiple",
+        "economic_floor",
+        "economic_floor_gates_hash",
+        "economic_floor_source",
+        "mde_at_test_max",
+        "mde_at_test_min",
+        "mde_source",
+        "mde_substrate",
+        "mde_unmeasured_ticks"
+      ],
+      "properties": {
+        "mde_at_test_min": {
+          "type": [
+            "number",
+            "null"
+          ],
+          "minimum": 0
+        },
+        "mde_at_test_max": {
+          "type": [
+            "number",
+            "null"
+          ],
+          "minimum": 0
+        },
+        "mde_substrate": {
+          "type": [
+            "number",
+            "null"
+          ],
+          "minimum": 0
+        },
+        "mde_unmeasured_ticks": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "mde_source": {
+          "enum": [
+            "ledger",
+            "tick_log",
+            "none"
+          ]
+        },
+        "economic_floor": {
+          "type": "number",
+          "exclusiveMinimum": 0
+        },
+        "economic_floor_source": {
+          "enum": [
+            "guards.uplift_min",
+            "generation.min_combination_uplift"
+          ]
+        },
+        "economic_floor_gates_hash": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{12}$"
+        },
+        "decisive_mde_multiple": {
+          "type": "number",
+          "exclusiveMinimum": 0
+        }
+      }
+    },
+    "ticks": {
+      "type": [
+        "object",
+        "null"
+      ],
+      "additionalProperties": false,
+      "required": [
+        "cohort_only",
+        "errors",
+        "idle",
+        "mined",
+        "no_score",
+        "screened_only",
+        "screened_unknown",
+        "tested",
+        "total",
+        "underpowered_skips"
+      ],
+      "properties": {
+        "total": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "mined": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "tested": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "screened_only": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "screened_unknown": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "no_score": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "cohort_only": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "underpowered_skips": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "idle": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "errors": {
+          "type": "integer",
+          "minimum": 0
+        }
+      }
+    },
+    "provenance": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "cohort_gates_hashes",
+        "contracts",
+        "corrected_gates_hashes",
+        "crucible_versions",
+        "data_snapshot_hashes",
+        "first_date",
+        "gates_hashes",
+        "last_date",
+        "manifest_hashes",
+        "proposers",
+        "runs",
+        "search_memory_gates_hashes",
+        "source"
+      ],
+      "properties": {
+        "source": {
+          "enum": [
+            "trial_ledger"
+          ]
+        },
+        "runs": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "first_date": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}$"
+        },
+        "last_date": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}$"
+        },
+        "crucible_versions": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "pattern": "^crucible-v[0-9]+\\.[0-9]+(\\.[0-9]+)?$"
+          },
+          "uniqueItems": true
+        },
+        "contracts": {
+          "type": "array",
+          "items": {
+            "enum": [
+              "corrected",
+              "shipped"
+            ]
+          },
+          "uniqueItems": true
+        },
+        "proposers": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "pattern": "^[A-Za-z0-9_.:+\\[\\]-]{1,120}$"
+          },
+          "uniqueItems": true
+        },
+        "gates_hashes": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "pattern": "^[0-9a-f]{12}$"
+          },
+          "uniqueItems": true
+        },
+        "corrected_gates_hashes": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "pattern": "^[0-9a-f]{12}$"
+          },
+          "uniqueItems": true
+        },
+        "search_memory_gates_hashes": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "pattern": "^[0-9a-f]{12}$"
+          },
+          "uniqueItems": true
+        },
+        "cohort_gates_hashes": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "pattern": "^[0-9a-f]{12}$"
+          },
+          "uniqueItems": true
+        },
+        "data_snapshot_hashes": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "pattern": "^[A-Za-z0-9_.:+\\[\\]-]{1,120}$"
+          },
+          "uniqueItems": true
+        },
+        "manifest_hashes": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "pattern": "^[0-9a-f]{12}$"
+          },
+          "uniqueItems": true
+        }
+      }
+    },
+    "hypotheses": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "by_type",
+        "count",
+        "semantic_hashes"
+      ],
+      "properties": {
+        "count": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "by_type": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "cross_sectional",
+            "overlay",
+            "unknown"
+          ],
+          "properties": {
+            "cross_sectional": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "overlay": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "unknown": {
+              "type": "integer",
+              "minimum": 0
+            }
+          }
+        },
+        "semantic_hashes": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "pattern": "^[0-9a-f]{12}$"
+          },
+          "uniqueItems": true
+        }
+      }
+    }
+  }
+}
