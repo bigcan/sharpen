@@ -36,6 +36,7 @@ Optional extras, installed only when you need the matching surface:
 | `ib` | `ib` | `ib-insync` — Interactive Brokers futures (GC/MGC) |
 | `ctrader` | `ctrader` | cTrader Open API — CFD execution (XAUUSD, EURUSD) |
 | `distributed` | `distributed` | `psycopg` — Postgres-backed distributed HPO |
+| `deploy` | `deploy` | `paramiko` — SSH/SFTP for the remote-GPU scripts (`deploy_bare_metal.py`, `monitor_fleet.py`, `collect_run.py`) |
 
 ---
 
