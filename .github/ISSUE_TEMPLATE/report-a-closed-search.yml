@@ -1,0 +1,84 @@
+name: Report a closed search
+description: You mined a data set with Crucible and found nothing. Share it so nobody repeats the search blind.
+title: "[closed search] "
+labels: ["closed-search"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks. A search that found nothing is a result, and it saves the next person the compute.
+
+        The quickest route is a pull request: run the export and add the file it writes under
+        `community/ledger/` (see CONTRIBUTING.md, "Share a search that found nothing"). Use this
+        form if you would rather paste the result and let a maintainer add it.
+
+        Share dead ends only. The export leaves out any substrate that holds a PROMISING result
+        unless you ask it not to, and nobody will ask you why a substrate is missing.
+  - type: input
+    id: substrate
+    attributes:
+      label: Substrate
+      description: The substrate id the orchestrator used, and one line on the universe.
+      placeholder: "us_equity: S&P 500 members (point-in-time), top 300 by dollar volume"
+    validations:
+      required: true
+  - type: input
+    id: data
+    attributes:
+      label: Data sources and date range
+      description: Name the sources. Do not paste local paths.
+      placeholder: "Yahoo Finance daily bars, 2007-01-01 to 2026-08-10"
+    validations:
+      required: true
+  - type: textarea
+    id: search-space
+    attributes:
+      label: Search space
+      description: What was proposed and scored (seed library, LLM proposer, genetic offspring), and the hold horizon.
+      placeholder: "Library seed formulas plus genetic offspring; 2-day hold"
+    validations:
+      required: true
+  - type: input
+    id: trials
+    attributes:
+      label: Trials
+      description: Pre-registered, scored, and tested out of sample. Say "not recorded" rather than 0 if your version did not record a count.
+      placeholder: "140 pre-registered, 151 scored, at least 42 tested out of sample, 0 PROMISING"
+    validations:
+      required: true
+  - type: input
+    id: power
+    attributes:
+      label: MDE at test and the economic floor
+      description: The smallest edge the test could detect (implied MDE) next to the smallest edge the contract accepts (guards.uplift_min).
+      placeholder: "MDE 1.31 against a floor of 0.10"
+    validations:
+      required: true
+  - type: dropdown
+    id: verdict
+    attributes:
+      label: Verdict
+      description: |
+        DECISIVE means the test could have seen an edge of the size that matters and did not.
+        UNDERPOWERED means it could not tell either way. That is not "nothing there".
+      options:
+        - OPEN_UNDERPOWERED (the test could not tell; worth retrying on a deeper panel)
+        - CLOSED_DECISIVE (the test could have seen it and did not)
+    validations:
+      required: true
+  - type: textarea
+    id: hashes
+    attributes:
+      label: Manifest hashes
+      description: crucible_version, gates_hash, corrected and search-memory gates hashes, data_snapshot_hash. They are all in the exported file.
+      render: text
+    validations:
+      required: false
+  - type: textarea
+    id: export
+    attributes:
+      label: Exported JSON
+      description: Paste the file written by `python scripts/crucible_export_closed_search.py --ledger <trial_ledger.db> --out community/ledger/`, or attach it.
+      render: json
+    validations:
+      required: true

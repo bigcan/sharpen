@@ -155,6 +155,10 @@ Systematic alpha mining with validation inside the loop.
 - **Mine, deflate, incubate**: every candidate is deflated against everything the search has ever
   tried, then forward-incubated in a lockbox.
 - **Reproducible**: gate definitions are hash-frozen, and every run records its provenance.
+- **Community ledger** ([`community/ledger/`](community/ledger/README.md)): if you mine a data set
+  and find nothing, one command exports the result as counts and hashes, with no formulas or
+  scores, so the next person does not repeat the search. Each entry says whether the search was
+  finished (`CLOSED_DECISIVE`) or the test was too weak to tell (`OPEN_UNDERPOWERED`).
 
 ### Backtesting and falsification
 A backtest shows what a strategy did. These tools test whether it would do it again.
@@ -309,6 +313,7 @@ sharpen/
 ├── crypto/  cfd/  futures/  live/   Broker adapters and live engine
 └── ...         eval, monitoring, analytics, portfolio
 configs/  scripts/  tests/  docs/  docker/live/
+community/ledger/   Crucible searches shared by users: what was searched and whether it is closed
 ```
 
 Session tags such as `S553` in the docs refer to the private R&D log, which is not published.
@@ -331,7 +336,8 @@ than fail, so run them individually with a timeout.
 
 ## Contributing, security, and a personal note
 
-Challenges to a result are the most useful contribution: see [CONTRIBUTING.md](CONTRIBUTING.md).
+Challenges to a result are the most useful contribution, and a Crucible search that found nothing
+is worth sharing too: see [CONTRIBUTING.md](CONTRIBUTING.md).
 Report security issues privately per [SECURITY.md](SECURITY.md). Participation follows the
 [Code of Conduct](CODE_OF_CONDUCT.md).
 

@@ -1,0 +1,115 @@
+{
+  "export_id": "ef70cd7517a5",
+  "hypotheses": {
+    "by_type": {
+      "cross_sectional": 18,
+      "overlay": 0,
+      "unknown": 0
+    },
+    "count": 18,
+    "semantic_hashes": [
+      "088611ab9268",
+      "21eb34572f43",
+      "2cf911f9b7f4",
+      "342f77a90c05",
+      "36813d80c35d",
+      "3ab42aa66e07",
+      "3c80ecd3da7b",
+      "498d5ac6cbae",
+      "4bfd4a485462",
+      "513c61a9f961",
+      "56664125b874",
+      "5b68aadbe74a",
+      "780920cbda71",
+      "806ce9887f67",
+      "94283b6f464f",
+      "9c210a5b5806",
+      "b3004f0a330e",
+      "e07beb59a90b"
+    ]
+  },
+  "kind": "crucible_closed_search",
+  "power": {
+    "decisive_mde_multiple": 1.0,
+    "economic_floor": 0.1,
+    "economic_floor_gates_hash": "d1523707b860",
+    "economic_floor_source": "guards.uplift_min",
+    "mde_at_test_max": 1.68267,
+    "mde_at_test_min": 1.68267,
+    "mde_source": "tick_log",
+    "mde_substrate": 1.68267,
+    "mde_unmeasured_ticks": 0
+  },
+  "provenance": {
+    "cohort_gates_hashes": [],
+    "contracts": [
+      "corrected"
+    ],
+    "corrected_gates_hashes": [
+      "7fc2a73be779"
+    ],
+    "crucible_versions": [
+      "crucible-v11.0"
+    ],
+    "data_snapshot_hashes": [
+      "be948584faf1"
+    ],
+    "first_date": "2026-08-04",
+    "gates_hashes": [
+      "8ec4820b3983"
+    ],
+    "last_date": "2026-08-04",
+    "manifest_hashes": [
+      "139e431f7867"
+    ],
+    "proposers": [
+      "library-seed-v1"
+    ],
+    "runs": 1,
+    "search_memory_gates_hashes": [
+      "26a0f6433347"
+    ],
+    "source": "trial_ledger"
+  },
+  "rejections": {
+    "decisive": 0,
+    "unclassified": null,
+    "underpowered": 0
+  },
+  "schema_version": 1,
+  "substrate": {
+    "data_end": "2026-08-04",
+    "data_sources": [
+      "Yahoo Finance daily bars"
+    ],
+    "data_start": "2008-01-01",
+    "id": "cross_asset",
+    "search_space": "library seed formulas plus genetic offspring; 1-day hold",
+    "universe": "18 US-listed ETFs across equity, rates, commodity and FX"
+  },
+  "ticks": {
+    "cohort_only": 0,
+    "errors": 0,
+    "idle": 0,
+    "mined": 1,
+    "no_score": 0,
+    "screened_only": 0,
+    "screened_unknown": 1,
+    "tested": 0,
+    "total": 1,
+    "underpowered_skips": 0
+  },
+  "trials": {
+    "holdout_count_complete": false,
+    "holdout_tested": null,
+    "preregistered": 8,
+    "promising": 0,
+    "recorded": 18,
+    "scored": 18
+  },
+  "verdict": "OPEN_UNDERPOWERED",
+  "verdict_reasons": [
+    "holdout_count_not_recorded",
+    "mde_above_floor"
+  ]
+}

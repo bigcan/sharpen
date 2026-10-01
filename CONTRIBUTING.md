@@ -18,8 +18,43 @@ contributions are the ones that test it.
    Then add the script and the verdict, including a NO-GO. Check the negative ledger first: closed
    families are not reopened without new evidence.
 4. **Bug fixes** in the validation funnel, statistics or data handling, each with a test.
+5. **A Crucible search that found nothing.** See the next section.
 
 Pull requests that only tune a closed strategy until it passes will not be merged.
+
+## Share a search that found nothing
+
+If you mine a data set with Crucible and find nothing, share the result. It goes into the
+[community ledger](community/ledger/README.md), so the next person does not spend compute on the
+same search.
+
+```bash
+python scripts/crucible_export_closed_search.py \
+    --ledger results/crucible_orchestrator/real/trial_ledger.db --out community/ledger/ \
+    --universe "what you searched" --data-source "where the bars came from" \
+    --data-start 2008-01-01 --data-end 2026-08-10
+python scripts/crucible_community_ledger.py validate
+```
+
+Open a pull request that adds the file it wrote, or paste the file into a *Report a closed search*
+issue. The file holds counts, hashes and the strength of the test. It contains no formula and no
+score, and the export opens your ledger read-only.
+
+Every file carries a verdict, and the two kinds mean different things:
+
+- **`CLOSED_DECISIVE`**: the test could have seen an edge of the smallest size the contract accepts,
+  and did not. Read it as "don't bother, unless you bring new evidence".
+- **`OPEN_UNDERPOWERED`**: the test could not tell either way. Read it as "we couldn't tell; retry
+  with a deeper panel". It must never be read as "nothing there".
+
+Share dead ends and keep your hits. A substrate that holds a PROMISING result is left out of the
+export unless you pass `--include-promising`, so sharing a dead end does not reveal that you found
+something elsewhere. `--list` shows what a ledger contains; `--substrate` and `--run-id` choose what
+to share.
+
+Before you mine, `python scripts/crucible_community_ledger.py check --substrate <id>` shows what
+others have already shared. It is advice for you: nothing in the mining funnel reads the community
+ledger, so it changes no gate, no trial count and no proposal.
 
 ## Development setup
 

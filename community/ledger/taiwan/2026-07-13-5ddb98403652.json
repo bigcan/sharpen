@@ -1,0 +1,187 @@
+{
+  "export_id": "5ddb98403652",
+  "hypotheses": {
+    "by_type": {
+      "cross_sectional": 25,
+      "overlay": 67,
+      "unknown": 0
+    },
+    "count": 92,
+    "semantic_hashes": [
+      "0258eae7152a",
+      "02cbb7c9cdad",
+      "033b4a9f34c3",
+      "08aa7483bdca",
+      "0a89bad96090",
+      "0b75d002fe8b",
+      "0d667deb5a79",
+      "0e8a8a141f1d",
+      "0fe4d995c8e3",
+      "104f7f25994f",
+      "14607257a420",
+      "1bbba97aed9f",
+      "1c00e947580f",
+      "1f5e822f4390",
+      "217a5b9a9c9d",
+      "227d304a978b",
+      "253a0965c896",
+      "27756a7c0936",
+      "2a7a9cef12e2",
+      "2b80899f38c7",
+      "30e88ed795ba",
+      "35c8001fa5b3",
+      "36d77d4693ec",
+      "3af77543fec1",
+      "3b5287332676",
+      "3fdd5df59d57",
+      "418af63a082e",
+      "4277ccad26cd",
+      "427da6a3f26d",
+      "44aa8816f789",
+      "4600434bd870",
+      "47edea5cb73b",
+      "499c5127156b",
+      "4a2edf69c724",
+      "4adad8d6951d",
+      "4d964c8d262d",
+      "4e6a2e7387ea",
+      "5206b530b938",
+      "5b46af763b39",
+      "5b8d1cdeb89c",
+      "64ef59aebff0",
+      "69144608e044",
+      "694576400723",
+      "69ac0e93609a",
+      "6abf04dd98c9",
+      "6c18dd48a76d",
+      "6c7507daff52",
+      "7da614b794bc",
+      "7df7a7ecd45e",
+      "84b64dfdfabb",
+      "878456069721",
+      "8b24ee68aaa5",
+      "8c41e89cd29c",
+      "8e8807e56937",
+      "91ce19191b1b",
+      "966def9038ef",
+      "97a907187124",
+      "97f2716712ce",
+      "9b4652cbc659",
+      "9b61ff2f3c7b",
+      "9d5d34afa538",
+      "9d6b0172e07b",
+      "9f33a1c3a214",
+      "a3ad580dfe4e",
+      "a93c3885ba9e",
+      "a9f3e50d543c",
+      "acee86b0554f",
+      "af217fb99318",
+      "b39819795307",
+      "b39b3fb81518",
+      "b4af0e756be1",
+      "b504b20c8bcd",
+      "b65be666c5f9",
+      "b6c2ac65d0df",
+      "c50a8dcb86fd",
+      "d04ac0e7c72a",
+      "d869d9150de9",
+      "dadfe0ff2109",
+      "dd4717bd4353",
+      "e0f6fb0d1945",
+      "e1923589d9e9",
+      "e26299ae94e3",
+      "e5183fe15882",
+      "e5c892e0329f",
+      "ecf585e8bb98",
+      "ed240d26a0e7",
+      "ed96ccd6e14d",
+      "f029ca865750",
+      "f573f72b359d",
+      "f62dd01c59a6",
+      "fc7847cb20fd",
+      "ff3294870e32"
+    ]
+  },
+  "kind": "crucible_closed_search",
+  "power": {
+    "decisive_mde_multiple": 1.0,
+    "economic_floor": 0.1,
+    "economic_floor_gates_hash": "519158fa1450",
+    "economic_floor_source": "generation.min_combination_uplift",
+    "mde_at_test_max": 1.402505,
+    "mde_at_test_min": 1.402505,
+    "mde_source": "tick_log",
+    "mde_substrate": 1.402505,
+    "mde_unmeasured_ticks": 0
+  },
+  "provenance": {
+    "cohort_gates_hashes": [],
+    "contracts": [
+      "shipped"
+    ],
+    "corrected_gates_hashes": [],
+    "crucible_versions": [
+      "crucible-v2.9"
+    ],
+    "data_snapshot_hashes": [
+      "b41be53246db"
+    ],
+    "first_date": "2026-07-13",
+    "gates_hashes": [
+      "22a18172be1a"
+    ],
+    "last_date": "2026-07-13",
+    "manifest_hashes": [
+      "05ace50c0aa4",
+      "08b3fd5cae0e",
+      "d8574dcd1b9f"
+    ],
+    "proposers": [
+      "llm-claude-cli-2.1.183-claude-sonnet-4-6-prompt8327c765"
+    ],
+    "runs": 2,
+    "search_memory_gates_hashes": [],
+    "source": "trial_ledger"
+  },
+  "rejections": {
+    "decisive": 0,
+    "unclassified": null,
+    "underpowered": 0
+  },
+  "schema_version": 1,
+  "substrate": {
+    "data_end": "2026-07-13",
+    "data_sources": [
+      "FinMind daily bars"
+    ],
+    "data_start": "2010-01-01",
+    "id": "taiwan",
+    "search_space": "LLM-proposed formulas plus genetic offspring; 21-day hold",
+    "universe": "10 Taiwan-listed ETFs (equity, bond, commodity), scored against a TAIEX and sector futures trend book"
+  },
+  "ticks": {
+    "cohort_only": 0,
+    "errors": 0,
+    "idle": 0,
+    "mined": 3,
+    "no_score": 0,
+    "screened_only": 0,
+    "screened_unknown": 3,
+    "tested": 0,
+    "total": 3,
+    "underpowered_skips": 0
+  },
+  "trials": {
+    "holdout_count_complete": false,
+    "holdout_tested": null,
+    "preregistered": 42,
+    "promising": 0,
+    "recorded": 92,
+    "scored": 92
+  },
+  "verdict": "OPEN_UNDERPOWERED",
+  "verdict_reasons": [
+    "holdout_count_not_recorded",
+    "mde_above_floor"
+  ]
+}
