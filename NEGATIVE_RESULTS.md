@@ -32,12 +32,12 @@ built on it (TSMOM plus a betting-against-beta sleeve), which failed deflation a
 | [1. Directional RL and its rescues](#1-directional-rl-and-its-rescues) | 14 | No edge out of sample; rescues added nothing |
 | [2. Options and volatility premium](#2-options-and-volatility-premium) | 7 | Data contamination, lucky subsamples, tail risk |
 | [3. Arbitrage, carry and market making](#3-arbitrage-carry-and-market-making) | 7 | Real gross structure that costs or execution cannot harvest |
-| [4. Equity cross-section and factors](#4-equity-cross-section-and-factors) | 12 | Survivorship, sector beta, arbitraged to cost |
+| [4. Equity cross-section and factors](#4-equity-cross-section-and-factors) | 13 | Survivorship, sector beta, hindsight, arbitraged to cost |
 | [5. Sleeves and overlays on the momentum book](#5-sleeves-and-overlays-on-the-momentum-book) | 11 | Dilutive, correlated, or one-subperiod gains |
 | [6. Retail technical and intraday](#6-retail-technical-and-intraday) | 10 | Cost-killed; win rate is not edge |
 | [7. Pre-registered free-data probes](#7-pre-registered-free-data-probes) | 11 | Artifacts, deflation, unharvestable effects |
 | [8. Automated mining substrates](#8-automated-mining-substrates) | 4 | Underpowered at the horizons costs force |
-| **Total** | **76** | |
+| **Total** | **77** | |
 
 Counts are rows, and a row is one pre-specified question with its own verdict. Some are variants of
 one idea (three arbitrage mechanisms, six Taiwan small-cap signals); they are listed separately
@@ -102,6 +102,7 @@ features, plus every attempt to rescue them.
 | RL fundamental reweighting of XLG | RL reweighting beats cap weight | Stage-0 linear falsification first | The reweight is beta, not alpha | `xlg_megacap_ic_gate.py` · `xlg_sleeve_robustness.py` |
 | Value factor sleeve | Cross-asset value adds to momentum | Pre-registered falsification | Pooled net Sharpe **−0.364** vs momentum +0.545; decayed after 2011; combining halved Sharpe and roughly doubled drawdown | [spec](docs/research/value_falsification_spec_2026-06-18.md) · `value_falsification.py` |
 | "ETFs that beat SPY" | Long-run ETF outperformance is persistent skill | 354 funds, factor attribution, FDR | Concentrated tech/semiconductor beta; **0/351 survive BH-FDR**; the lookback selection rule has zero predictive power | [research](docs/research/etf_outperformance_research_2026-08-14.md) · `etf_outperformance_*.py` |
+| FinRL-X Adaptive Rotation (AI4Finance, external) | A published weekly rotation over a fixed growth list beats QQQ | FinRL-X's own code at `4409abe9`, costs re-priced; 35 random lists from a 2017-12-29 pool, rules pre-registered | Reproduces at zero cost (4.91x) but ends below QQQ at the paper's own 10 bps; **0/35** lists an investor could have picked in 2017 beat QQQ. The edge was the list | [study](studies/finrl-x/README.md) · [report](docs/research/finrl_x_final_report_2026-09-25.md) · `finrl_x_rerun.py` |
 | Taiwan large-cap momentum | Cross-sectional momentum on TWSE | First pass, then size control | The first-pass PROMISING was a size confound | `taiwan_xsec_momentum_eval.py` |
 | Taiwan small-cap price signals (R1 reversal, R2 IVOL) | Classic price anomalies in small caps | Pre-registered | Frictionless Sharpe **−0.182** and **−0.627** | [prereg](docs/research/taiwan_smallcap_price_probes_preregistration_2026-07-31.md) · `taiwan_smallcap_price_eval.py` |
 | Taiwan small-cap flows and short interest (Q1, Q2, S1) | Institutional flow and short interest predict returns | Pre-registered with committed sign | Q1 and Q2 **falsified on sign** (t −6.57 against a committed +); S1 CI straddles zero and flips sign at 63d | [flow prereg](docs/research/taiwan_smallcap_institutional_flow_preregistration_2026-07-31.md) · [short interest](docs/research/taiwan_smallcap_short_interest_preregistration_2026-07-31.md) |

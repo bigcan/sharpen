@@ -37,9 +37,6 @@ import numpy as np
 import pandas as pd
 
 ROOT = Path(__file__).resolve().parents[2]
-sys.path.insert(0, str(ROOT))
-
-from sharpen.data.fundamentals import _live_transport  # noqa: E402
 
 logger = logging.getLogger("finrl_x_pit_universe")
 
@@ -210,7 +207,12 @@ def main() -> int:
     args = ap.parse_args()
     logging.basicConfig(level=logging.INFO, format="%(message)s")
 
+    # imported here so the draw helpers stay importable without the SEC client (finrl_x_rerun.py)
     from dotenv import load_dotenv
+
+    sys.path.insert(0, str(ROOT))
+    from sharpen.data.fundamentals import _live_transport
+
     load_dotenv(args.env_file)
     transport = _live_transport(rate_per_sec=2.0)
     frames = {k: transport(u) for k, u in FRAMES.items()}
