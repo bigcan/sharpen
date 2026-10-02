@@ -39,8 +39,9 @@ REPO_URL = "https://github.com/AI4Finance-Foundation/FinRL-Trading"
 DEFAULT_CLONE = ROOT / ".cache" / "finrl-x" / "FinRL-Trading"
 OUT = ROOT / "results" / "finrl_x" / "rerun"
 # what the Adaptive Rotation runner and the downloader import (FinRL-X's requirements.txt does not install cleanly)
-PACKAGES = ("pyyaml", "pandas", "numpy", "scipy", "yfinance", "pandas-market-calendars", "python-dotenv", "matplotlib")
-IMPORTS = "import yaml, pandas, numpy, scipy, yfinance, pandas_market_calendars, dotenv, matplotlib"
+PACKAGES = ("pyyaml", "pandas", "numpy", "scipy", "yfinance", "pandas-market-calendars", "python-dotenv", "matplotlib",
+            "pydantic")
+IMPORTS = "import yaml, pandas, numpy, scipy, yfinance, pandas_market_calendars, dotenv, matplotlib, pydantic"
 QUICK_ARMS = ("mag7", "pit_top7", "rand_02")
 COST_GRID = "0,2,3,5,10"
 LABELS = {"mag7": "Magnificent 7 (as published)", "pit_top7": "7 largest on 2017-12-29"}
