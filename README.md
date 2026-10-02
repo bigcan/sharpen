@@ -259,7 +259,7 @@ Crucible discovery tick.
 
 ## Battle-tested on its own research
 
-Sharpen was built by running it hard: 76 strategies and probes across eight families went through
+Sharpen was built by running it hard: 77 strategies and probes across eight families went through
 this machinery, from directional RL and options premia to market making and cross-sectional
 equities. The full record, with the number that decided each one, is in
 [NEGATIVE_RESULTS.md](NEGATIVE_RESULTS.md).

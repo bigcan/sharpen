@@ -11,6 +11,19 @@ The Crucible alpha-mining platform keeps its own version (`sharpen/crucible/vers
 `crucible-vMAJOR.MINOR`), because it stamps every mining run; each entry below names the Crucible
 versions it contains.
 
+## [1.1.2] — unreleased
+
+### Added
+- **FinRL-X audit study** (`studies/finrl-x/`): a one-line rerun,
+  `python scripts/research/finrl_x_rerun.py`, that clones FinRL-X at `4409abe9`, runs its own
+  Adaptive Rotation backtest on three growth lists with free Yahoo data and re-prices each run
+  with trading costs; `--full` runs all 37 lists and the pre-registered verdict.
+
+### Changed
+- `scripts/research/finrl_x_hindsight_runs.py` works on Linux and macOS and no longer needs
+  `results/finrl_x/hindsight/pool.json`: without it the growth lists are regenerated from the
+  published pool and seed and checked against the published fingerprint.
+
 ## [1.1.1] — 2026-10-01
 
 ### Fixed
