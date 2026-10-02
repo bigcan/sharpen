@@ -27,6 +27,19 @@ Fresh clone, fresh venv, Python 3.11, CPU only, no data, keys, WandB or checkpoi
 
 Sieve line: 2.00 ÷ 0.50 = 4× → "about four times a realistic one".
 
+## Record figures (project's logged history; not rerunnable from a clone)
+
+| # | Figure | Value | Source (verified 9f5befb) |
+|---|---|---|---|
+| F1 | Orchestrator lifetime result | **0 PROMISING** | root cause 2026-08-09, §1 table ("PROMISING, lifetime: 0") |
+| F2 | Trials in the ledger | **559** rows, **445** distinct formulas | root cause §1 |
+| F3 | Substrates | **6**: 5 closed (4 underpowered; `us_equity` closed on both axes), 1 wired but refused by the power guard (`taiwan_smallcap`) | mining log, substrate board |
+| F4 | Edge the gate needed for a coin-flip promotion | information ratio **1.2–1.8** | root cause, Verdict |
+| F5 | Pass rate of the one validated edge (cross-asset momentum, net Sharpe **0.60**) | **5–7%** | root cause, Verdict; mining log L6 |
+| F6 | MDE per substrate (production) | cross-asset **1.68** · Taiwan **1.40** · US equity **1.31** · intraday **1.91** · FX intraday **1.96** · Taiwan small-cap **1.55** | mining log, substrate board |
+| F7 | Logged mining campaigns | **C01 2026-07-02 → C13 2026-08-11** | mining log |
+| F8 | Free-data connectors | **7**: FRED, CFTC COT, SEC EDGAR, GDELT, Stooq, TWSE, TAIFEX | README, Crucible section (line 154) |
+| F10 | Community-ledger export command | **Landed** (256820ab): `python scripts/crucible_export_closed_search.py --ledger results/crucible_orchestrator/real/trial_ledger.db --out community/ledger/ --universe … --data-source … --data-start … --data-end …`, then `python scripts/crucible_community_ledger.py validate`. On screen (12.14): `python scripts/crucible_export_closed_search.py --ledger <your trial_ledger.db> --out community/ledger/`. Verdicts `CLOSED_DECISIVE` / `OPEN_UNDERPOWERED` (`PROMISING_FOUND` only with `--include-promising`). Seeded ledger: 12 entries, all `OPEN_UNDERPOWERED` | CONTRIBUTING.md "Share a search that found nothing"; community/ledger/README.md; sharpen/crucible/community.py |
 
 ## Added 2026-09-30 (10-min expansion, Keng's request) — verified on 9f5befb
 | # | Figure | Value | Source |
