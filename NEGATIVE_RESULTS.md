@@ -165,6 +165,7 @@ negative control.
 ## 8. Automated mining substrates
 
 The Crucible miner closes a data substrate when it can measure that no honest test on it has power.
+The power argument and a one-command rerun are in [`studies/crucible-power/`](studies/crucible-power/README.md).
 
 | Substrate | Hypothesis | Method / kill criterion | Result | Evidence |
 |---|---|---|---|---|

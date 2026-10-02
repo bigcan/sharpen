@@ -159,6 +159,7 @@ Systematic alpha mining with validation inside the loop.
   and find nothing, one command exports the result as counts and hashes, with no formulas or
   scores, so the next person does not repeat the search. Each entry says whether the search was
   finished (`CLOSED_DECISIVE`) or the test was too weak to tell (`OPEN_UNDERPOWERED`).
+- **Power study** ([`studies/crucible-power/`](studies/crucible-power/README.md)): why the miner promoted zero alphas, with a 15-second rerun.
 
 ### Backtesting and falsification
 A backtest shows what a strategy did. These tools test whether it would do it again.
