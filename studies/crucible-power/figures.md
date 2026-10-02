@@ -1,6 +1,6 @@
 # Ep02 Figures (locked)
 
-> Figures for KISI Ep02; study overview in [README.md](README.md). Checked against public Sharpen `main` @ **9f5befb** (2026-09-30; `CRUCIBLE_VERSION = crucible-v14.0`). **Locked by Keng 2026-09-30. Re-locked 2026-10-01** after a recheck against public `main` @ **50855de** (`crucible-v17.0`; 9f5befb is no longer in the public history): F9, F10 and F16 changed (see the recheck section below); every other figure was found unchanged.
+> Figures for KISI Ep02; study overview in [README.md](README.md). Checked against public Sharpen `main` @ **9f5befb** (2026-09-30; `CRUCIBLE_VERSION = crucible-v14.0`). **Locked by Keng 2026-09-30. Re-locked 2026-10-01** after a recheck against public `main` @ **50855de** (`crucible-v17.0`; 9f5befb is no longer in the public history): F10 and F16 changed (see the recheck section below); every other figure was found unchanged.
 
 ## G1 · the one-line rerun ✅ (2026-09-30)
 ```
