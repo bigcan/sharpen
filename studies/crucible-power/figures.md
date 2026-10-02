@@ -66,4 +66,5 @@ Voice roundings: "about a hundred and fifty … close to a hundred" (F11); "abou
 
 ## Recheck 2026-10-01 (public main @ 50855de, crucible-v17.0)
 - G1 reran on Keng's laptop: 3.92 @ 756, 2.00 @ 2782 (unchanged). It took 4.1 s there, against 14.2 s on the locked fresh Windows clone. The voice keeps "about fifteen seconds" (true for a first run), and the 11.3 clip has no clock chip.
+- F10: landed command (see the row). F16: qualified, with an on-screen footnote (see the row).
 - F1–F8, F11–F15, F17, F18 unchanged. F11 is also confirmed by the ledger entry `us_equity/2026-08-11-5f1c75cd5b86.json` (145 / 98 / 0).
