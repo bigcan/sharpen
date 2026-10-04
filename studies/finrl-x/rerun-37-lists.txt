@@ -1,0 +1,48 @@
+Source: KISI (Keep It Simple Investment) study by Keng · youtube.com/channel/UCPyTohwSp1URsZL9EX-NJ2A · github.com/bigcan/sharpen · ko-fi.com/bigcan · historical simulation, not investment advice
+FinRL-X Adaptive Rotation, 37 growth lists, 2018-01-07 -> 2025-10-24, dividend-adjusted Yahoo, FinRL-X @ 4409abe9
+Cloud rerun 2026-10-02/03. Columns: parity vs FinRL-X printed table; growth x (0 bps); per-year % at 0/2/10 bps;
+vs QQQ (pts/yr) at 2/10 bps; standard Sharpe at 2 bps (vs QQQ). QQQ 19.30%/yr, Sharpe 0.91.
+mag7      par=True x0=4.91 c0=22.69 c2=21.17 c10=15.25 d2=+1.87 d10=-4.05 s2=1.01(+0.10)
+pit_top7  par=True x0=2.66 c0=13.42 c2=12.08 c10=6.87 d2=-7.22 d10=-12.43 s2=0.79(-0.12)
+rand_00   par=True x0=2.69 c0=13.57 c2=12.43 c10=8.00 d2=-6.87 d10=-11.30 s2=0.77(-0.14)
+rand_01   par=True x0=2.18 c0=10.55 c2=9.31 c10=4.49 d2=-9.99 d10=-14.81 s2=0.62(-0.29)
+rand_02   par=True x0=3.95 c0=19.31 c2=17.89 c10=12.37 d2=-1.41 d10=-6.93 s2=0.91(+0.00)
+rand_03   par=True x0=2.24 c0=10.89 c2=9.80 c10=5.52 d2=-9.51 d10=-13.78 s2=0.68(-0.23)
+rand_04   par=True x0=2.75 c0=13.86 c2=12.55 c10=7.44 d2=-6.75 d10=-11.87 s2=0.79(-0.12)
+rand_05   par=True x0=2.29 c0=11.24 c2=10.13 c10=5.79 d2=-9.18 d10=-13.51 s2=0.69(-0.22)
+rand_06   par=True x0=2.10 c0=9.97 c2=8.81 c10=4.28 d2=-10.49 d10=-15.03 s2=0.58(-0.33)
+rand_07   par=True x0=2.31 c0=11.36 c2=10.25 c10=5.91 d2=-9.05 d10=-13.40 s2=0.71(-0.20)
+rand_08   par=True x0=2.44 c0=12.15 c2=11.08 c10=6.89 d2=-8.22 d10=-12.41 s2=0.74(-0.17)
+rand_09   par=True x0=2.40 c0=11.91 c2=10.73 c10=6.16 d2=-8.57 d10=-13.14 s2=0.73(-0.18)
+rand_10   par=True x0=2.45 c0=12.18 c2=10.99 c10=6.38 d2=-8.31 d10=-12.92 s2=0.71(-0.20)
+rand_11   par=True x0=2.37 c0=11.74 c2=10.43 c10=5.34 d2=-8.87 d10=-13.96 s2=0.67(-0.24)
+rand_12   par=True x0=3.06 c0=15.44 c2=14.04 c10=8.61 d2=-5.26 d10=-10.70 s2=0.82(-0.09)
+rand_13   par=True x0=2.21 c0=10.71 c2=9.52 c10=4.88 d2=-9.78 d10=-14.42 s2=0.61(-0.30)
+rand_14   par=True x0=1.94 c0=8.88 c2=7.80 c10=3.58 d2=-11.51 d10=-15.73 s2=0.54(-0.37)
+rand_15   par=True x0=1.85 c0=8.25 c2=7.16 c10=2.94 d2=-12.14 d10=-16.36 s2=0.52(-0.39)
+rand_16   par=True x0=3.21 c0=16.17 c2=14.79 c10=9.40 d2=-4.51 d10=-9.91 s2=0.80(-0.11)
+rand_17   par=True x0=2.31 c0=11.34 c2=10.16 c10=5.59 d2=-9.14 d10=-13.71 s2=0.69(-0.22)
+rand_18   par=True x0=2.38 c0=11.79 c2=10.59 c10=5.90 d2=-8.71 d10=-13.40 s2=0.65(-0.26)
+rand_19   par=True x0=2.01 c0=9.36 c2=8.20 c10=3.67 d2=-11.10 d10=-15.63 s2=0.56(-0.35)
+rand_20   par=True x0=3.40 c0=17.02 c2=15.74 c10=10.78 d2=-3.56 d10=-8.52 s2=0.92(+0.01)
+rand_21   par=True x0=2.27 c0=11.10 c2=10.03 c10=5.85 d2=-9.27 d10=-13.45 s2=0.68(-0.23)
+rand_22   par=True x0=3.41 c0=17.06 c2=15.68 c10=10.31 d2=-3.62 d10=-8.99 s2=0.89(-0.02)
+rand_23   par=True x0=2.11 c0=10.10 c2=8.94 c10=4.42 d2=-10.36 d10=-14.88 s2=0.62(-0.29)
+rand_24   par=True x0=1.82 c0=8.01 c2=6.83 c10=2.23 d2=-12.47 d10=-17.07 s2=0.51(-0.40)
+rand_25   par=True x0=2.04 c0=9.60 c2=8.48 c10=4.07 d2=-10.83 d10=-15.23 s2=0.59(-0.32)
+rand_26   par=True x0=3.29 c0=16.56 c2=15.25 c10=10.17 d2=-4.05 d10=-9.13 s2=0.90(-0.01)
+rand_27   par=True x0=3.13 c0=15.78 c2=14.40 c10=9.04 d2=-4.90 d10=-10.26 s2=0.79(-0.12)
+rand_28   par=True x0=2.01 c0=9.39 c2=8.31 c10=4.10 d2=-10.99 d10=-15.20 s2=0.58(-0.33)
+rand_29   par=True x0=2.00 c0=9.29 c2=8.09 c10=3.42 d2=-11.21 d10=-15.88 s2=0.53(-0.38)
+rand_30   par=True x0=2.09 c0=9.94 c2=8.86 c10=4.64 d2=-10.45 d10=-14.66 s2=0.62(-0.29)
+rand_31   par=True x0=2.21 c0=10.75 c2=9.63 c10=5.26 d2=-9.68 d10=-14.05 s2=0.63(-0.28)
+rand_32   par=True x0=2.25 c0=11.00 c2=9.88 c10=5.54 d2=-9.42 d10=-13.76 s2=0.67(-0.24)
+rand_33   par=True x0=2.25 c0=10.98 c2=9.78 c10=5.10 d2=-9.52 d10=-14.21 s2=0.63(-0.28)
+rand_34   par=True x0=2.96 c0=14.96 c2=13.62 c10=8.43 d2=-5.68 d10=-10.87 s2=0.80(-0.11)
+n_rand 35
+c0 median 0.1124 min 0.0801 max 0.1931
+d2 median -0.0918 min -0.1247 max -0.0141
+d10 median -0.1371 min -0.1707 max -0.0693
+ds2 median -0.2304 min -0.4028 max 0.0065
+beat QQQ at 2bps: 0 of 35
+return: HINDSIGHT sharpe: HINDSIGHT 10bps: HINDSIGHT VERDICT: HINDSIGHT
