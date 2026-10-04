@@ -136,7 +136,7 @@ vs 0.66). The test would measure the tradeable strategy, not the quirks of the p
 ## 4. Step 3 — The one look (1973–2005)
 
 The rules, windows, gates, trial count (84) and a power estimate ("roughly 0.2–0.35 chance of passing if the design-window
-edge is the true edge") were committed first (`674df095`). The evaluation ran once, 4 minutes 45 seconds, recorded with a
+edge is the true edge") were committed first (`45ff5c39`). The evaluation ran once, 4 minutes 45 seconds, recorded with a
 fingerprint of every file it depended on.
 
 **Results vs SPY** (1973-01-02 → 2005-12-30, after 2 bps per trade on liquid ETFs and 5 bps on thin ones, borrow fees,
@@ -311,5 +311,5 @@ wrote down a 0.2–0.35 pass probability before the look. The result sits right 
 | `13339096` | Seal, fully funded book engine, P&L, metrics, trial ledger, design grid defined before running |
 | `eea4504f` | FinRL-X parity bridge, signal funnel, one-look runner, equity and rates proxies |
 | `3d3eeae3` | Line-ending-proof hashing of the pre-registration |
-| `674df095` | **Pre-registration frozen** (FX and commodity proxies, proxy-book fidelity, closed-market rule) |
+| `45ff5c39` | **Pre-registration frozen** (FX and commodity proxies, proxy-book fidelity, closed-market rule) |
 | `2e9e39f7` | The one look (H1 FAIL), forward lockbox registration, result artifacts |
