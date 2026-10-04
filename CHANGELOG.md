@@ -14,10 +14,8 @@ versions it contains.
 ## [1.1.2] — unreleased
 
 ### Added
-- **FinRL-X audit study** (`studies/finrl-x/`): a one-line rerun,
-  `python scripts/research/finrl_x_rerun.py`, that clones FinRL-X at `4409abe9`, runs its own
-  Adaptive Rotation backtest on three growth lists with free Yahoo data and re-prices each run
-  with trading costs; `--full` runs all 37 lists and the pre-registered verdict.
+- **FinRL-X audit study** (`studies/finrl-x/`): the Adaptive Rotation audit with the per-list
+  results of all 37 growth lists and the pre-registered verdict, plus the keel-v1 final report.
 
 ### Changed
 - `scripts/research/finrl_x_hindsight_runs.py` works on Linux and macOS and no longer needs

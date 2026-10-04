@@ -15,7 +15,6 @@ Stages (``--stage``, default ``all``):
   score    scripts/research/finrl_x_rotation_repro.py per arm (parity vs FinRL-X's printed table, cost grid, break-even)
   verdict  the pre-registered decision rules -> verdict.json
 
-scripts/research/finrl_x_rerun.py drives the same stages from a fresh clone.
 """
 
 from __future__ import annotations

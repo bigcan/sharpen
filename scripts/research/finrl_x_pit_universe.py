@@ -207,7 +207,7 @@ def main() -> int:
     args = ap.parse_args()
     logging.basicConfig(level=logging.INFO, format="%(message)s")
 
-    # imported here so the draw helpers stay importable without the SEC client (finrl_x_rerun.py)
+    # imported here so the draw helpers stay importable without the SEC client
     from dotenv import load_dotenv
 
     sys.path.insert(0, str(ROOT))
