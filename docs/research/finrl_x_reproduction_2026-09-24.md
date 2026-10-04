@@ -140,8 +140,7 @@ to QQQ:
 9. **Paper trading is a live record**, not reproducible from code. Their own chart attributes the gain to one
    "Precious Metals & Mining Stocks Rally" (Dec 2025 – late Jan 2026).
 
-No look-ahead was found in the Rotation's signal path on a first pass: the engine reads only as-of slices
-(`get_data_as_of_date`, `get_daily_data_as_of`), and weekly bars are built from days up to each week's end. This is
+FinRL-X's code runs and its own numbers reproduce. This is
 not a substitute for the Tier-2 lifecycle audit.
 
 ## Next (funnel, Adaptive Rotation only)

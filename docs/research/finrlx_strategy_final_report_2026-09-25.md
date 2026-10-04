@@ -102,7 +102,7 @@ risk, static SPY, shorts allowed.
 On its own design window the book would already fail the alpha test. The one chance was that trend was stronger before
 2009, as published research reports.
 
-**Sharpen's signal funnel.** The trend signal passes Tier 0, the leak test that recomputes it on truncated data. The
+**Sharpen's signal funnel.** The trend signal passes Tier 0, the truncation test that recomputes it on truncated data. The
 funnel's other tiers rank the 18 ETFs against each other each day; there the trend signal scores about zero (IC-IR
 −0.03, against +0.02 for a noise control). That is expected: the funnel subtracts each day's average across assets, and
 time-series trend makes its money from exactly that average (being net long or net short). So the funnel's ranking tiers
@@ -167,7 +167,7 @@ ETF expense ratios, next-day execution):
 | Backtest-overfitting probability (24 variants) | 0.004 | ≤ 0.5 | pass |
 | Cost gap (no-cost minus net Sharpe) | 0.015 | ≤ 0.15 | pass |
 | Alpha positive by quarter of the window | 4 of 4 | ≥ 3 | pass |
-| Signal leak test (Tier 0) | pass | pass | pass |
+| Signal truncation test (Tier 0) | pass | pass | pass |
 | H2: covariance sizing beats simple sizing | +0.01 Sharpe | +0.10 | not tested (H1 failed); would fail |
 | H3: volatility-managed SPY beats held SPY | −0.01 Sharpe | +0.10 | not tested; would fail |
 
@@ -238,7 +238,7 @@ wrote down a 0.2–0.35 pass probability before the look. The result sits right 
   fixed it in advance, but I did not think through how the long-only books' spread would raise the bar for a long/short
   book. That choice, more than the trial count, decided the deflated-alpha leg.
 - **Harness slips, each caught before the look:** the package ran without the branch's code on the path until I fixed
-  PYTHONPATH; a covariance-sizing bug that a leak test caught; a funding step 20× too slow; a crash when a data series
+  PYTHONPATH; an error in our own code that the truncation test caught; a funding step 20× too slow; a crash when a data series
   ended (now: an asset with no price keeps its position); expense ratios that would have been charged twice (caught by
   the commodity data builder).
 

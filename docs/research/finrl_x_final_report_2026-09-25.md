@@ -34,7 +34,7 @@ submitted 2026-03-22; Apache-2.0 license; 3,747 GitHub stars as of 2026-09-24), 
     precious-metals rally.
 - **What worked.**
   - FinRL-X's code runs, and its zero-cost numbers reproduce within about 2%.
-  - No look-ahead leak was found in the Rotation's signal code.
+  - FinRL-X's code runs and its own numbers reproduce.
   - Our own checks: an independent re-calculation that matches FinRL-X's printed tables to the last digit, a test plan
     frozen before any run, and a 2017 stock list built only from data public at the time.
 - **Cost:** two calendar days (2026-09-24 → 09-25), no paid data (SEC EDGAR and Yahoo Finance are free), and 41
@@ -225,8 +225,7 @@ else.
   without touching its code.
 - **The code runs and is deterministic.** Re-runs are identical, and the zero-cost numbers reproduce within about 2% on
   total-return prices.
-- **No look-ahead leak** was found in the Rotation's signal code on a first pass: it reads only data up to each
-  decision date, and weekly bars are built only from past days. This is not a full audit.
+- **FinRL-X's code runs and its own numbers reproduce.** This is not a full audit.
 - **It is open source.** Everything in this report could be checked because the code is public.
 - **The fixes are straightforward:** charge costs in the P&L, apply the stops, ship the missing Rolling Strategy
   inputs, and choose stock lists by a rule applied at each date rather than by hand.
