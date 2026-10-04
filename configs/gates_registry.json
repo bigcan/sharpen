@@ -109,6 +109,16 @@
       "registered_on": "2026-09-30",
       "reason": "initial registration 2026-09-30 (SharpOps ladder decision item 7): baseline of every gates file as committed; later edits need a re-registration citing a decision"
     },
+    "configs/finrlx_strategy.gates.yaml": {
+      "sha256": "311cf5f8f6c317c9d70679ef4f0c23348087542d9624f5e3b549d4f6573da44c",
+      "registered_on": "2026-10-04",
+      "reason": "keel-v1 (finrlx-strategy) gates, frozen before the one look at 1973-2005 (prereg 674df095); registered when the branch merged into Oct2026. Additive: no existing entry changes."
+    },
+    "configs/finrlx_strategy_signal_eval.gates.yaml": {
+      "sha256": "f6c483beab16774e7e3408f7a86aac4d31c5a798a3e92eac9a2369217735a075",
+      "registered_on": "2026-10-04",
+      "reason": "keel-v1 (finrlx-strategy) gates, frozen before the one look at 1973-2005 (prereg 674df095); registered when the branch merged into Oct2026. Additive: no existing entry changes."
+    },
     "configs/funding_arb_dsac_velotrade_wf.gates.yaml": {
       "sha256": "d55c8a727468e5eb7b32691159226d94c1828e18dbb7d166f9940a2ff0e11fbb",
       "registered_on": "2026-09-30",
