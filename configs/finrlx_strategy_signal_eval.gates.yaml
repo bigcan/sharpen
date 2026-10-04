@@ -1,0 +1,53 @@
+# Sharpen signal funnel gates for the FinRL-X strategy's trend SIGNAL COMPONENT on the 18-ETF panel (dev window).
+# Mirrors configs/country_momentum.gates.yaml (the house template for a small ETF cross-section) unchanged, except:
+#   universe.id -> finrlx_cross_asset_etf18; min_names_per_day 8 -> 10 (eval_harness._ls_weights needs >= 10 names).
+# The funnel ranks names CROSS-SECTIONALLY; the strategy's mechanism is TIME-SERIES trend. Only Tier 0 gates the
+# strategy (configs/finrlx_strategy.gates.yaml signal_component); the other tiers are reported as diagnostics.
+
+universe:
+  id: finrlx_cross_asset_etf18
+  min_names_per_day: 10            # eval_harness._ls_weights hardcodes min_names=10
+  min_adv_usd: 0.0                 # ADV floor enforced in the panel builder (active mask)
+
+coverage:
+  min_days: 1000
+  max_nan_frac: 0.60
+  max_ohlc_violations: 0
+
+gross_power:
+  horizons: [1, 5, 10, 21, 63]
+  primary_horizon: 21              # monthly rebalance = low turnover
+  promising_ic_ir: 0.05
+  promising_ic_tstat: 3.0
+
+deflation:
+  promising_dsr: 0.90
+  fdr_q_max: 0.10
+  use_effective_n: false
+  hlz_t_min: 3.0
+  require_hlz: false
+
+cpcv:
+  enabled: true
+  n_groups: 6
+  k_test: 2
+  embargo_days: 5
+
+robustness:
+  min_subperiod_ic_ir: 0.0
+  recent_oos_years: 2
+
+capturability:
+  cost_models:
+    frictionless: 0.0
+    standard: 0.0005               # ~5bp round trip: US-listed ETF spread + commission
+    harsh: 0.0010                  # 10bp — pessimistic for the thinner country ETFs
+  cost_wall_caution: 0.30
+
+neutralization:
+  winsor_pct: [0.01, 0.99]
+  controls: [size]                 # size = log trailing dollar ADV; NO sector (degenerate here)
+
+promotion:
+  survivorship_free_required: true # delisted country ETFs are absent from the yfinance query
+  tier2_audit_required: true

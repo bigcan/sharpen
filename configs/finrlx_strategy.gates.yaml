@@ -1,0 +1,51 @@
+# FinRL-X strategy mission — pass/fail gates for the ONE look at the sealed clean window (<= 2005-12-31).
+# Written before any clean-window number was computed. House values are reused where one exists (source cited);
+# new values are marked NEW with their rationale. Never edit after the look: a wrong rule gets a NEW test.
+workstream: finrlx-strategy
+
+# The seal (scripts/research/finrlx_strategy/seal.py) unlocks only when this document is committed, unmodified,
+# and its sha256 matches. Filled in when the pre-registration is final.
+prereg:
+  path: docs/research/finrlx_strategy_prereg_2026-09-25.md
+  sha256: b6f1128922ea5704368a84b91564eaa5607c3d887c99f1f9a1e02ee538d08448
+
+# H1 (primary): the selected book vs SPY total return (proxy), net of base costs, one bar execution lag.
+h1_beats_spy:
+  sharpe_must_exceed_spy: true        # NEW (mission criterion B): net excess Sharpe point estimate > SPY's
+  alpha_t_min: 2.0                    # NEW: monthly Newey-West t of alpha vs SPY excess; one-sided ~2.3%
+  alpha_dsr_min: 0.95                 # house min_dsr (configs/tailwind_v1.gates.yaml overfitting.min_dsr), applied
+                                      # to the residual (alpha) stream deflated by the full trial ledger
+  book_dsr_min: 0.95                  # house min_dsr, on the book's excess returns
+  psr_min: 0.95                       # house paper_soak.performance.min_psr (tailwind_v1 / cross_asset_momentum)
+  pbo_max: 0.50                       # house PBO bar (scripts/research/audit_tailwind_book.py:235)
+  cost_gap_max: 0.15                  # house g_cost_gap.max_frictionless_minus_net_sharpe
+  subperiods: 4                       # equal-length subperiods of the clean window
+  min_subperiods_alpha_positive: 3    # NEW: majority rule; "all 4" would fail a true IR-0.45 edge ~35% of the time
+  # Reported, not gating: harsh-cost (x5) Sharpe vs SPY, break-even cost, paired-bootstrap CI of the Sharpe
+  # difference (underpowered by construction, see the pre-registration's power section), max drawdown, exposure.
+
+# H2 (secondary): the grid-selected allocator vs the correlation-blind linear allocator, all else equal.
+h2_allocator:
+  min_sharpe_uplift: 0.10             # house min_uplift_vs_baseline (rl_beats_linear / combiner_beats_static)
+  max_p_uplift_le_0: 0.025            # paired block bootstrap P(uplift <= 0) <= familywise_alpha / 2
+
+# H3 (secondary): vol-managed SPY core vs static core, all else equal.
+h3_vol_managed_core:
+  min_sharpe_uplift: 0.10             # house min_uplift_vs_baseline
+  max_p_uplift_le_0: 0.025            # as H2
+
+# Multiplicity across the three pre-registered hypotheses: gatekeeping. H1 is tested first at the full level;
+# H2 and H3 are tested only if H1 passes, each at familywise_alpha / 2 (Bonferroni). FWER <= familywise_alpha.
+family:
+  order: [h1_beats_spy, [h2_allocator, h3_vol_managed_core]]
+  familywise_alpha: 0.05              # NEW: conventional; H1's alpha_t_min 2.0 (p ~0.023) sits inside it
+
+# Signal component (Sharpen funnel, sharpen/signals/eval_harness.py) — see the pre-registration for why only T0
+# gates a time-series signal: the funnel ranks names cross-sectionally and cannot see time-series timing.
+signal_component:
+  tier0_causal_required: true
+
+# Forward lockbox after the look (house configs/crucible_lockbox.gates.yaml incubation block).
+lockbox:
+  min_forward_bars: 63
+  min_forward_sharpe: 0.30
