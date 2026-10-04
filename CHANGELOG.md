@@ -11,7 +11,7 @@ The Crucible alpha-mining platform keeps its own version (`sharpen/crucible/vers
 `crucible-vMAJOR.MINOR`), because it stamps every mining run; each entry below names the Crucible
 versions it contains.
 
-## [1.1.2] — unreleased
+## [1.1.2] — 2026-10-04
 
 ### Added
 - **FinRL-X audit study** (`studies/finrl-x/`): the Adaptive Rotation audit with the per-list
