@@ -308,8 +308,8 @@ wrote down a 0.2–0.35 pass probability before the look. The result sits right 
 
 | Commit | Step |
 |---|---|
-| `13339096` | Seal, fully funded book engine, P&L, metrics, trial ledger, design grid defined before running |
-| `eea4504f` | FinRL-X parity bridge, signal funnel, one-look runner, equity and rates proxies |
-| `3d3eeae3` | Line-ending-proof hashing of the pre-registration |
+| `fb906234` | Seal, fully funded book engine, P&L, metrics, trial ledger, design grid defined before running |
+| `77d09070` | FinRL-X parity bridge, signal funnel, one-look runner, equity and rates proxies |
+| `206556f7` | Line-ending-proof hashing of the pre-registration |
 | `45ff5c39` | **Pre-registration frozen** (FX and commodity proxies, proxy-book fidelity, closed-market rule) |
-| `2e9e39f7` | The one look (H1 FAIL), forward lockbox registration, result artifacts |
+| `482b06cd` | The one look (H1 FAIL), forward lockbox registration, result artifacts |
