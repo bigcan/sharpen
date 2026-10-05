@@ -1,4 +1,5 @@
 Source: KISI (Keep It Simple Investment) study by Keng · youtube.com/channel/UCPyTohwSp1URsZL9EX-NJ2A · github.com/bigcan/sharpen · ko-fi.com/bigcan · historical simulation, not investment advice
+Video: https://youtu.be/hWqLBWK0aIQ
 FinRL-X Adaptive Rotation, 37 growth lists, 2018-01-07 -> 2025-10-24, dividend-adjusted Yahoo, FinRL-X @ 4409abe9
 Cloud rerun 2026-10-02/03. Columns: parity vs FinRL-X printed table; growth x (0 bps); per-year % at 0/2/10 bps;
 vs QQQ (pts/yr) at 2/10 bps; standard Sharpe at 2 bps (vs QQQ). QQQ 19.30%/yr, Sharpe 0.91.

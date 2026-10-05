@@ -1,6 +1,7 @@
 # FinRL-X Strategy Mission — Final Report
 
 > **Source:** a study from the **KISI** YouTube channel (Keep It Simple Investment), by Keng. Channel: [youtube.com/channel/UCPyTohwSp1URsZL9EX-NJ2A](https://www.youtube.com/channel/UCPyTohwSp1URsZL9EX-NJ2A) · Code: [github.com/bigcan/sharpen](https://github.com/bigcan/sharpen) · Support: [ko-fi.com/bigcan](https://ko-fi.com/bigcan). Historical simulation and paper trading only; not investment advice.
+> Video: https://youtu.be/hWqLBWK0aIQ
 
 ## Can a strategy built on FinRL-X beat the S&P 500 on data it has never seen?
 

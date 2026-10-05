@@ -1,6 +1,7 @@
 # FinRL-X audit
 
 > **Source:** a study from the **KISI** YouTube channel (Keep It Simple Investment), by Keng. Channel: [youtube.com/channel/UCPyTohwSp1URsZL9EX-NJ2A](https://www.youtube.com/channel/UCPyTohwSp1URsZL9EX-NJ2A) · Code: [github.com/bigcan/sharpen](https://github.com/bigcan/sharpen) · Support: [ko-fi.com/bigcan](https://ko-fi.com/bigcan). Historical simulation and paper trading only; not investment advice.
+> Video: https://youtu.be/hWqLBWK0aIQ
 
 Does the "next generation of FinRL" build strategies you could trade? We ran AI4Finance's FinRL-X (the `FinRL-Trading` repository, arXiv 2603.21330) at commit `4409abe9`, with its own code, unmodified, and checked its README claims.
 
@@ -87,4 +88,4 @@ Not rerunnable from a fresh clone: [`scripts/research/finrl_x_pit_universe.py`](
 
 FinRL-X: [github.com/AI4Finance-Foundation/FinRL-Trading](https://github.com/AI4Finance-Foundation/FinRL-Trading) · paper: [arXiv 2603.21330](https://arxiv.org/abs/2603.21330)
 
-Video: KISI Ep03 (link added when published). Part of the KISI channel: see the source line at the top.
+Video: KISI Ep03, https://youtu.be/hWqLBWK0aIQ. Part of the KISI channel: see the source line at the top.

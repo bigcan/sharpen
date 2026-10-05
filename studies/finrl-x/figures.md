@@ -1,6 +1,7 @@
 # Ep03 Figures
 
 > **Source:** a study from the **KISI** YouTube channel (Keep It Simple Investment), by Keng. Channel: [youtube.com/channel/UCPyTohwSp1URsZL9EX-NJ2A](https://www.youtube.com/channel/UCPyTohwSp1URsZL9EX-NJ2A) · Code: [github.com/bigcan/sharpen](https://github.com/bigcan/sharpen) · Support: [ko-fi.com/bigcan](https://ko-fi.com/bigcan). Historical simulation and paper trading only; not investment advice.
+> Video: https://youtu.be/hWqLBWK0aIQ
 
 > Figures for KISI Ep03; study overview in [README.md](README.md). **Reviewed and locked by Keng 2026-10-03.** Sources: the three `docs/research/finrl_x_*` docs on public Sharpen `main` @ 51a7a69, and a cloud rerun of FinRL-X @ `4409abe9` (Linux, Python 3.13, CPU, Yahoo via FinRL-X's own downloader with `auto_adjust=True`). Column "Rerun" = reproduced by that cloud rerun (✅) or record only (—). **All 37 lists rerun 2026-10-02/03: every figure from the report reproduced exactly, parity PASS on all 37.** Locks once Keng approves; re-checked against `studies/finrl-x/` when the repo work lands.
 
