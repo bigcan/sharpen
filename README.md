@@ -37,6 +37,10 @@ Underneath is a full research-to-execution stack:
 > **Not investment advice. Not a trading product.** Every performance figure in this repository
 > comes from a historical simulation or a paper run. Read [DISCLAIMER.md](DISCLAIMER.md).
 
+<p align="center"><a href="https://youtu.be/_RoqJDZKaTU"><img src="https://img.youtube.com/vi/_RoqJDZKaTU/maxresdefault.jpg" width="480" alt="Ep01: Meet Sharpen (full episode). Watch on YouTube."></a></p>
+
+<p align="center"><sub>Ep01: Meet Sharpen (full episode) · <a href="https://youtu.be/_RoqJDZKaTU">Watch on YouTube</a></sub></p>
+
 ---
 
 ## From a concept to a strategy
@@ -147,6 +151,10 @@ Signal libraries: WorldQuant 101, TradingView indicators, a demo set, and a gene
 Systematic alpha mining with validation inside the loop.
 
 ![Crucible architecture: acquire, hypothesize, mine, deflate, incubate in a lockbox, hand off to a human audit; the proposer reads only a score-free view of the trial ledger, and every run pins a manifest of version, gates, data and seeds](docs/assets/crucible-architecture.png)
+
+<p align="center"><a href="https://youtu.be/2k6TIuSsXvc"><img src="https://img.youtube.com/vi/2k6TIuSsXvc/maxresdefault.jpg" width="480" alt="Ep02: Crucible (full episode). Watch on YouTube."></a></p>
+
+<p align="center"><sub>Ep02: Crucible (full episode) · <a href="https://youtu.be/2k6TIuSsXvc">Watch on YouTube</a></sub></p>
 
 - **LLM hypothesis proposer** (`agentic/llm_proposer.py`, uses the Claude API). It turns
   natural-language priors into pre-registered specs. It is **structurally blind to scores**: the
