@@ -4,10 +4,6 @@
 
 Sharpen is an agentic-AI, full-featured quant strategy builder — from a concept to a validated, trained and deployment-ready system.
 
-![The 30-second quickstart, run from a fresh clone: install, score four demo signals through the validation funnel, read the scorecard](docs/assets/quickstart.gif)
-
-<sub>A real run from a fresh clone of this repository. Waits are skipped ahead and labelled; the output is unedited.</sub>
-
 **Describe what you want in any natural language. Sharpen turns it into a pre-registered spec,
 writes the signal and the tests, trains it, and then tries to break it — with every result
 deflated for the number of things you tried.**
