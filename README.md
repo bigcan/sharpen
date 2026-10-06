@@ -345,6 +345,7 @@ Challenges to a result are the most useful contribution, and a Crucible search t
 is worth sharing too: see [CONTRIBUTING.md](CONTRIBUTING.md).
 Report security issues privately per [SECURITY.md](SECURITY.md). Participation follows the
 [Code of Conduct](CODE_OF_CONDUCT.md).
+Questions and ideas go in [GitHub Discussions](https://github.com/bigcan/sharpen/discussions).
 
 [EPILOGUE.md](EPILOGUE.md) is the author's personal conclusion. It is opinion, labelled as such, and
 goes beyond what this repository shows.
