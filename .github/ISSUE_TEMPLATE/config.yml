@@ -3,3 +3,6 @@ contact_links:
   - name: Report a security issue privately
     url: https://docs.github.com/en/code-security/security-advisories/guidance-on-reporting-and-writing-information-about-vulnerabilities/privately-reporting-a-security-vulnerability
     about: Use the repository's Security tab. Do not open a public issue for credentials or vulnerabilities.
+  - name: Ask a question or suggest what to test next
+    url: https://github.com/bigcan/sharpen/discussions
+    about: Questions, ideas and shared studies go in Discussions. Issues are for challenges to a result and ledger reports.
