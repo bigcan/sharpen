@@ -1,0 +1,15 @@
+{
+  "label": "solo_2026",
+  "n_bars": 2460,
+  "pf_bar": 0.882052830178647,
+  "total_return_pct": -28.940522785278095,
+  "trailing_max_drawdown_pct": -30.017972503788894,
+  "worst_intraday_daily_dd_pct": 7.254446304224505,
+  "active_days": 27,
+  "max_single_day_share": 0.3583844367758613,
+  "ftmo_compliance_pass": true,
+  "trade_count": 171,
+  "prop_firm_termination": null,
+  "trailing_dd_buffer_pp": -20.017972503788894,
+  "daily_dd_buffer_pp": null
+}

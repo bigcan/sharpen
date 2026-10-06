@@ -1,0 +1,15 @@
+{
+  "label": "ens_median",
+  "n_bars": 1856,
+  "pf_bar": 0.8558983860277379,
+  "total_return_pct": -27.24772812243411,
+  "trailing_max_drawdown_pct": -30.002892507839107,
+  "worst_intraday_daily_dd_pct": 6.8951545174904645,
+  "active_days": 21,
+  "max_single_day_share": 0.46623758860878695,
+  "ftmo_compliance_pass": true,
+  "trade_count": 103,
+  "prop_firm_termination": null,
+  "trailing_dd_buffer_pp": -20.002892507839107,
+  "daily_dd_buffer_pp": null
+}
