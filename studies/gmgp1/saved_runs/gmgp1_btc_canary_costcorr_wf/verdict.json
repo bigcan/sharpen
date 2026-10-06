@@ -1,0 +1,96 @@
+{
+  "overall": "FAIL",
+  "graded_rule": "ens_mean",
+  "gates_aggregation_rule": "ens_mean",
+  "folds_completed": 4,
+  "folds_total": 4,
+  "folds_expected": 4,
+  "gates": {
+    "G1_solo_baseline": {
+      "pass": false,
+      "folds_meeting": 0,
+      "min_required": 3
+    },
+    "G2_no_regression": {
+      "pass": true,
+      "folds_meeting": 3,
+      "min_required": 3
+    },
+    "G3_uplift": {
+      "pass": false,
+      "median_ens_pf": 0.893469699944986,
+      "median_best_solo_pf": 0.9773880581303602,
+      "uplift": 0.9141401846612479,
+      "uplift_min": 1.05
+    },
+    "G4_velotrade_compliance": {
+      "pass": false,
+      "folds_meeting": 0,
+      "min_required": 3,
+      "trailing_dd_buffer_pp_min": 0.5,
+      "daily_dd_buffer_pp_min": null,
+      "compliance_must_pass": false
+    },
+    "G5_dd_stability": {
+      "pass": true,
+      "cv_pf": 0.020239936039386692,
+      "cv_max": 0.35
+    },
+    "G_STRESS": {
+      "pass": false,
+      "status": "FAIL",
+      "worst_fixed_trailing_mdd_pct": -33.09020223256465,
+      "stress_dd_buffer_pp": -23.09020223256465,
+      "peak_leverage": 1.7422803664273614
+    }
+  },
+  "decision": "reject_ensemble_use_best_solo",
+  "stress": {
+    "graded_rule": "ens_mean",
+    "trailing_cap_pct": 10.0,
+    "n_folds_evaluated": 4,
+    "worst_fixed_trailing_mdd_pct": -33.09020223256465,
+    "stress_dd_buffer_pp": -23.09020223256465,
+    "stress_dd_buffer_pp_min": 0.5,
+    "stress_dd_pass": false,
+    "peak_leverage": 1.7422803664273614,
+    "leverage_known": true,
+    "stress_leverage_max": 2.0,
+    "stress_leverage_pass": true,
+    "early_terminated_folds": [],
+    "per_fold": [
+      {
+        "fold": "fold_00",
+        "n_bars": 2977,
+        "fixed_trailing_mdd_pct": -29.962340969887624,
+        "fixed_mdd_of_initial_pct": -28.903620166399556,
+        "peak_abs_position": 1.7156158311213063
+      },
+      {
+        "fold": "fold_01",
+        "n_bars": 2977,
+        "fixed_trailing_mdd_pct": -28.85214234538065,
+        "fixed_mdd_of_initial_pct": -29.79550034262399,
+        "peak_abs_position": 1.7422803664273614
+      },
+      {
+        "fold": "fold_02",
+        "n_bars": 2371,
+        "fixed_trailing_mdd_pct": -30.170650804203035,
+        "fixed_mdd_of_initial_pct": -34.250764530565355,
+        "peak_abs_position": 1.6493730295595268
+      },
+      {
+        "fold": "fold_03",
+        "n_bars": 2538,
+        "fixed_trailing_mdd_pct": -33.09020223256465,
+        "fixed_mdd_of_initial_pct": -34.430329708158744,
+        "peak_abs_position": 1.6830936820087556
+      }
+    ],
+    "stress_pass": false,
+    "status": "FAIL",
+    "note": "recorded path = un-truncated (no early-term fired) \u2192 fixed-lot reconstruction is exact"
+  },
+  "stress_override": "overall set FAIL by X3 fixed-lot stress gate"
+}

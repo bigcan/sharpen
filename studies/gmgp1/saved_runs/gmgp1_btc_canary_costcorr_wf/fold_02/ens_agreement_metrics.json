@@ -1,0 +1,15 @@
+{
+  "label": "ens_agreement",
+  "n_bars": 2689,
+  "pf_bar": 0.9719593498632485,
+  "total_return_pct": -13.877963682099232,
+  "trailing_max_drawdown_pct": -29.177197965503343,
+  "worst_intraday_daily_dd_pct": 23.143112305484827,
+  "active_days": 29,
+  "max_single_day_share": 0.14761950277693534,
+  "ftmo_compliance_pass": true,
+  "trade_count": 77,
+  "prop_firm_termination": null,
+  "trailing_dd_buffer_pp": -19.177197965503343,
+  "daily_dd_buffer_pp": null
+}

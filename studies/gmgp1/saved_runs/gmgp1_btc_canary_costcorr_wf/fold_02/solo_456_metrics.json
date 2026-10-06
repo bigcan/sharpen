@@ -1,0 +1,15 @@
+{
+  "label": "solo_456",
+  "n_bars": 2542,
+  "pf_bar": 0.9226038682562999,
+  "total_return_pct": -24.195995561720352,
+  "trailing_max_drawdown_pct": -30.530233618916856,
+  "worst_intraday_daily_dd_pct": 16.250849279205404,
+  "active_days": 28,
+  "max_single_day_share": 0.3526822618719752,
+  "ftmo_compliance_pass": true,
+  "trade_count": 208,
+  "prop_firm_termination": null,
+  "trailing_dd_buffer_pp": -20.530233618916856,
+  "daily_dd_buffer_pp": null
+}

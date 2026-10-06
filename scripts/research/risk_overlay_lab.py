@@ -52,6 +52,7 @@ import pandas as pd
 
 logger = logging.getLogger(__name__)
 
+SUBS = ("GMGP1-BTC", "SG1-BTC")  # substrates reported; main() narrows it with --substrate
 DATA_ROOT = Path("data")
 RESULTS_ROOT = Path("results")
 TAKER_FEE = 0.00055
@@ -459,7 +460,7 @@ def cmd_flip(runs, grid):
             y["params"] = p
             v.append(y)
         out[tag] = run_grid(v, grid)
-    for sub in ("GMGP1-BTC", "SG1-BTC"):
+    for sub in SUBS:
         neg = frontier_excess(out["NEG (real, live cost)"], sub).set_index("arm")
         pos = frontier_excess(out["POS (inverted, frictionless)"], sub).set_index("arm")
         r = pd.DataFrame([
@@ -479,7 +480,7 @@ def cmd_fees(runs):
             ("TP_equity_100bps", dict(tp_bps=100)), ("TIMESTOP_16bars", dict(max_hold=16)),
             ("DDTHROTTLE_0.02-0.06", dict(dd_throttle_start=0.02, dd_throttle_full=0.06))]
     rows = []
-    for sub in ("GMGP1-BTC", "SG1-BTC"):
+    for sub in SUBS:
         rr = [x for x in runs if x["sub"] == sub]
         for f in (0.0, 0.00005, 0.0001, 0.00025, 0.0005, 0.00075, FEE_FRAC):
             def med(ov):
@@ -508,10 +509,15 @@ def main():
     ap.add_argument("--out", type=Path, default=None)
     ap.add_argument("--data-root", type=Path, default=DATA_ROOT)
     ap.add_argument("--results-root", type=Path, default=RESULTS_ROOT)
+    ap.add_argument("--substrate", choices=["both", "gmgp1"], default="both",
+                    help="gmgp1 = GMGP1-BTC only (the public study; SG-1 trajectories are not needed or read)")
     a = ap.parse_args()
+    global SUBS
+    if a.substrate == "gmgp1":
+        SUBS = ("GMGP1-BTC",)
     logging.basicConfig(level=logging.INFO, format="%(levelname)s %(message)s")
 
-    runs = build_gmgp1(a.data_root, a.results_root) + build_sg1(a.results_root)
+    runs = build_gmgp1(a.data_root, a.results_root) + (build_sg1(a.results_root) if a.substrate == "both" else [])
     logger.info("substrates: %d runs (GMGP1=%d, SG1=%d)", len(runs),
                 sum(x["sub"] == "GMGP1-BTC" for x in runs), sum(x["sub"] == "SG1-BTC" for x in runs))
     if a.validate or a.test == "all":
@@ -520,7 +526,10 @@ def main():
     grid = make_grid()
     if a.test in ("grid", "all"):
         df = run_grid(runs, grid)
-        for sub in ("GMGP1-BTC", "SG1-BTC"):
+        for sub in SUBS:
+            ov = df[(df["sub"] == sub) & (df["arm"] != "baseline")].groupby("arm")["pf"].median()
+            print(f"\n{sub}: {len(ov)} overlay arms, {int((ov >= 1).sum())} with median PF >= 1 "
+                  f"(best {ov.max():.4f}; baseline {df[(df['sub'] == sub) & (df['arm'] == 'baseline')]['pf'].median():.4f})")
             print(f"\n=== {sub}: excess over matched-exposure de-levering ===")
             f = frontier_excess(df, sub)
             print(f[~f["arm"].str.startswith("CONTROL")][
@@ -528,7 +537,7 @@ def main():
         if a.out:
             a.out.mkdir(parents=True, exist_ok=True)
             df.to_csv(a.out / "grid_results.csv", index=False)
-            for sub in ("GMGP1-BTC", "SG1-BTC"):
+            for sub in SUBS:
                 frontier_excess(df, sub).to_csv(a.out / f"frontier_{sub}.csv", index=False)
             logger.info("wrote %s", a.out)
     if a.test in ("flip", "all"):
