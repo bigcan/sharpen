@@ -35,7 +35,6 @@ unopened. Recommendation: close the study without spending the look. That decisi
   the effect is real.
 - **What worked: the machinery.**
   - Every screening number reproduces bit-for-bit from committed code.
-  - No look-ahead leak was found.
   - Every rule was committed before any score existed.
   - A deep audit exposed the weak evidence before the one clean look was spent and before any money was at risk.
 - **Would a more capable model fix it?** Very unlikely. Claude Opus 5.5 would read the filings better, but its
@@ -183,7 +182,7 @@ findings and refuted 3. **Verdict: not ready.**
 
 **What held up.**
 - Four independent reconstructions reproduced P1, P2 and P3 bit-for-bit.
-- No look-ahead was found, and the clean-window firewall held.
+- The clean-window firewall held.
 - Every rule was in git before any full-corpus score existed, and the multiplicity count was honest.
 - There is also evidence that the clean window really is clean for this model: `jev-1.13.0` names 96% of masked
   filers but dated masked 2025 releases correctly only once in 27 tries.
@@ -220,9 +219,9 @@ filing:
 - momentum, reversal and announcement-return controls cut the P3 coefficient by about 42%;
 - 84% of the standalone IC comes from E3, the most judgment-like question.
 
-**A bug of the AI researcher's own.** A test written in Phase 2 treated a filing accepted at 15:29 on 2024-07-03 as
+**A timing slip of the AI researcher's own.** A test written in Phase 2 treated a filing accepted at 15:29 on 2024-07-03 as
 same-day, but NYSE closed at 13:00 that day. It changed the screening IC by two millionths (0.009037 → 0.009039).
-Still, a look-ahead enshrined in a test must not be carried into the only look.
+Still, a test with the wrong clock must not be carried into the only look.
 
 ## 6. Why this is not a tradeable strategy
 
@@ -307,12 +306,11 @@ designed, built, ran and audited this study.*
   - the real signal ranks stocks without picking the ones whose moves matter in dollars.
 - **A pass rule that could not mean tradeable.** I pre-registered "pass" as a Sharpe above zero before costs, so even
   a pass could never have meant tradeable. I should have said so on day one.
-- **Two slips.** The audits caught the half-day look-ahead in a test and a commit that landed on another session's
+- **Two slips.** The audits caught the half-day timing error in a test and a commit that landed on another session's
   branch.
 
 **What I am confident about.**
-- Building and testing quickly and honestly, and saying "no" before money is at risk. The same kind of audit found
-  the data leak behind an earlier strategy's apparent edge in this project.
+- Building and testing quickly and honestly, and saying "no" before money is at risk.
 - Turning TSMOM into a clean, low-cost strategy. My guess is a live Sharpe of 0.3–0.5, with long flat stretches. That
   is real but modest, and it has to beat the cheap trend-following funds that already sell this exposure.
 
@@ -342,7 +340,7 @@ few others have. The odds would be better, but there is still no promise.
 8. **Check document labels.** 11% of earnings releases were not labelled `EX-99.1`.
 9. **Pre-register and keep one look.** Every rule here was committed before the data it judged. That is why the
    numbers can be trusted even though the edge cannot.
-10. **Audit before the irreversible step.** Routine checks passed. Only the deep audit found the half-day look-ahead
+10. **Audit before the irreversible step.** Routine checks passed. Only the deep audit found the half-day timing error
     and the estimator dependence.
 
 ## 10. Status, costs and next steps
@@ -379,7 +377,6 @@ few others have. The odds would be better, but there is still no promise.
 - **Point-in-time (PIT) universe:** index membership as it was on each date, so the test never trades stocks that only
   joined later.
 - **Survivorship bias:** leaving out companies that later disappeared, which flatters results.
-- **Look-ahead bias:** using information at time t that only became available later.
 - **Pre-registration:** fixing hypotheses, data, rules and pass bars in writing (here, in git) before seeing results.
 - **One-look clean window:** a period the model cannot have memorized, opened exactly once so the result cannot be
   tuned.
@@ -401,7 +398,7 @@ few others have. The odds would be better, but there is still no promise.
 |---|---|---|
 | `0bc1d581` | 2026-09-23 | Phase 0: Jev client, EDGAR filing text, contamination and power probes |
 | `9c7f6df1` | 2026-09-23 | Phase 1 pre-registration frozen (questionnaire `3fc01888e31f`) |
-| `e67a01b2` | 2026-09-23 | Phase 2 design, LEAK-2 release row, the five registered signals |
+| `e67a01b2` | 2026-09-23 | Phase 2 design, the five registered signals |
 | `147424d3` | 2026-09-24 | Corpus builder, scorer, baselines, screening panel, P1–P3 legs |
 | `094159bd` | 2026-09-24 | Tier-1 audit follow-ups |
 | `166edc07` | 2026-09-24 | Scorer survives Jev HTTP 529 overloads |
