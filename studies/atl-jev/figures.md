@@ -3,7 +3,7 @@
 > **Source:** a study from the **KISI** YouTube channel (Keep It Simple Investing), by Keng. Channel: [youtube.com/channel/UCPyTohwSp1URsZL9EX-NJ2A](https://www.youtube.com/channel/UCPyTohwSp1URsZL9EX-NJ2A) · Code: [github.com/bigcan/sharpen](https://github.com/bigcan/sharpen) · Support: [ko-fi.com/bigcan](https://ko-fi.com/bigcan).
 > Video: link added when Ep05 is published.
 
-> Figures for KISI Ep05; study overview in [README.md](README.md). "Check" = asserted by `verify.py` against the saved results (✅), or cited from the final report only (—). **Draft until Keng locks it.**
+> Figures for KISI Ep05; study overview in [README.md](README.md). "Check" = asserted by `verify.py` against the saved results (✅), or cited from the final report only (—).
 
 | # | Figure | Value | Source file | Check |
 |---|---|---|---|---|
@@ -33,4 +33,4 @@
 | F24 | Deep audit | 15 AI agents; 111 findings confirmed, 3 refuted; verdict not ready | final report §5 | — |
 | F25 | Duration; cost | 3 calendar days (2026-09-23 to 09-25); about $7 | final report | — |
 
-**Known mismatch to resolve before locking:** the final report says 24,676 filings were in scope (23,214 earnings releases and 1,462 event filings); the saved corpus manifest says 24,607 in scope (23,156 earnings, 1,451 events). The scored set is 24,676 filings (scores manifest). Use "about 25,000 filings" and the scored count; do not quote the earnings/event split until reconciled.
+**Filings in scope.** The final report gives 24,676 filings in scope (23,214 earnings releases and 1,462 event filings). The saved corpus manifest gives 24,607 (23,156 earnings, 1,451 events). The scored set is 24,676 filings (scores manifest). This page quotes the scored count and "about 25,000", not the earnings/event split.

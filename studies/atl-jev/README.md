@@ -9,7 +9,7 @@ We had an AI model read about 25,000 SEC 8-K filings from S&P 500 companies (201
 
 ## What was run
 
-- **The model:** Jev (TypeSafe, "System One"), asked six fixed questions about each filing: was guidance raised or lowered, what is the business trajectory, is the tone more positive than the numbers justify, are the results flattered by one-offs, is there a material adverse event. It answers with probabilities and cannot write text. It reads facts that are in the filing; it is never asked to forecast prices.
+- **The model:** Jev (TypeSafe, "System One"), asked six fixed questions about each filing: was guidance raised, was guidance lowered, what is the business trajectory, is the tone more positive than the numbers justify, are the results flattered by one-offs, is there a material adverse event. It answers with probabilities and cannot write text. It reads facts that are in the filing; it is never asked to forecast prices.
 - **The data:** 98,119 8-Ks listed for index members, 584 companies. 24,676 filings were scored (24,654 with text) for 140,614 answers, all from one model version (`jev-1.13.0`), at a cost of $6.57.
 - **The tests (all fixed before any score existed):** P1, Sharpen's frozen evaluation funnel. P2, a placebo that shuffles scores across firms reporting in the same week, 200 times. P3, a check that Jev adds information beyond two non-AI text baselines (Loughran–McDonald tone and Lazy-Prices similarity). P4, one look at clean data after 2025-02. P5, a forward lockbox.
 - **Cost:** three calendar days and about $7 of Jev credits. The price and filing data were free (SEC EDGAR, Yahoo Finance).
@@ -54,7 +54,7 @@ git clone https://github.com/bigcan/sharpen && cd sharpen
 python studies/atl-jev/verify.py
 ```
 
-It reads the saved screening results in `results/atl_jev/` and asserts every number quoted above, ending with `0 mismatches`. Expected output: [`expected/verify-output.txt`](expected/verify-output.txt). Every figure and where it comes from: [figures.md](figures.md).
+It reads the saved screening results in `results/atl_jev/` and asserts the screening, placebo, baseline, run and Phase 0 numbers quoted above, ending with `0 mismatches`. A few figures are quoted from the final report only and are not asserted by the script: the 0.7 bp break-even, the 2.6 to 2.9 range of stricter t-statistics, the 2018 to 2024 IC and t, the 0.76 rank Sharpe, the 40% overlap with price signals, the 20 to 25% chance for the clean look, the deep-audit counts, and the three-day duration. Expected output: [`expected/verify-output.txt`](expected/verify-output.txt). Figures and where each comes from, with the report-only ones marked: [figures.md](figures.md).
 
 Not rerunnable from a fresh clone: re-scoring the filings (needs a Jev API key and about $7) and rebuilding the price panel.
 
