@@ -1,7 +1,7 @@
 # GMGP1-BTC: a reinforcement-learning agent trades Bitcoin
 
 > **Source:** a study from the **KISI** YouTube channel (Keep It Simple Investing), by Keng. Channel: [youtube.com/channel/UCPyTohwSp1URsZL9EX-NJ2A](https://www.youtube.com/channel/UCPyTohwSp1URsZL9EX-NJ2A) · Code: [github.com/bigcan/sharpen](https://github.com/bigcan/sharpen) · Support: [ko-fi.com/bigcan](https://ko-fi.com/bigcan). Historical simulation only; not investment advice.
-> Video: link added when Ep04 is published.
+> Video: [https://youtu.be/Y4r83uh95lo](https://youtu.be/Y4r83uh95lo)
 
 Can a reinforcement-learning agent (SAC) find a tradable edge on Bitcoin 15-minute bars? We trained it with 5 seeds on each of 4 walk-forward test months (Dec 2025 to Mar 2026), charged realistic costs (taker fee 5.5 bps plus 5 bps slippage, one way), and checked the 20 resulting runs.
 
@@ -46,4 +46,4 @@ Full figure table: [figures.md](figures.md).
 
 Not rerunnable from a fresh clone: training the agents (needs GPU time and the private training pipeline) and the PPO-GAE screen.
 
-Video: KISI Ep04, working title "I Trained An AI To Trade Bitcoin. Here's What Happened."
+Video: KISI Ep04, [I Trained An AI To Trade Bitcoin. This Is Unexpected](https://youtu.be/Y4r83uh95lo)
