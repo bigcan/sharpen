@@ -1,7 +1,7 @@
 # Ep04 Figures
 
 > **Source:** a study from the **KISI** YouTube channel (Keep It Simple Investing), by Keng. Channel: [youtube.com/channel/UCPyTohwSp1URsZL9EX-NJ2A](https://www.youtube.com/channel/UCPyTohwSp1URsZL9EX-NJ2A) · Code: [github.com/bigcan/sharpen](https://github.com/bigcan/sharpen) · Support: [ko-fi.com/bigcan](https://ko-fi.com/bigcan). Historical simulation only; not investment advice.
-> Video: link added when Ep04 is published.
+> Video: [https://youtu.be/Y4r83uh95lo](https://youtu.be/Y4r83uh95lo)
 
 > Figures for KISI Ep04; study overview in [README.md](README.md). Source: the saved GMGP1-BTC clean-canary runs in `saved_runs/`, re-derived by `rerun.py` (CPU, 2026-10-06). Column "Rerun" = reproduced by `rerun.py` (✅) or cited from a research note only (—). **Draft until Keng locks it.**
 
