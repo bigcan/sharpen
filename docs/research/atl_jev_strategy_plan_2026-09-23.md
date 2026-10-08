@@ -11,7 +11,7 @@ TypeSafe's **Jev** as the agent's decision model, and have it clear Sharpen's fa
   EDGAR acceptance time. It answers a fixed, pre-registered set of *extraction* questions. A pre-registered linear rule
   maps those answers to a cross-sectional score. It does not read ATL's RSI/MACD/SMA/Bollinger features: technical
   signals on liquid large caps are a closed family in this repo's record.
-- **Main risk: pretraining look-ahead.** Jev was released 2026-09-15 and its training cutoff is undisclosed. It may
+- **Main risk: pretraining memory.** Jev was released 2026-09-15 and its training cutoff is undisclosed. It may
   "know" what happened after any historical filing. Only data after Jev's *measured* knowledge cutoff, plus the forward
   lockbox, can certify a result. Everything before that cutoff is screening, labelled UPPER BOUND.
 - **Verdict universe: S&P 500 PIT daily.** The frozen funnel requires ≥ 50 names/day, so DJIA-30 fails its first
@@ -107,7 +107,7 @@ score decays with half-life H, and the frozen gates' neutralization (sector and 
 
 **Why this design.**
 - **Extraction is checkable.** The answer is in the text, so a sample can be audited for accuracy. A forecasting answer
-  can only come from the model's own knowledge, which is where memorization leaks in.
+  can only come from the model's own knowledge, which is where memorization creeps in.
 - **Typed answers are auditable.** They are hashable like a `SignalSpec`, reproducible from the cache, and need no
   output parsing.
 - **Jev is cheap enough for breadth.** The full S&P 500 corpus is roughly $40–100 at list price, and breadth is what
@@ -120,8 +120,8 @@ score decays with half-life H, and the frozen gates' neutralization (sector and 
 | C1 | **Knowledge-cutoff probe.** Dated market-fact `noul` questions: monthly direction of SPY and each DJIA name, 2018-01 → 2026-08, about 3k questions, well under $1. Plot accuracy by month. | T_c = the changepoint where accuracy falls to chance. The clean window is [T_c + embargo, now]. |
 | C2 | **Anonymizing state renderer.** Masks registrant name, ticker, CIK and dates. Tripwire test: no identifier, price, return or verdict field reaches the request body (mirrors the ranker's CR-1 tripwire). | Required for every Jev call |
 | C3 | **Identification probe.** Jev picks the filer from 10 same-sector candidates given the anonymized text (chance = 10%). | If identifiable above the pre-registered threshold, pre-T_c results are screening only (they are anyway) and H1 relies on P4 and P5 alone. |
-| C4 | **Named-vs-anonymized A/B** in the screening era (Glasserman–Lin design) | If named beats anonymized, that is a knowledge leak. Reported. |
-| C5 | **Deliberate leak detector.** A named, dated *forecast* question ("will it outperform over 5 days?"). This is the naive LLM-agent strategy. | It should "work" before T_c and die after. If it does not die, the clean window is not clean and P4 is void. |
+| C4 | **Named-vs-anonymized A/B** in the screening era (Glasserman–Lin design) | If named beats anonymized, that is knowledge contamination. Reported. |
+| C5 | **Deliberate contamination detector.** A named, dated *forecast* question ("will it outperform over 5 days?"). This is the naive LLM-agent strategy. | It should "work" before T_c and die after. If it does not die, the clean window is not clean and P4 is void. |
 | C6 | **Version pin.** Record the served `jev-x.y.z` on every answer. | A version change is a new trial and triggers a C1 re-run. |
 
 ### 3.3 Controls and baselines
@@ -277,7 +277,7 @@ hash `3fc01888e31f`; rules in `configs/atl_jev.gates.yaml` `phase1`). No filing 
 - **Step 1, the release row** (`sharpen/jev/release.py`):
   - acceptance time → trading-day row, with the DST-aware cutoff read from `phase1.release_row`;
   - beyond the calendar gives NaT (fail closed);
-  - 19 tests, 4/4 mutations caught, including the fixed-offset DST look-ahead.
+  - 19 tests, 4/4 mutations caught, including the fixed-offset DST timing error.
 - **Step 2, the five registered signals** (`sharpen/signals/library/jev_filings.py`):
   - built strictly per `phase1.construction`, date-aligned to the calendar;
   - a screening-mode firewall past 2024, and P4's `min_filing_accepted`;
@@ -367,7 +367,7 @@ the era is contaminated and the panel is survivorship-biased.
 - **Expectation:** P4 needs a 5d IC t ≥ 2.0 on 411 days **and** a frictionless long-short Sharpe > 0.
   - At the screening IC (0.009), the IC leg alone has power of about 5/8.
   - The screening frictionless Sharpe was only 0.02, so the book leg is close to a coin flip.
-  - One sign cuts against pure memory leakage: the signal was weakest (IC-IR 0.01) in the 2018–2021 quarter of
+  - One sign cuts against pure memory contamination: the signal was weakest (IC-IR 0.01) in the 2018–2021 quarter of
     the window, which falls inside the 2018–2023 regimes Jev remembers, and strongest in 2012–2018. This is
     weak evidence.
 
