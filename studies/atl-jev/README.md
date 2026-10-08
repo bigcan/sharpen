@@ -1,7 +1,7 @@
 # ATL × Jev: can an AI that reads SEC filings build a tradeable strategy?
 
 > **Source:** a study from the **KISI** YouTube channel (Keep It Simple Investing), by Keng. Channel: [youtube.com/channel/UCPyTohwSp1URsZL9EX-NJ2A](https://www.youtube.com/channel/UCPyTohwSp1URsZL9EX-NJ2A) · Code: [github.com/bigcan/sharpen](https://github.com/bigcan/sharpen) · Support: [ko-fi.com/bigcan](https://ko-fi.com/bigcan).
-> Video: link added when Ep05 is published.
+> Video: [youtu.be/nm4VW3zbXy0](https://youtu.be/nm4VW3zbXy0)
 
 We had an AI model read about 25,000 SEC 8-K filings from S&P 500 companies (2012 to 2024) and turned its answers into five trading signals. Every rule and pass bar was written into git before any filing was scored. Then the signals went through [Sharpen](https://github.com/bigcan/sharpen), our falsification-first evaluation framework.
 
