@@ -28,7 +28,7 @@ dependencies = [
     "pyyaml>=6.0",
     "requests==2.32.3",
     "yfinance>=0.2.40",
-    "pyarrow>=14.0.1",
+    "pyarrow>=14.0.1,<20",
     "alpaca-py>=0.23.0",
     "PyWavelets>=1.5.0",
     "statsmodels>=0.14.0",

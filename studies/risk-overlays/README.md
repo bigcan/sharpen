@@ -15,7 +15,7 @@ This is one strategy, one asset and four months, replayed rather than retrained.
 
 ```bash
 git clone https://github.com/bigcan/sharpen && cd sharpen
-pip install -e ".[dev]" pyarrow
+pip install -e ".[dev]"
 python studies/gmgp1/fetch_btc_1min.py      # public Bybit 1-minute candles -> data/ (a few minutes)
 python studies/gmgp1/rerun.py               # step 2 replays the saved runs under the 53 overlay arms
 python studies/risk-overlays/summarize.py   # the tables below
