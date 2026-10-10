@@ -1,0 +1,26 @@
+Overlay arms: 53; arms with median PF >= 1.0: 0
+Baseline median: PF 0.9057, return -24.3%, max drawdown -29.2%, exposure 1.08, trades 206
+Run-and-arm cells with PF >= 1.0: 59 of 1060; from test month (fold) 2: 42
+
+| Rule family | Arms | Best median PF | Worst median PF | Arms above baseline | Runs with PF >= 1 |
+|---|---|---|---|---|---|
+| Stop-loss on price | 6 | 0.9026 | 0.7026 | 0 of 6 | 1 |
+| Stop-loss on equity | 7 | 0.8949 | 0.7535 | 0 of 7 | 0 |
+| Stop-loss with cooldown | 3 | 0.8625 | 0.8330 | 0 of 3 | 1 |
+| Take-profit on price | 5 | 0.9057 | 0.7861 | 0 of 5 | 0 |
+| Take-profit on equity | 5 | 0.9057 | 0.8579 | 0 of 5 | 0 |
+| Time stop | 6 | 0.8883 | 0.2125 | 0 of 6 | 0 |
+| Daily loss limit | 4 | 0.8796 | 0.8090 | 0 of 4 | 7 |
+| Volatility target | 6 | 0.9367 | 0.9017 | 5 of 6 | 11 |
+| Drawdown brake | 5 | 0.9841 | 0.9226 | 5 of 5 | 31 |
+| Control: just trade smaller | 6 | 0.9303 | 0.8988 | 3 of 6 | 8 |
+
+Top 5 arms by median PF:
+| Arm | Median PF | Median return | Median max drawdown | Median exposure | Median trades |
+|---|---|---|---|---|---|
+| DDTHROTTLE_0.02-0.06_fl0.0 | 0.9841 | -1.2% | -6.5% | 0.29 | 34 |
+| DDTHROTTLE_0.03-0.08_fl0.0 | 0.9723 | -2.2% | -8.9% | 0.36 | 51 |
+| DDTHROTTLE_0.01-0.04_fl0.0 | 0.9573 | -2.0% | -5.1% | 0.17 | 21 |
+| DDTHROTTLE_0.05-0.1_fl0.25 | 0.9399 | -6.1% | -12.2% | 0.42 | 70 |
+| VOLTARGET_0.05 | 0.9367 | -6.2% | -9.3% | 0.38 | 56 |
+| baseline (no rule) | 0.9057 | -24.3% | -29.2% | 1.08 | 206 |
