@@ -11,7 +11,7 @@ Can a reinforcement-learning agent (SAC) find a tradable edge on Bitcoin 15-minu
 
 ```bash
 git clone https://github.com/bigcan/sharpen && cd sharpen
-pip install -e ".[dev]" pyarrow
+pip install -e ".[dev]"
 python studies/gmgp1/fetch_btc_1min.py     # public Bybit 1-minute candles -> data/ (a few minutes)
 python studies/gmgp1/rerun.py              # re-derives the numbers below from the saved runs
 ```
