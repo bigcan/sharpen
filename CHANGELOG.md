@@ -11,6 +11,16 @@ The Crucible alpha-mining platform keeps its own version (`sharpen/crucible/vers
 `crucible-vMAJOR.MINOR`), because it stamps every mining run; each entry below names the Crucible
 versions it contains.
 
+## [1.2.0] — unreleased
+
+### Added
+- **Funnel searches in the community ledger.** A second record kind, `funnel_closed_search`, records a pre-registered search run straight through the signal funnel (no orchestrator).
+  - It holds counts, spec hashes, the declared multiplicity, the gates hash, and a power block that compares the detection bar with the smallest effect worth having. No formula, score or per-signal verdict is written.
+  - Exporter: `scripts/funnel_export_closed_search.py`. It refuses a scorecard that holds a PROMISING result. `crucible_community_ledger.py validate` checks both kinds.
+- **Two US large-cap searches shared** (`community/ledger/us_largecap_sp500_top300/`). Both are `OPEN_UNDERPOWERED`: the detection bar is above the floor.
+  - SEC alt-data: XBRL fundamentals, Form 4 insider trades and filing behaviour, 7 signals.
+  - Price-only families, 8 signals plus a composite.
+
 ## [1.1.2] — 2026-10-04
 
 ### Added
