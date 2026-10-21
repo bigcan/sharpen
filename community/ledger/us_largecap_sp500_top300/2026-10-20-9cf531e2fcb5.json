@@ -1,0 +1,56 @@
+{
+  "campaign": {
+    "declared_multiplicity": 187,
+    "gates_sha256_12": "b3d8e43ebbb7",
+    "preregistered_on": "2026-10-20",
+    "primary_horizon_days": 21
+  },
+  "export_id": "9cf531e2fcb5",
+  "hypotheses": {
+    "spec_hashes": [
+      "0c9b42202982",
+      "167a8ccb1b22",
+      "1854fecb0ae5",
+      "4b9309127d45",
+      "519a6dce4059",
+      "a01deaacca7b",
+      "aa0180c01b61",
+      "c1600b9b249d",
+      "cf059cc5e457"
+    ]
+  },
+  "kind": "funnel_closed_search",
+  "power": {
+    "detection_bar_ic_ir": 0.34,
+    "economic_floor_ic_ir": 0.1,
+    "planted_control_passed": true
+  },
+  "provenance": {
+    "funnel": "sharpen.signals",
+    "sharpen_version": "1.1.2"
+  },
+  "schema_version": 1,
+  "substrate": {
+    "data_end": "2026-08-07",
+    "data_sources": [
+      "Ken French FF3 daily factors",
+      "SEC EDGAR filing index (8-K Item 2.02)",
+      "SEC submissions SIC codes",
+      "Yahoo Finance daily bars",
+      "fja05680 S&P 500 membership"
+    ],
+    "data_start": "2008-01-02",
+    "id": "us_largecap_sp500_top300",
+    "search_space": "price-only cross-sectional families: seasonality, overnight/intraday reversal, MAX, idiosyncratic volatility, 52-week high, industry momentum, earnings-announcement premium, composite (8 + 1 pre-registered)",
+    "universe": "S&P 500 point-in-time members, top 300 by 60-day dollar volume"
+  },
+  "trials": {
+    "preregistered": 9,
+    "promising": 0,
+    "scored": 9
+  },
+  "verdict": "OPEN_UNDERPOWERED",
+  "verdict_reasons": [
+    "mde_above_floor"
+  ]
+}
