@@ -6,11 +6,15 @@
 ``check`` answers "has anyone already searched this?" before you spend compute. It prints advice for
 a person; nothing in the mining funnel reads the community ledger.
 
-``validate`` checks every file against ``docs/schemas/community_closed_search.schema.json`` and for
+``validate`` checks every file against the schema its ``kind`` names —
+``docs/schemas/community_closed_search.schema.json`` (``crucible_closed_search``) or
+``docs/schemas/community_funnel_closed_search.schema.json`` (``funnel_closed_search``) — and for
 internal consistency (the id matches the content, the counts add up, the verdict follows from them,
-no local path or address). It exits 1 on any problem, and CI runs it on every pull request.
+no local path or address). A file of any other kind is invalid. It exits 1 on any problem, and CI
+runs it on every pull request. Exporter inputs under ``_describe/`` are not entries and are skipped.
 
-To add your own search, see ``scripts/crucible_export_closed_search.py``.
+To add your own search, see ``scripts/crucible_export_closed_search.py`` (a Crucible trial ledger)
+or ``scripts/funnel_export_closed_search.py`` (a signal-funnel scorecard).
 """
 from __future__ import annotations
 

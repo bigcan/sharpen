@@ -26,6 +26,12 @@ hypothesis with one elsewhere in the ledger — is skipped as a whole unless ``i
 set. It is all-or-nothing on purpose: withholding one hash would leave a visible gap in the counts,
 and exporting only a substrate's dead-end runs would publish a "nothing here" that its author knows
 to be false.
+
+TWO KINDS OF RECORD. ``crucible_closed_search`` (above) is read from an orchestrator trial ledger.
+``funnel_closed_search`` is read from a signal-funnel scorecard (``sharpen.signals.evaluate_batch``
+then ``write_scorecard``) run against a pre-registration, with no orchestrator: its counts come from
+the scorecard and its power block is the author's own measurement (see :func:`export_funnel_search`).
+Neither kind borrows the other's fields; ``kind`` decides which schema a file is checked against.
 """
 from __future__ import annotations
 
@@ -85,6 +91,21 @@ _PRIVATE_TEXT = (
     (re.compile(r"\b(?:\d{1,3}\.){3}\d{1,3}\b"), "an IP address"),
 )
 _MAX_TEXT = 300
+
+FUNNEL_SCHEMA_VERSION = 1
+FUNNEL_KIND = "funnel_closed_search"
+# Why a funnel search was read the way it was, in the fixed order they are written.
+FUNNEL_REASONS = (
+    "promising_result",                    # PROMISING_FOUND
+    "no_candidate_passed_at_powered_bar",  # CLOSED_DECISIVE
+    "mde_above_floor",                     # the detection bar exceeds the smallest edge worth having
+    "planted_control_failed",              # the funnel did not recover a planted signal
+    "power_not_measured",                  # a power number or the control result is missing
+)
+FUNNEL_NAME = "sharpen.signals"
+#: Author inputs to :func:`export_funnel_search` may live under this directory of the ledger; the
+#: validator and the reader skip it (they are not ledger entries).
+DESCRIBE_DIR = "_describe"
 
 
 # --------------------------------------------------------------------------------------- schema
@@ -184,6 +205,48 @@ SCHEMA: dict = {
         }),
     }),
 }
+
+
+#: The funnel kind's file format; ``docs/schemas/community_funnel_closed_search.schema.json`` is a
+#: JSON dump of it (a test keeps them equal). The substrate block is the same as :data:`SCHEMA`'s.
+FUNNEL_SCHEMA: dict = {
+    "$schema": "https://json-schema.org/draft/2020-12/schema",
+    "$id": "urn:sharpen:crucible:community-funnel-closed-search:v1",
+    "title": "Crucible community ledger: one closed signal-funnel search",
+    "description": ("One pre-registered batch scored by the sharpen.signals funnel: what was searched, "
+                    "how many specs were scored, how strong the test was next to the smallest "
+                    "edge worth having, and whether the question is closed. Counts and spec hashes "
+                    "only; no name, score or per-signal verdict."),
+    **_object({
+        "schema_version": {"const": FUNNEL_SCHEMA_VERSION},
+        "kind": {"const": FUNNEL_KIND},
+        "export_id": _HASH12,
+        "verdict": {"enum": list(VERDICTS)},
+        "verdict_reasons": {"type": "array", "minItems": 1, "uniqueItems": True,
+                            "items": {"enum": list(FUNNEL_REASONS)}},
+        "substrate": SCHEMA["properties"]["substrate"],
+        "campaign": _object({
+            "preregistered_on": _DATE,
+            "primary_horizon_days": {"type": "integer", "minimum": 1},
+            "declared_multiplicity": {"type": "integer", "minimum": 1},
+            "gates_sha256_12": _HASH12,
+        }),
+        "trials": _object({"preregistered": _COUNT, "scored": _COUNT, "promising": _COUNT}),
+        "power": _object({
+            "detection_bar_ic_ir": _nullable(_NUMBER),
+            "economic_floor_ic_ir": _nullable(_NUMBER),
+            "planted_control_passed": {"type": ["boolean", "null"]},
+        }),
+        "hypotheses": _object({"spec_hashes": _hash_list(_HASH12)}),
+        "provenance": _object({
+            "sharpen_version": {"type": "string",
+                                "pattern": r"^[0-9]+\.[0-9]+\.[0-9]+([.+-][A-Za-z0-9.+-]+)?$"},
+            "funnel": {"const": FUNNEL_NAME},
+        }),
+    }),
+}
+
+_SCHEMAS = {KIND: SCHEMA, FUNNEL_KIND: FUNNEL_SCHEMA}
 
 
 # --------------------------------------------------------------------------------------- inputs
@@ -454,8 +517,12 @@ def export_id(payload: dict) -> str:
 
 
 def relative_path(payload: dict) -> str:
-    """``<substrate>/<last date>-<export id>.json`` — the path under ``community/ledger/``."""
-    date = payload["provenance"]["last_date"] or "undated"
+    """``<substrate>/<date>-<export id>.json`` — the path under ``community/ledger/``. The date is
+    the last run date for a trial-ledger search and the pre-registration date for a funnel search."""
+    if payload.get("kind") == FUNNEL_KIND:
+        date = payload["campaign"]["preregistered_on"]
+    else:
+        date = payload["provenance"]["last_date"] or "undated"
     return f"{payload['substrate']['id']}/{date}-{payload['export_id']}.json"
 
 
@@ -717,6 +784,143 @@ def write_exports(payloads: list[dict], out_dir: str | Path) -> list[Path]:
     return written
 
 
+# --------------------------------------------------------------------------------------- funnel kind
+class PromisingHeldBack(ValueError):
+    """A funnel scorecard holds a PROMISING card and ``include_promising`` was not set."""
+
+
+def decide_funnel_verdict(*, promising: int, detection_bar: float | None,
+                          floor: float | None,
+                          control_passed: bool | None) -> tuple[str, list[str]]:
+    """The top-level reading of one funnel batch.
+
+    ``CLOSED_DECISIVE`` needs a planted control that the funnel recovered AND a detection bar at or
+    below the economic floor (the smallest IC-IR worth having): the test could have seen any edge
+    worth having, and nothing passed. Anything short of that is ``OPEN_UNDERPOWERED``."""
+    if promising > 0:
+        return PROMISING_FOUND, ["promising_result"]
+    measured = detection_bar is not None and floor is not None
+    if control_passed is True and measured and detection_bar <= floor + 1e-12:
+        return CLOSED_DECISIVE, ["no_candidate_passed_at_powered_bar"]
+    reasons: set[str] = set()
+    if measured and detection_bar > floor + 1e-12:
+        reasons.add("mde_above_floor")
+    if control_passed is False:
+        reasons.add("planted_control_failed")
+    if not measured or control_passed is None:
+        reasons.add("power_not_measured")
+    return OPEN_UNDERPOWERED, [r for r in FUNNEL_REASONS if r in reasons]
+
+
+@dataclass(frozen=True, slots=True)
+class FunnelCampaign:
+    """The pre-registration a funnel batch was scored under, in the author's words."""
+
+    preregistered_on: str
+    gates_sha256_12: str
+    primary_horizon_days: int | None = None     # None: take the scorecard's primary horizon
+
+
+@dataclass(frozen=True, slots=True)
+class FunnelPower:
+    """The author's own measurement of how strong the funnel's test was (IC-IR units)."""
+
+    detection_bar_ic_ir: float | None = None
+    economic_floor_ic_ir: float | None = None
+    planted_control_passed: bool | None = None
+
+
+def _ic_ir(value: object, what: str) -> float | None:
+    if value is None:
+        return None
+    v = _finite(value)
+    if v is None or v < 0 or isinstance(value, bool):
+        raise ValueError(f"{what} must be a non-negative number or null, got {value!r}")
+    return round(v, 6)
+
+
+def export_funnel_search(
+    scorecard: dict,
+    *,
+    substrate_id: str,
+    description: SubstrateDescription,
+    campaign: FunnelCampaign,
+    power: FunnelPower,
+    sharpen_version: str,
+    include_promising: bool = False,
+) -> dict:
+    """One ``funnel_closed_search`` payload from a ``write_scorecard`` JSON dict.
+
+    Read from the scorecard: the card count (pre-registered), the batch's scored count, the number
+    of PROMISING cards, the declared multiplicity, the primary horizon and each card's ``spec_hash``.
+    Card names, families, scores and per-card verdicts are never copied. A scorecard holding a
+    PROMISING card raises :class:`PromisingHeldBack` unless ``include_promising`` is set; a batch
+    deflated against its own size (no declared multiplicity) is refused, since this kind records a
+    pre-registered search."""
+    if not re.match(_SUBSTRATE_ID, substrate_id):
+        raise ValueError(f"substrate id {substrate_id!r} is not a plain name")
+    cards = scorecard.get("cards")
+    if not isinstance(cards, list) or not cards:
+        raise ValueError("the scorecard has no cards")
+    promising = sum(1 for c in cards if c.get("verdict") in PROMISING_VERDICTS)
+    if promising and not include_promising:
+        raise PromisingHeldBack(f"the scorecard holds {promising} PROMISING card(s); kept private "
+                                "(pass include_promising to export it as PROMISING_FOUND)")
+    source = str(scorecard.get("multiplicity_source") or "batch")
+    if source == "batch":
+        raise ValueError("the scorecard was deflated against its own batch size; a funnel search "
+                         "record needs a declared (pre-registered) multiplicity")
+    hashes = []
+    for c in cards:
+        h = c.get("spec_hash")
+        if not (isinstance(h, str) and re.fullmatch(r"[0-9a-f]{12}", h)):
+            raise ValueError("a card has no 12-hex spec_hash")
+        hashes.append(h)
+    horizon = int(scorecard["primary_horizon"])
+    if campaign.primary_horizon_days is not None and campaign.primary_horizon_days != horizon:
+        raise ValueError(f"campaign primary_horizon_days {campaign.primary_horizon_days} does not "
+                         f"match the scorecard's primary horizon {horizon}")
+    if not re.fullmatch(r"[0-9a-f]{12}", campaign.gates_sha256_12 or ""):
+        raise ValueError("gates_sha256_12 must be the first 12 hex digits of the gates file SHA-256")
+    if not isinstance(power.planted_control_passed, (bool, type(None))):
+        raise ValueError("planted_control_passed must be true, false or null")
+    bar = _ic_ir(power.detection_bar_ic_ir, "detection_bar_ic_ir")
+    floor = _ic_ir(power.economic_floor_ic_ir, "economic_floor_ic_ir")
+    verdict, reasons = decide_funnel_verdict(
+        promising=promising, detection_bar=bar, floor=floor,
+        control_passed=power.planted_control_passed)
+    desc = description
+    payload = {
+        "schema_version": FUNNEL_SCHEMA_VERSION,
+        "kind": FUNNEL_KIND,
+        "verdict": verdict,
+        "verdict_reasons": reasons,
+        "substrate": {
+            "id": substrate_id,
+            "universe": public_text(desc.universe, "universe"),
+            "data_sources": sorted({t for t in (public_text(s, "data source")
+                                                for s in desc.data_sources) if t}),
+            "data_start": _public_date(desc.data_start, "data start"),
+            "data_end": _public_date(desc.data_end, "data end"),
+            "search_space": public_text(desc.search_space, "search space"),
+        },
+        "campaign": {
+            "preregistered_on": _public_date(campaign.preregistered_on, "preregistered_on"),
+            "primary_horizon_days": horizon,
+            "declared_multiplicity": int(scorecard["n_multiplicity"]),
+            "gates_sha256_12": campaign.gates_sha256_12,
+        },
+        "trials": {"preregistered": len(cards), "scored": int(scorecard["n_trials"]),
+                   "promising": promising},
+        "power": {"detection_bar_ic_ir": bar, "economic_floor_ic_ir": floor,
+                  "planted_control_passed": power.planted_control_passed},
+        "hypotheses": {"spec_hashes": sorted(set(hashes))},
+        "provenance": {"sharpen_version": str(sharpen_version), "funnel": FUNNEL_NAME},
+    }
+    payload["export_id"] = export_id(payload)
+    return payload
+
+
 # --------------------------------------------------------------------------------------- validate
 def _strings(node: object):
     if isinstance(node, str):
@@ -730,7 +934,7 @@ def _strings(node: object):
             yield from _strings(v)
 
 
-def _schema_errors(payload: object, *, required: bool) -> list[str]:
+def _schema_errors(payload: object, *, required: bool, schema: dict = SCHEMA) -> list[str]:
     try:
         import jsonschema                                # a dev dependency, imported where it is used
     except ImportError:
@@ -738,7 +942,7 @@ def _schema_errors(payload: object, *, required: bool) -> list[str]:
             raise RuntimeError("validating the community ledger needs the jsonschema package "
                                "(pip install -e '.[dev]')") from None
         return []
-    validator = jsonschema.Draft202012Validator(SCHEMA)
+    validator = jsonschema.Draft202012Validator(schema)
     return sorted(f"schema: {'/'.join(str(p) for p in e.absolute_path) or '<root>'}: {e.message}"
                   for e in validator.iter_errors(payload))
 
@@ -750,7 +954,13 @@ def validate_payload(payload: object, *, relpath: str | None = None,
     Beyond the schema: the id matches the content, the path matches the id, the counts add up, the
     verdict is the one those counts imply, and no string looks like a local path or an address.
     ``require_schema=False`` lets the exporter run without ``jsonschema`` installed; the checks
-    below still run, and CI validates every committed file against the schema."""
+    below still run, and CI validates every committed file against the schema. ``kind`` picks the
+    schema; a file of any other kind is invalid."""
+    kind = payload.get("kind") if isinstance(payload, dict) else None
+    if kind == FUNNEL_KIND:
+        return _validate_funnel(payload, relpath=relpath, require_schema=require_schema)
+    if isinstance(payload, dict) and kind != KIND:
+        return [f"kind: unknown record kind {kind!r} (expected one of {sorted(_SCHEMAS)})"]
     errors = _schema_errors(payload, required=require_schema)
     if errors or not isinstance(payload, dict):
         return errors or ["schema: not a JSON object"]
@@ -797,6 +1007,44 @@ def validate_payload(payload: object, *, relpath: str | None = None,
     elif payload["verdict_reasons"] != reasons:
         errors.append(f"verdict_reasons should be {reasons}")
 
+    errors.extend(_private_text_errors(payload))
+    return errors
+
+
+def _validate_funnel(payload: dict, *, relpath: str | None, require_schema: bool) -> list[str]:
+    """:func:`validate_payload` for a ``funnel_closed_search`` file."""
+    errors = _schema_errors(payload, required=require_schema, schema=FUNNEL_SCHEMA)
+    if errors:
+        return errors
+    if payload["export_id"] != export_id(payload):
+        errors.append("export_id does not match the content (the file was edited after export; "
+                      "re-run the export instead)")
+    if relpath is not None and relpath.replace("\\", "/") != relative_path(payload):
+        errors.append(f"path should be {relative_path(payload)}")
+    t, p, c = payload["trials"], payload["power"], payload["campaign"]
+    hashes = payload["hypotheses"]["spec_hashes"]
+    if hashes != sorted(hashes):
+        errors.append("hypotheses.spec_hashes is not sorted")
+    if len(hashes) > t["preregistered"]:
+        errors.append("hypotheses.spec_hashes lists more specs than were pre-registered")
+    if t["scored"] > t["preregistered"] or t["promising"] > t["scored"]:
+        errors.append("trials: promising <= scored <= preregistered does not hold")
+    if c["declared_multiplicity"] < t["scored"]:
+        errors.append("campaign.declared_multiplicity is smaller than the number of specs scored")
+    verdict, reasons = decide_funnel_verdict(
+        promising=t["promising"], detection_bar=p["detection_bar_ic_ir"],
+        floor=p["economic_floor_ic_ir"], control_passed=p["planted_control_passed"])
+    if payload["verdict"] != verdict:
+        errors.append(f"verdict {payload['verdict']} does not follow from the counts and power "
+                      f"(they imply {verdict})")
+    elif payload["verdict_reasons"] != reasons:
+        errors.append(f"verdict_reasons should be {reasons}")
+    errors.extend(_private_text_errors(payload))
+    return errors
+
+
+def _private_text_errors(payload: dict) -> list[str]:
+    errors = []
     for text in _strings(payload):
         for pattern, label in _PRIVATE_TEXT:
             if pattern.search(text):
@@ -806,11 +1054,14 @@ def validate_payload(payload: object, *, relpath: str | None = None,
 
 
 def validate_tree(root: str | Path = DEFAULT_LEDGER_DIR) -> dict[str, list[str]]:
-    """``{relative path: [errors]}`` for every ``*.json`` under ``root`` (errors may be empty)."""
+    """``{relative path: [errors]}`` for every ``*.json`` under ``root`` (errors may be empty),
+    except the exporter inputs under :data:`DESCRIBE_DIR`."""
     root = Path(root)
     report: dict[str, list[str]] = {}
     for path in sorted(root.rglob("*.json")):
         rel = path.relative_to(root).as_posix()
+        if rel.split("/", 1)[0] == DESCRIBE_DIR:          # exporter inputs, not ledger entries
+            continue
         try:
             payload = json.loads(path.read_text(encoding="utf-8"))
         except (OSError, ValueError) as e:
@@ -836,8 +1087,17 @@ def load_community_ledger(root: str | Path = DEFAULT_LEDGER_DIR) -> list[dict]:
 
 def power_phrase(entry: dict) -> str:
     """One clause on how strong the test was, next to the smallest edge the contract accepts
-    (both are annualized Sharpe uplift over the base book)."""
+    (both are annualized Sharpe uplift over the base book) or, for a funnel search, next to the
+    smallest edge its author considers worth having (both IC-IR, the author's measurement)."""
     p = entry["power"]
+    if entry.get("kind") == FUNNEL_KIND:
+        bar, floor = p["detection_bar_ic_ir"], p["economic_floor_ic_ir"]
+        control = {True: "planted control passed", False: "planted control failed",
+                   None: "no planted control"}[p["planted_control_passed"]]
+        if bar is None or floor is None:
+            return f"detection power not measured ({control})"
+        return (f"detection bar IC-IR {bar:.2f} against a floor of {floor:.2f} ({control}; "
+                "author-measured)")
     floor = f"a floor of {p['economic_floor']:.2f}"
     if p["mde_at_test_min"] is not None:
         return f"smallest detectable edge {p['mde_at_test_min']:.2f} against {floor}"
@@ -869,11 +1129,18 @@ def describe_substrate(entries: list[dict], substrate_id: str) -> str:
     lines = [f"{substrate_id}: {len(mine)} shared search(es)."]
     for e in sorted(mine, key=relative_path):
         t = e["trials"]
-        tested = ("an unrecorded number" if t["holdout_tested"] is None else
-                  f"{'' if t['holdout_count_complete'] else 'at least '}{t['holdout_tested']}")
         power = power_phrase(e)
-        lines.append(f"  {relative_path(e)}: {e['verdict']} - {e['hypotheses']['count']} hypotheses "
-                     f"scored, {tested} reached the out-of-sample test; {power}.")
+        if e["kind"] == FUNNEL_KIND:
+            c = e["campaign"]
+            lines.append(f"  {relative_path(e)}: {e['verdict']} - signal-funnel batch, {t['scored']} "
+                         f"of {t['preregistered']} pre-registered specs scored at "
+                         f"{c['primary_horizon_days']} days, deflated for "
+                         f"{c['declared_multiplicity']} trials; {power}.")
+        else:
+            tested = ("an unrecorded number" if t["holdout_tested"] is None else
+                      f"{'' if t['holdout_count_complete'] else 'at least '}{t['holdout_tested']}")
+            lines.append(f"  {relative_path(e)}: {e['verdict']} - {e['hypotheses']['count']} "
+                         f"hypotheses scored, {tested} reached the out-of-sample test; {power}.")
         about = _searched(e)
         if about:
             lines.append(f"      {about}")

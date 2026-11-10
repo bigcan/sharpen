@@ -1,0 +1,54 @@
+{
+  "campaign": {
+    "declared_multiplicity": 178,
+    "gates_sha256_12": "129d737b9fc3",
+    "preregistered_on": "2026-10-19",
+    "primary_horizon_days": 21
+  },
+  "export_id": "2bf4f87dbb37",
+  "hypotheses": {
+    "spec_hashes": [
+      "3f9414754dee",
+      "7392533e8702",
+      "8e2776edcaa2",
+      "9081867dc41a",
+      "e1596014ed96",
+      "f9aeceb66926",
+      "ffd6dfd484ce"
+    ]
+  },
+  "kind": "funnel_closed_search",
+  "power": {
+    "detection_bar_ic_ir": 0.34,
+    "economic_floor_ic_ir": 0.1,
+    "planted_control_passed": true
+  },
+  "provenance": {
+    "funnel": "sharpen.signals",
+    "sharpen_version": "1.1.2"
+  },
+  "schema_version": 1,
+  "substrate": {
+    "data_end": "2026-08-07",
+    "data_sources": [
+      "SEC EDGAR filing index",
+      "SEC Form 4 insider transactions data sets",
+      "SEC XBRL companyfacts",
+      "Yahoo Finance daily bars",
+      "fja05680 S&P 500 membership"
+    ],
+    "data_start": "2011-01-03",
+    "id": "us_largecap_sp500_top300",
+    "search_space": "SEC fundamentals, insider and filing-behaviour signals (7 pre-registered)",
+    "universe": "S&P 500 point-in-time members, top 300 by 60-day dollar volume"
+  },
+  "trials": {
+    "preregistered": 7,
+    "promising": 0,
+    "scored": 7
+  },
+  "verdict": "OPEN_UNDERPOWERED",
+  "verdict_reasons": [
+    "mde_above_floor"
+  ]
+}
