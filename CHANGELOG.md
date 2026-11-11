@@ -11,7 +11,7 @@ The Crucible alpha-mining platform keeps its own version (`sharpen/crucible/vers
 `crucible-vMAJOR.MINOR`), because it stamps every mining run; each entry below names the Crucible
 versions it contains.
 
-## [1.2.0] — unreleased
+## [1.2.0] — 2026-11-11
 
 ### Added
 - **Funnel searches in the community ledger.** A second record kind, `funnel_closed_search`, records a pre-registered search run straight through the signal funnel (no orchestrator).
